@@ -312,3 +312,19 @@ test("an open citation card survives a resize", async ({ page, isMobile }) => {
   await page.setViewportSize({ width: 412, height: 760 });
   await expect(page.locator("#cite-tip")).toBeVisible();
 });
+
+test("a tapped citation card survives compatibility mouse events on a slow phone", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "touch");
+  // CI runners are slow: reproduce that, then let the emulated mouse leave
+  // the citation before the second tap, as touch screens do
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 8 });
+  await page.goto(`${BASE}ja/#s1-p10`);
+  await page.locator("#s1-p10 .cell-tr a.cite").first().tap();
+  await expect(page.locator("#cite-tip")).toBeVisible();
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(600);
+  await expect(page.locator("#cite-tip")).toBeVisible();
+  await page.locator("#cite-tip a.go").tap();
+  await expect(page).toHaveURL(/#ref-15$/);
+});

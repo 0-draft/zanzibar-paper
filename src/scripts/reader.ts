@@ -315,7 +315,11 @@ if (tip) {
       window.clearTimeout(showTimer);
       showTimer = window.setTimeout(() => show(a, false), 400);
     });
-    a.addEventListener("mouseleave", hideSoon);
+    // touch screens also send compatibility mouse events: only a real hover
+    // card closes when the pointer leaves
+    a.addEventListener("mouseleave", () => {
+      if (canHover.matches && tapped === null) hideSoon();
+    });
     // on touch screens a tap also focuses the link: let the tap decide
     a.addEventListener("focus", () => canHover.matches && show(a, false));
     a.addEventListener("blur", (e) => {
@@ -333,7 +337,9 @@ if (tip) {
     });
   }
   tip.addEventListener("mouseenter", () => window.clearTimeout(hideTimer));
-  tip.addEventListener("mouseleave", hideSoon);
+  tip.addEventListener("mouseleave", () => {
+    if (canHover.matches && tapped === null) hideSoon();
+  });
   document.addEventListener("click", (e) => {
     const t = e.target as Element;
     if (!tip.hidden && !tip.contains(t) && !t.closest("a.cite")) hideNow();
