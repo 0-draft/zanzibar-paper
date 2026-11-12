@@ -3,7 +3,8 @@
  *
  * Colour comes from the paper's own Figure 2: client blue, server yellow and
  * Spanner green are the only tints, and each keeps one meaning everywhere.
- *   blue   — where you are (current language, linked paragraph, current section, progress)
+ *   blue   — where you are (current language, linked paragraph, current section,
+ *            progress, your text selection, "you" in the tuple headline)
  *   yellow — what is under the pointer (a paragraph pair, a menu item)
  *   green  — stored notation (code, tuples, grammar)
  * The original is set in a serif and every translation in a sans, so either
@@ -336,8 +337,8 @@ details > summary::-webkit-details-marker {
   background: var(--server);
 }
 .pop[open] > summary {
-  background: var(--client);
   border-color: var(--rule-strong);
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
 }
 .chev {
   transition: transform 0.15s;
