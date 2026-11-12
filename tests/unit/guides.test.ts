@@ -42,6 +42,9 @@ describe("guides: English source", () => {
 });
 
 describe("guides: translations", () => {
+  it("English is the reference every translation is compared with", () => {
+    expect(present).toContain("en");
+  });
   for (const lang of present.filter((c) => c !== "en")) {
     it(`${lang} has every English page and nothing else`, () => {
       expect(slugs(lang)).toEqual(en);
