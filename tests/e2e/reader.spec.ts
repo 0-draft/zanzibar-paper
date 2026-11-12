@@ -278,3 +278,14 @@ test("citation cards lead with the title, and the reference links back", async (
   await page.locator("#ref-15 a.back").click();
   await expect(page).toHaveURL(/#s1-p10$/);
 });
+
+test("permalink and report link are reachable by keyboard and show on focus", async ({ page, isMobile }) => {
+  test.skip(isMobile, "keyboard");
+  await page.goto(`${BASE}ja/`);
+  const pl = page.locator('#s1-p1 .pl a[href="#s1-p1"]');
+  expect(await pl.evaluate((el: HTMLElement) => el.tabIndex)).toBeGreaterThanOrEqual(0);
+  await pl.focus();
+  await expect(page.locator("#s1-p1 .pl")).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#s1-p1 .pl-report")).toBeFocused();
+});

@@ -1641,9 +1641,6 @@ blocks:
     level: 2
     text: References
   # Each reference is split into authors / title / rest only so the page can
-  # lead a citation preview with the title; joined back ("authors title rest")
-  # they are the published text, verbatim.
-  # Each reference is split into authors / title / rest only so the page can
   # lead a citation preview with the title. Joined back ("authors title rest")
   # they are the published text, verbatim.
   - id: refs-list
