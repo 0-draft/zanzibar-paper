@@ -105,6 +105,7 @@ const paperHref = (s: string) => (lang === "en" ? undefined : withBase(`${lang}/
     </aside>
 
     <main id="main" class="guide" lang={lang}>
+      <SiteNav lang={lang} current={section} place="top" />
       <header class="guide-head">
         <p class="crumb">
           <a href={withBase(pathOf(lang, section))}>{section === "guides" ? t.navGuides : t.navEcosystem}</a>

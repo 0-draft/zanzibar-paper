@@ -7,8 +7,10 @@ import { withBase } from "../lib/paths.ts";
 interface Props {
   lang: string;
   current: "paper" | "guides" | "ecosystem";
+  /** "bar": in the sticky bar (wide screens). "top": a row above the content (narrow screens). */
+  place?: "bar" | "top";
 }
-const { lang, current } = Astro.props;
+const { lang, current, place = "bar" } = Astro.props;
 const t = ui(lang);
 // A section not yet written in this language links to the English one.
 const entries = await allEntries();
@@ -20,7 +22,7 @@ const items = [
 ] as const;
 ---
 
-<nav class="sitenav" aria-label="zanzibar-paper">
+<nav class:list={["sitenav", `sitenav-${place}`]} aria-label="zanzibar-paper">
   {
     items.map((i) => (
       <a href={i.href} aria-current={i.key === current ? "page" : undefined}>

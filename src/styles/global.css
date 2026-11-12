@@ -1463,9 +1463,24 @@ html:not([data-view="both"]) .pl {
   box-shadow: inset 0 -2px 0 var(--link);
   border-radius: 0;
 }
+/* narrow screens: the bar has no room, so the nav is a row above the content */
+.sitenav-top {
+  display: none;
+}
 @media (max-width: 56rem) {
-  .sitenav {
+  .sitenav-bar {
     display: none;
+  }
+  .sitenav-top {
+    display: flex;
+    margin: 0 0 1.75rem calc(-0.5rem);
+    font-size: var(--fs-s);
+  }
+  .sitenav-top a {
+    padding-block: 0.6rem;
+  }
+  .masthead > .sitenav-top {
+    margin-top: -1.25rem;
   }
 }
 
