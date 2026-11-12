@@ -47,10 +47,10 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
   <a class="skip" href="#paper">{t.skip}</a>
 
   <header class="bar">
-    <a class="brand" href={base} lang="en" title={t.tupleCaption}>
-      <span class="b-long">paper<span class="b-p">:</span></span>zanzibar<span class="b-long"
+    <a class="brand" href={base} title={t.tupleCaption}>
+      <span lang="en"><span class="b-long">paper<span class="b-p">:</span></span>zanzibar<span class="b-long"
         ><span class="b-p">#</span>translation</span
-      ><span class="b-p">@</span><span class="b-user">{lang}</span>
+      ><span class="b-p">@</span><span class="b-user">{lang}</span></span>
     </a>
     <span class="progress-num in-bar" aria-hidden="true" data-js-only hidden>0%</span>
     <nav class="bar-tools" aria-label={t.view}>

@@ -82,10 +82,7 @@ if (form) {
       first.checked = root.dataset.first ? root.dataset.first === "translation" : root.dataset.layout === "stacked";
   };
   syncFirst();
-  NARROW.addEventListener("change", syncFirst);
-  form.addEventListener("change", (e) => {
-    if ((e.target as HTMLInputElement).name === "layout") syncFirst();
-  });
+  NARROW.addEventListener("change", () => queueMicrotask(syncFirst));
 
   form.addEventListener("change", (e) => {
     const input = e.target as HTMLInputElement;
@@ -99,6 +96,7 @@ if (form) {
       case "layout":
         store("zp-layout", input.value === "stacked" ? "stacked" : null);
         keepPlace(applyLayout);
+        syncFirst(); // after the layout is applied, so the box shows what the page does
         break;
       case "first":
         keepPlace(() => {
@@ -336,7 +334,15 @@ if (tip) {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !tip.hidden) hideNow();
   });
-  window.addEventListener("resize", () => !tip.hidden && hideNow(), { passive: true });
+  // phones resize while scrolling (the address bar comes and goes): keep the
+  // card and move it with its citation instead of closing it
+  window.addEventListener(
+    "resize",
+    () => {
+      if (!tip.hidden && owner) place(owner);
+    },
+    { passive: true },
+  );
 }
 
 // ── Report a paragraph: attach the selected words, as arXiv does ────────
@@ -392,6 +398,7 @@ function offerWayBack(el: HTMLElement | null) {
   back.href = `#${citedFrom}`;
   back.textContent = "↩";
   back.setAttribute("aria-label", tip?.dataset.back ?? "Back");
+  back.lang = document.documentElement.lang;
   el.append(" ", back);
 }
 

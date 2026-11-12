@@ -289,3 +289,26 @@ test("permalink and report link are reachable by keyboard and show on focus", as
   await page.keyboard.press("Tab");
   await expect(page.locator("#s1-p1 .pl-report")).toBeFocused();
 });
+
+test("the translation-first box follows the layout default", async ({ page, isMobile }) => {
+  test.skip(isMobile, "phones have no layout choice");
+  await page.goto(`${BASE}ja/`);
+  await openView(page);
+  const first = page.locator('input[name="first"]');
+  await expect(first).not.toBeChecked();
+  await page.locator('input[name="layout"][value="stacked"]').check();
+  // stacked puts the translation on top by default, and the box says so
+  await expect(first).toBeChecked();
+  const tr = (await page.locator("#s1-p1 .cell-tr").boundingBox())!;
+  const en = (await page.locator("#s1-p1 .cell-en").boundingBox())!;
+  expect(tr.y).toBeLessThan(en.y);
+});
+
+test("an open citation card survives a resize", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "touch");
+  await page.goto(`${BASE}ja/#s1-p10`);
+  await page.locator("#s1-p10 .cell-tr a.cite").first().tap();
+  await expect(page.locator("#cite-tip")).toBeVisible();
+  await page.setViewportSize({ width: 412, height: 760 });
+  await expect(page.locator("#cite-tip")).toBeVisible();
+});
