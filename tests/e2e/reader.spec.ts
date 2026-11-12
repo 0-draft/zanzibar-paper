@@ -332,7 +332,9 @@ test("a tapped citation card survives compatibility mouse events on a slow phone
 test("Enter on a citation follows it even after a touch", async ({ page, isMobile }) => {
   test.skip(isMobile, "a hover-capable device that was touched once (touchscreen laptop)");
   await page.goto(`${BASE}ja/#s1-p10`);
-  await page.evaluate(() => document.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "touch", bubbles: true })));
+  await page.evaluate(() =>
+    document.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "touch", bubbles: true })),
+  );
   await page.locator("#s1-p10 .cell-tr a.cite").first().focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/#ref-15$/);
