@@ -7,3 +7,9 @@ overrides:
   # A 2.0 beta of the emnapi runtime gets picked up as a peer and crashes
   # @astrojs/check on Node 26 ("this.bridge.deleteEnv is not a function").
   "@emnapi/runtime": "1.11.3"
+  # Patched versions for advisories reached only through dev tooling
+  # (markdownlint-cli2, textlint). Drop once the parents depend on them.
+  re2js@>=2.2.0 <2.8.7: ">=2.8.7"
+  katex@<0.18.2: ">=0.18.2"
+  glob@>=9.0.0 <=14.0.1: ">=14.0.2"
+  minimatch@>=7.0.0 <11.0.1: ">=11.0.1"
