@@ -1203,6 +1203,13 @@ html:not([data-view="both"]) .row {
 html:not([data-view="both"]) .row > :not(.pl) {
   grid-column: 1;
 }
+/* the masthead lines up with the single column under it */
+html:not([data-view="both"]) .masthead {
+  max-width: var(--single);
+  box-sizing: content-box;
+  padding-right: var(--pl-w);
+  margin-inline: auto;
+}
 /* one column of the original alone: about 66 characters a line */
 html[data-view="original"] {
   --single: 37em;
