@@ -67,7 +67,7 @@ caveat has_valid_ip(user_ip ipaddress, allowed_range string) {
 }
 
 definition folder {
-    relation viewer: user | group#member | user with has_valid_ip
+    relation viewer: user | user with has_valid_ip
     permission view = viewer
 }
 ```
@@ -145,7 +145,7 @@ definition folder {
 
 *SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
 
-The [expiring relationships docs](https://authzed.com/docs/spicedb/concepts/expiring-relationships) set the time with `OptionalExpiresAt` (RFC 3339) on `WriteRelationships`, and give two reasons to prefer it over a caveat: a caveat "requires clients to provide the `now` timestamp", and "expired caveats are not automatically garbage collected". An expired relationship stops counting immediately; its row is removed later by garbage collection (after 24 hours by default, per the same page). The page gives the version once as "v1.40" and once as "v1.4.0"; the blog post says v1.40. Whether the feature is still marked experimental in the current release was not checked.
+The [expiring relationships docs](https://authzed.com/docs/spicedb/concepts/expiring-relationships) set the time with `OptionalExpiresAt` (RFC 3339) on `WriteRelationships`, and give two reasons to prefer it over a caveat: a caveat "requires clients to provide the `now` timestamp", and "expired caveats are not automatically garbage collected". An expired relationship stops counting as soon as it expires, except that a sub-result cached before the expiry can still be served within its cache window; its row is removed later by garbage collection (after 24 hours by default, per the same page). The page gives the version once as "v1.40" and once as "v1.4.0"; the blog post says v1.40. Whether the feature is still marked experimental in the current release was not checked.
 
 ## OpenFGA conditions
 
@@ -221,7 +221,7 @@ Notice where the IP matching happened: in the application, before the call. Cont
 
 ## Permify attributes and rules
 
-Permify, which FusionAuth acquired in November 2025 ([Permify, 2025-11-20](https://permify.co/post/fusionauth-acquires-permify/)), stores attributes on entities, not conditions on relationships. Its schema has `attribute` and `rule`, and the docs say "we design our schema language based on" CEL ([Permify ABAC docs](https://fusionauth.io/permify-docs/use-cases/abac)). The example from Permify's [modeling guide](https://fusionauth.io/permify-docs/getting-started/modeling):
+Permify, whose acquisition by FusionAuth was announced on 2025-11-20 ([Permify, 2025-11-20](https://permify.co/post/fusionauth-acquires-permify/)), stores attributes on entities, not conditions on relationships. Its schema has `attribute` and `rule`, and the docs say "we design our schema language based on" CEL ([Permify ABAC docs](https://fusionauth.io/permify-docs/use-cases/abac)). The example from Permify's [modeling guide](https://fusionauth.io/permify-docs/getting-started/modeling):
 
 ```text
 entity organization {
@@ -256,7 +256,7 @@ Sources for each cell are in the sections above.
 
 Cedar is a policy language whose paper describes it as supporting RBAC and ABAC natively. The paper (Cutler et al., "Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)", [arXiv:2403.04651v2](https://arxiv.org/abs/2403.04651), 2024-03-08) places Zanzibar in its related work (§6). It calls Zanzibar "a highly scalable, relationship-based access control (ReBAC) system" and says "Zanzibar supports RBAC and ReBAC with a natural syntax, and with policy validation", that "forbid-style policies are supported by expressing one relationship in terms of non-membership in some other relation", and that "it does not support ABAC, string matching, or search." It describes Cedar as the reverse: "Cedar natively supports RBAC and ABAC, can encode ReBAC, and supports forbid policies."
 
-The Cedar paper is describing the 2019 Zanzibar paper; its experiments use OpenFGA, which it introduces as "a recently developed language for specifying relationship-based access control (ReBAC) (Pang et al., 2019) policies" (§1). The caveats and conditions above are product extensions that the paper's classification does not cover. Its "forbid-style" sentence is the exclusion pattern on the [modeling page](../modeling/#blocklists-exclusion).
+The Cedar paper is describing the 2019 Zanzibar paper; its experiments use OpenFGA, which it introduces as "a recently developed language for specifying relationship-based access control (ReBAC) [43] policies", where reference 43 is the Zanzibar paper (§1). The caveats and conditions above are product extensions that the paper's classification does not cover. Its "forbid-style" sentence is the exclusion pattern on the [modeling page](../modeling/#blocklists-exclusion).
 
 ## When to keep the rule in the application
 
