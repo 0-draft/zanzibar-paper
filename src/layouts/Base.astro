@@ -1,0 +1,67 @@
+---
+import "@fontsource-variable/literata/opsz.css";
+import "@fontsource-variable/literata/opsz-italic.css";
+import "@fontsource/ibm-plex-sans/400.css";
+import "@fontsource/ibm-plex-sans/400-italic.css";
+import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource/ibm-plex-sans-jp/400.css";
+import "@fontsource/ibm-plex-sans-jp/600.css";
+import "@fontsource/ibm-plex-sans-kr/400.css";
+import "@fontsource/ibm-plex-sans-kr/600.css";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+import "katex/dist/katex.min.css";
+import "../styles/global.css";
+import { TRANSLATIONS } from "../i18n/langs.ts";
+import { withBase } from "../lib/paths.ts";
+
+interface Props {
+  lang: string;
+  title: string;
+  description: string;
+  /** Path below the base, e.g. "ja/". Used for canonical and hreflang links. */
+  path: string;
+  alternates?: boolean;
+}
+const { lang, title, description, path, alternates = false } = Astro.props;
+const site = Astro.site!;
+const abs = (p: string) => new URL(withBase(p), site).href;
+---
+
+<!doctype html>
+<html lang={lang} data-view="both">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={abs(path)} />
+    {
+      alternates &&
+        TRANSLATIONS.map((l) => <link rel="alternate" hreflang={l.code} href={abs(`${l.code}/`)} />)
+    }
+    {alternates && <link rel="alternate" hreflang="x-default" href={abs("")} />}
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={abs(path)} />
+    <meta property="og:image" content={abs("og.png")} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href={withBase("favicon.svg")} type="image/svg+xml" />
+    <link rel="sitemap" href={withBase("sitemap-index.xml")} />
+    <script is:inline>
+      // Apply saved preferences before first paint (no flash).
+      try {
+        const t = localStorage.getItem("zp-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        const v = localStorage.getItem("zp-view");
+        if (v === "both" || v === "original" || v === "translation") document.documentElement.dataset.view = v;
+      } catch {}
+      document.documentElement.classList.add("js");
+    </script>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

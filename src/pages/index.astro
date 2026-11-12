@@ -1,0 +1,141 @@
+---
+import { DEFAULT_LANG, TRANSLATIONS } from "../i18n/langs.ts";
+import { UI } from "../i18n/ui.ts";
+import Base from "../layouts/Base.astro";
+import { loadSource, loadTranslation } from "../lib/content.ts";
+import { withBase } from "../lib/paths.ts";
+
+const src = loadSource();
+const titles = Object.fromEntries(TRANSLATIONS.map((l) => [l.code, loadTranslation(l.code).meta.title]));
+const codes = TRANSLATIONS.map((l) => l.code);
+---
+
+<Base lang="en" title={`${src.meta.title} | parallel translations`} description={UI.en!.description} path="" alternates>
+  <main class="landing">
+    <p class="tuple" lang="en">
+      <span class="seg-ns">paper</span><span class="punct">:</span><span class="seg-obj">zanzibar</span><span class="punct"
+        >#</span
+      ><span class="seg-rel">translation</span><span class="punct">@</span><span class="seg-user-plain">…</span>
+    </p>
+    <h1 class="landing-title">{src.meta.title}</h1>
+    <p class="landing-sub">
+      {src.meta.venue}. The original English on the left, a translation on the right, paragraph by paragraph.
+    </p>
+
+    <ul class="landing-langs">
+      {
+        TRANSLATIONS.map((l) => (
+          <li>
+            <a href={withBase(`${l.code}/`)} hreflang={l.code} data-code={l.code}>
+              <span class="code" lang="en">
+                @{l.code}
+              </span>
+              <span class="native" lang={l.code}>
+                {l.native}
+              </span>
+              <span class="ttl" lang={l.code}>
+                {titles[l.code]}
+              </span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+
+    <p class="landing-notice">{UI.en!.notice} {UI.en!.aiNote}</p>
+  </main>
+
+  <script is:inline define:vars={{ codes, fallback: DEFAULT_LANG }}>
+    // Point at the reader's own language. Never redirects automatically: the
+    // list stays the page, so links and crawlers see every translation.
+    const prefs = navigator.languages || [navigator.language];
+    let pick;
+    for (const p of prefs) {
+      const tag = String(p);
+      const lower = tag.toLowerCase();
+      pick =
+        codes.find((c) => c.toLowerCase() === lower) ||
+        (lower.startsWith("zh") &&
+          (/(hant|tw|hk|mo)/.test(lower) ? "zh-Hant" : "zh-Hans")) ||
+        (lower.startsWith("pt") && "pt-BR") ||
+        codes.find((c) => c.toLowerCase() === lower.split("-")[0]);
+      if (pick) break;
+    }
+    const el = document.querySelector(`[data-code="${pick || fallback}"]`);
+    if (el) el.closest("li").classList.add("suggested");
+  </script>
+</Base>
+
+<style>
+  .landing {
+    max-width: 60rem;
+    padding-block: clamp(3rem, 9vw, 7rem) 4rem;
+  }
+  .seg-user-plain {
+    background: var(--client);
+    border-radius: 0.12em;
+    padding-inline: 0.12em;
+  }
+  .landing-title {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(1.6rem, 3.6vw, 2.6rem);
+    line-height: 1.2;
+    margin: 2.5rem 0 0.75rem;
+    padding-top: 1.75rem;
+    border-top: 2px solid var(--rule-strong);
+    text-wrap: balance;
+  }
+  .landing-sub {
+    margin: 0 0 2.5rem;
+    color: var(--ink-2);
+    font-family: var(--serif);
+  }
+  .landing-langs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--rule);
+  }
+  .landing-langs a {
+    display: grid;
+    grid-template-columns: 6.5rem 11rem 1fr;
+    gap: 1rem;
+    align-items: baseline;
+    padding: 0.85rem 0.5rem;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .landing-langs a:hover {
+    background: var(--server);
+  }
+  .landing-langs .suggested a {
+    background: var(--client);
+  }
+  .landing-langs .code {
+    font-family: var(--mono);
+    color: var(--ink-2);
+    font-size: 0.9rem;
+  }
+  .landing-langs .native {
+    font-weight: 600;
+  }
+  .landing-langs .ttl {
+    color: var(--ink-2);
+    font-size: 0.92rem;
+  }
+  .landing-notice {
+    margin-top: 2rem;
+    font-size: 0.85rem;
+    color: var(--ink-2);
+  }
+  @media (max-width: 40rem) {
+    .landing-langs a {
+      grid-template-columns: 5rem 1fr;
+    }
+    .landing-langs .ttl {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

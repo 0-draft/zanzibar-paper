@@ -1,0 +1,25 @@
+---
+import type { TocEntry } from "../lib/render.ts";
+
+interface Props {
+  entries: TocEntry[];
+  label: string;
+  lang: string;
+}
+const { entries, label, lang } = Astro.props;
+---
+
+<nav class="toc" aria-label={label}>
+  <ol lang={lang}>
+    {
+      entries.map((e) => (
+        <li class={`lv${e.level}`}>
+          <a href={`#${e.id}`} data-toc-link={e.id}>
+            {e.num && <span class="num">{e.num}</span>}
+            <span class="t" set:html={e.tr} />
+          </a>
+        </li>
+      ))
+    }
+  </ol>
+</nav>

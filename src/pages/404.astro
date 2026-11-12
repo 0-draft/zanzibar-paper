@@ -1,0 +1,49 @@
+---
+import { TRANSLATIONS } from "../i18n/langs.ts";
+import Base from "../layouts/Base.astro";
+import { withBase } from "../lib/paths.ts";
+---
+
+<Base lang="en" title="Not found | zanzibar-paper" description="This page does not exist." path="404/">
+  <main class="nf">
+    <p class="tuple" lang="en">
+      <span class="seg-ns">paper</span><span class="punct">:</span><span class="seg-obj">zanzibar</span><span class="punct"
+        >#</span
+      ><span class="seg-rel">404</span><span class="punct">@</span><span class="seg-user-plain">you</span>
+    </p>
+    <p class="nf-text">
+      No tuple matches this address. Pick a language, or start from the <a href={withBase()}>list of translations</a>.
+    </p>
+    <p class="nf-langs">
+      {
+        TRANSLATIONS.map((l) => (
+          <a href={withBase(`${l.code}/`)} hreflang={l.code} lang={l.code}>
+            {l.native}
+          </a>
+        ))
+      }
+    </p>
+  </main>
+</Base>
+
+<style>
+  .nf {
+    max-width: 52rem;
+    padding-block: clamp(3rem, 10vw, 8rem);
+  }
+  .seg-user-plain {
+    background: var(--client);
+    border-radius: 0.12em;
+    padding-inline: 0.12em;
+  }
+  .nf-text {
+    margin-top: 2rem;
+    font-family: var(--serif);
+    font-size: 1.1rem;
+  }
+  .nf-langs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+  }
+</style>
