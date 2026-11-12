@@ -1,0 +1,170 @@
+name: Claude review
+
+# A reviewer for what CI cannot see. CI checks lint, types, tests, the
+# structure of every translation against the source, Japanese style, links and
+# a11y; this reads the diff for what only a reader catches: a translation whose
+# meaning drifts from the English, a number or unit that changed, a change to
+# the transcription of the paper itself, a layout regression in the reading
+# view. It reviews, it does not gate: nothing here is a required check.
+#
+# The action refuses to run when this file differs from the copy on the default
+# branch, so a pull request cannot rewrite its own reviewer. The cost is that a
+# change to this file goes unreviewed by Claude until it is merged.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+# One review per pull request; a rapid re-push cancels the superseded run.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: review the diff
+    # Forks and Dependabot get no Actions secrets, so the run would fail on auth
+    # rather than say anything useful; drafts wait until marked ready.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write # post the summary and inline findings
+      issues: read # the delivery check reads conversation comments
+      id-token: write # the action's default GitHub App auth
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Without the token the action exits green having reviewed nothing, which
+      # looks reviewed but is not. Fail here, where the reason is legible.
+      - name: Require the token
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is not set. Generate one with 'claude setup-token', then: gh secret set CLAUDE_CODE_OAUTH_TOKEN"
+            exit 1
+          fi
+
+      # Anything the review posts must be newer than this, or it is a leftover
+      # from an earlier push. Two minutes absorbs runner/API clock skew.
+      - name: Mark the start of this review
+        id: started
+        run: echo "at=$(date -u -d '-2 minutes' +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - uses: anthropics/claude-code-action@db77d4d3c98f3f6380e7cd45ffba2342a3dbde3c # v1.0.254
+        id: claude
+        with:
+          # A subscription token, not an API key (runs against the Claude plan).
+          # Generate it with `claude setup-token`.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR: ${{ github.event.pull_request.number }}
+
+            zanzibar-paper is a static Astro site that shows the Zanzibar paper (Pang et al.,
+            USENIX ATC '19) paragraph by paragraph: the original English on the left, one of
+            eight translations on the right. content/en.yaml is a faithful transcription of the
+            published PDF and the structural source of truth; content/<lang>.yaml holds only
+            translated strings keyed by the same block ids. Read README.md and CLAUDE.md first.
+
+            Do not repeat what CI already catches: Biome, astro check, Vitest, the content
+            validator (ids, shapes, code/TeX/link tokens per string), textlint for Japanese,
+            markdownlint, lychee and Playwright+axe all run. Look for what only a reader can catch:
+
+            1. Translation fidelity. For every changed block of content/<lang>.yaml, compare
+               with the English block of the same id: meaning drift, omissions or additions,
+               inverted logic, wrong subject, changed numbers/units/percentiles (95th vs 99th,
+               M vs K, "less than" vs "more than"), terminology that contradicts the rest of
+               that language file. Quote the English and the translation in the comment.
+
+            2. The transcription. Any change to content/en.yaml must match the published paper
+               word for word (its original typos are kept on purpose). Flag edits that
+               paraphrase, fix the authors' wording, or alter numbers, references or figures.
+
+            3. Reading view. Changes under src/ must keep: one grid row per block with the
+               original on the left and the translation on the right; correct lang attributes
+               on every column; the view switch (both / original / translation) and the
+               language switch keeping the reader's paragraph; no horizontal page scroll at
+               400px; the colour roles documented at the top of src/styles/global.css.
+
+            4. Honesty of the notices: the unofficial-translation and AI-assistance notices
+               must stay on every reading page and in every language.
+
+            Do not sign anything you post. No "Generated with" footer, no co-authored-by line,
+            no self-attribution, in any comment. The review stands on the findings.
+
+            Post findings as inline comments on the lines they concern, one top-level comment
+            for the summary, each citing file:line. If the diff is clean against all of the
+            above, say so in one line rather than manufacturing nits.
+
+            Write the summary to a file and post it with `gh pr comment --body-file <path>`.
+            A body built inline from a heredoc or command substitution does not match the
+            allowlist and is refused, which loses the whole review.
+
+          claude_args: |
+            --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Write,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
+
+      - name: Report the review outcome
+        if: always()
+        env:
+          CONCLUSION: ${{ steps.claude.outputs.conclusion }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          echo "action conclusion: '${CONCLUSION}'"
+          echo "execution file:    '${EXECUTION_FILE}'"
+          if [ -n "${EXECUTION_FILE:-}" ] && [ -f "$EXECUTION_FILE" ]; then
+            jq -r '[.. | objects | select(.type? == "result") | .permission_denials?]
+              | map(select(. != null)) | last // [] | .[]
+              | "denied: \(.tool_name // "?") \(.tool_input | tojson | .[0:200])"' \
+              "$EXECUTION_FILE" 2>/dev/null || true
+          fi
+
+      # A review that runs, is refused a tool call on the way to posting, and
+      # exits green leaves the PR unreviewed behind a passing check. Silence
+      # alone is fine (nothing to add); silence WITH a refusal is the failure.
+      - name: Fail on a review that was not delivered
+        if: always() && steps.claude.outputs.conclusion == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SINCE: ${{ steps.started.outputs.at }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          BOT: claude[bot]
+        run: |
+          set -euo pipefail
+          fresh() {
+            gh api --paginate "$1" --jq \
+              "[.[] | select(.user.login == \"$BOT\") | select((.$2 // \"\") >= \"$SINCE\")] | length" |
+              awk '{ n += $1 } END { print n + 0 }'
+          }
+          summary=$(fresh "repos/$REPO/issues/$PR/comments" updated_at)
+          inline=$(fresh "repos/$REPO/pulls/$PR/comments" updated_at)
+          reviews=$(fresh "repos/$REPO/pulls/$PR/reviews" submitted_at)
+          total=$((summary + inline + reviews))
+          echo "posted since $SINCE: $summary summary, $inline inline, $reviews review(s)"
+          if [ "$total" -gt 0 ]; then
+            exit 0
+          fi
+          denials=unknown
+          if [ -n "${EXECUTION_FILE:-}" ] && [ -f "$EXECUTION_FILE" ]; then
+            denials=$(jq -r '[.. | objects | select(.type? == "result") | .permission_denials_count?]
+              | map(select(. != null)) | last // 0' "$EXECUTION_FILE" 2>/dev/null || echo unknown)
+          fi
+          echo "denied tool calls: $denials"
+          if [ "$denials" = "0" ]; then
+            echo "::notice::The review posted nothing and nothing was refused, so it had nothing to add."
+            exit 0
+          fi
+          echo "::error::The review ran, was refused a tool call ($denials), and posted nothing. Widen --allowedTools above."
+          exit 1
