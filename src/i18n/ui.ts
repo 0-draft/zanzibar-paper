@@ -373,7 +373,7 @@ export const UI: Record<string, UiStrings> = {
     sizeSmall: "Klein",
     sizeMedium: "Mittel",
     sizeLarge: "Groß",
-    goToReference: "Zur Quelle springen",
+    goToReference: "Zum Literatureintrag springen",
     backToText: "Zurück zum Text",
     reportParagraph: "Fehler in diesem Absatz melden",
     openFigure: "In voller Größe öffnen",

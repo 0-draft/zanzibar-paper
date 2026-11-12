@@ -289,9 +289,14 @@ if (tip) {
       parts.push(go);
     }
     tip.replaceChildren(...parts);
+    // touch: a sheet fixed to the bottom of the screen (as on Wikipedia's
+    // mobile site), so scrolling, fonts loading or the address bar moving
+    // cannot shift it away from the finger. Pointer: a card at the citation.
+    tip.classList.toggle("sheet", withLink);
+    if (withLink) tip.removeAttribute("style");
     tip.hidden = false;
     a.setAttribute("aria-describedby", "cite-tip");
-    place(a);
+    if (!withLink) place(a);
   };
   const hideNow = () => {
     window.clearTimeout(showTimer);
@@ -339,7 +344,7 @@ if (tip) {
   window.addEventListener(
     "resize",
     () => {
-      if (!tip.hidden && owner) place(owner);
+      if (!tip.hidden && owner && !tip.classList.contains("sheet")) place(owner);
     },
     { passive: true },
   );
