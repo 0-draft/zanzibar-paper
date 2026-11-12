@@ -231,3 +231,14 @@ test("on touch screens a citation opens its card first", async ({ page, isMobile
   await page.locator("#cite-tip a.go").tap();
   await expect(page).toHaveURL(/#ref-15$/);
 });
+
+test("the latency table follows the view: original labels in the original-only view", async ({ page }) => {
+  await page.goto(`${BASE}ja/#tab-2`);
+  await expect(page.locator("#tab-2 .v-tr")).toBeVisible();
+  await expect(page.locator("#tab-2 .v-en")).toBeHidden();
+  await openView(page);
+  await page.locator('input[name="view"][value="original"]').check();
+  await expect(page.locator("#tab-2 .v-en")).toBeVisible();
+  await expect(page.locator("#tab-2 .v-tr")).toBeHidden();
+  await expect(page.locator("#tab-2 .v-en")).toContainText("Latency in milliseconds");
+});

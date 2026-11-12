@@ -1112,6 +1112,15 @@ html[data-view="original"] .cell-tr,
 html[data-view="translation"] .cell-en {
   display: none;
 }
+/* blocks set once in both languages (the latency table): the original only
+   in the original-only view, the translation otherwise */
+.shared .v-en,
+html[data-view="original"] .shared .v-tr {
+  display: none;
+}
+html[data-view="original"] .shared .v-en {
+  display: block;
+}
 html:not([data-view="both"]) .row {
   grid-template-columns: minmax(0, var(--single));
   justify-content: center;

@@ -224,10 +224,10 @@ export function validateTranslation(src: Source, tr: Translation): string[] {
   return errs;
 }
 
-/** Checks of the source itself: unique ids, resolvable internal links. */
 /** Ids the page uses itself; a block must not take them. */
 const RESERVED_IDS = /^(ref-\d+|paper|cite-tip)$/;
 
+/** Checks of the source itself: unique ids, resolvable internal links. */
 export function validateSource(src: Source, figureFiles?: Set<string>): string[] {
   const errs: string[] = [];
   const ids = new Set<string>();

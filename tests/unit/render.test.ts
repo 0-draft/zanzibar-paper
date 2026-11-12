@@ -17,6 +17,7 @@ describe("buildRows", () => {
   it("sets the latency table once and pairs only its captions", () => {
     const r = rows.find((x) => x.id === "tab-2")!;
     expect(r.shared).toContain("401.0 (133.0)");
+    expect(r.shared).toContain('<div class="v-en" lang="en">');
     expect(r.shared).not.toContain("figcaption");
     expect(r.en).toContain("Table 2:");
     expect(r.en).not.toContain("<table");

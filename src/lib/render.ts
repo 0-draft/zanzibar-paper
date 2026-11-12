@@ -148,7 +148,8 @@ export function buildRows(src: Source, tr: Translation, base: string, labels?: S
       const tb = localize(b, tr.blocks[b.id]);
       const row: Row = { id: b.id, type: b.type };
       if (b.type === "table" && tb.type === "table" && b.variant === "latency") {
-        row.shared = table(tb, false);
+        // both versions: the reader's view decides which one shows
+        row.shared = `<div class="v-tr">${table(tb, false)}</div><div class="v-en" lang="en">${table(b, false)}</div>`;
         row.en = caption(b.caption);
         row.tr = caption(tb.caption);
         return row;
