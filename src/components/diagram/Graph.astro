@@ -1,4 +1,5 @@
 ---
+import { labelSize, placeLabel, textWidth } from "./place.ts";
 // Boxes and arrows, drawn in the palette of the paper's Figure 2:
 //   client (blue) · server (yellow) · store (green) · subject / object (plain)
 // Arrows stop at box edges; labels sit on a halo of the page colour so a line
@@ -63,11 +64,6 @@ const { width, height, title, desc, nodes, edges = [], groups = [], minWidth, ca
 const uid = `g${[...title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)}`;
 const byId = new Map(nodes.map((n) => [n.id, n]));
 
-// Estimated text width: CJK and other wide characters take about twice the
-// advance of Latin ones at the same size.
-const WIDE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/u;
-const textWidth = (t: string, mono = false) => [...t].reduce((w, ch) => w + (WIDE.test(ch) ? 13 : mono ? 7.6 : 7.2), 0);
-
 const size = (n: GraphNode) => {
   const lines = n.label.split("\n");
   const longest = Math.max(...lines.map((l) => textWidth(l, n.mono)));
@@ -85,6 +81,19 @@ const exit = (n: GraphNode, dx: number, dy: number, gap: number) => {
   return { x: n.x + dx * t, y: n.y + dy * t };
 };
 
+// every box, for keeping edge labels off them
+const boxes = nodes.map((n) => {
+  const { w, h } = size(n);
+  return { x: n.x - w / 2, y: n.y - h / 2, w, h };
+});
+
+// The drawing area grows to take in any box that pokes past the given size,
+// so a long label never clips at the edge.
+const minX = Math.min(0, ...boxes.map((b) => b.x - 6));
+const minY = Math.min(0, ...boxes.map((b) => b.y - 6));
+const vw = Math.max(width, ...boxes.map((b) => b.x + b.w + 6)) - minX;
+const vh = Math.max(height, ...boxes.map((b) => b.y + b.h + 6)) - minY;
+
 const lines = edges.map((e) => {
   const a = byId.get(e.from);
   const b = byId.get(e.to);
@@ -98,6 +107,23 @@ const lines = edges.map((e) => {
   const p = exit(a, ux, uy, dir === "both" ? 4 : 2);
   const q = exit(b, -ux, -uy, dir === "none" ? 2 : 4);
   const off = e.labelOffset ?? 0;
+  const plate = e.label ? labelSize(e.label) : { w: 0, h: 0 };
+  const at = { x: (p.x + q.x) / 2 - uy * off, y: (p.y + q.y) / 2 + ux * off };
+  const spot = e.label
+    ? placeLabel(
+        at,
+        { ux, uy, len: Math.hypot(q.x - p.x, q.y - p.y) },
+        plate,
+        boxes,
+        {
+          x: 0,
+          y: 0,
+          w: width,
+          h: height,
+        },
+        `${e.label} (${title})`,
+      )
+    : at;
   return {
     ...e,
     dir,
@@ -105,8 +131,10 @@ const lines = edges.map((e) => {
     y1: p.y,
     x2: q.x,
     y2: q.y,
-    lx: (p.x + q.x) / 2 - uy * off,
-    ly: (p.y + q.y) / 2 + ux * off,
+    lx: spot.x,
+    ly: spot.y,
+    lw: plate.w,
+    lh: plate.h,
   };
 });
 ---
@@ -114,9 +142,9 @@ const lines = edges.map((e) => {
 <figure class="dg" style={minWidth ? `--dg-min: ${minWidth}px` : undefined}>
   <div class="dg-scroll">
     <svg
-      viewBox={`0 0 ${width} ${height}`}
-      width={width}
-      height={height}
+      viewBox={`${minX} ${minY} ${vw} ${vh}`}
+      width={vw}
+      height={vh}
       role="img"
       aria-labelledby={`${uid}-t ${uid}-d`}
     >
@@ -179,7 +207,12 @@ const lines = edges.map((e) => {
       {
         lines
           .filter((l) => l.label)
-          .map((l) => (
+          .map((l) => {
+            // A plate of the page colour behind the label, so the line never shows
+            // through it, spaces included (a stroke halo leaves gaps there).
+            return (
+            <>
+            <rect x={l.lx - l.lw / 2} y={l.ly - l.lh / 2} width={l.lw} height={l.lh} rx={3} class="dg-label-bg" />
             <text x={l.lx} y={l.ly} dominant-baseline="central" text-anchor="middle" class:list={["dg-label", l.on && "on"]}>
               {l.label!.split("\n").map((t, i, all) => (
                 <tspan x={l.lx} dy={i === 0 ? `${-(all.length - 1) * 0.6}em` : "1.2em"}>
@@ -187,7 +220,9 @@ const lines = edges.map((e) => {
                 </tspan>
               ))}
             </text>
-          ))
+            </>
+            );
+          })
       }
     </svg>
   </div>

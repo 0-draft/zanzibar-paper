@@ -1,4 +1,5 @@
 ---
+import { labelSize, placeLabel, textWidth } from "./place.ts";
 // Who did what, when: one column per actor, time running down. For orderings
 // such as the paper's "new enemy" examples, where the point is which event
 // comes first and which arrow crosses which.
@@ -39,12 +40,20 @@ const {
   desc,
   timeLabel,
   ticks = [],
-  laneWidth = 170,
-  rowHeight = 64,
+  laneWidth: laneWidthProp = 170,
+  rowHeight: rowHeightProp = 64,
   caption,
 } = Astro.props;
 // stable across builds: derived from the figure's own title
 const uid = `s${[...title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)}`;
+// labels may break with "\n"; every box in a figure gets the tallest height
+const lineCount = Math.max(1, ...events.map((e) => e.label.split("\n").length));
+const boxH = 18 + 16 * lineCount;
+// lanes widen so the longest box label fits (box = lane - 22, 12px inner padding)
+const longest = Math.max(...events.flatMap((e) => e.label.split("\n").map((l) => textWidth(l, e.mono))));
+const laneWidth = Math.max(laneWidthProp, Math.ceil(longest * 0.95 + 22 + 16));
+// rows keep a gap of at least one label line between boxes, for arrow labels
+const rowHeight = Math.max(rowHeightProp, boxH + 28);
 const rows = Math.max(...events.map((e) => e.t), ...arrows.flatMap((a) => [a.from[1], a.to[1]])) + 1;
 const left = 56;
 const top = 52;
@@ -53,9 +62,7 @@ const height = top + rows * rowHeight + 16;
 const cx = (lane: number) => left + lane * laneWidth + laneWidth / 2;
 const cy = (t: number) => top + t * rowHeight + rowHeight / 2;
 const boxW = laneWidth - 22;
-// labels may break with "\n"; every box in a figure gets the tallest height
-const lineCount = Math.max(1, ...events.map((e) => e.label.split("\n").length));
-const boxH = 18 + 16 * lineCount;
+const boxes = events.map((e) => ({ x: cx(e.lane) - boxW / 2, y: cy(e.t) - boxH / 2, w: boxW, h: boxH }));
 ---
 
 <figure class="dg sw" style={`--dg-min: ${Math.min(width, 640)}px`}>
@@ -93,6 +100,19 @@ const boxH = 18 + 16 * lineCount;
             dx !== 0 && Math.abs(dy) < Math.abs(dx) ? [(boxW / 2 + 2) * Math.sign(dx), 0] : [0, (boxH / 2 + 2) * Math.sign(dy)];
           const [ax, ay] = pad(x2 - x1, y2 - y1);
           const [bx, by] = pad(x1 - x2, y1 - y2);
+          const p = { x: x1 + ax, y: y1 + ay };
+          const q = { x: x2 + bx - sx * 2, y: y2 + by - sy * 2 };
+          const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+          const plate = a.label ? labelSize(a.label) : { w: 0, h: 0 };
+          const spot = a.label
+            ? placeLabel(
+                { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 },
+                { ux: (q.x - p.x) / len, uy: (q.y - p.y) / len, len },
+                plate,
+                boxes,
+                { x: 0, y: top - 4, w: width, h: height - top }, `${a.label} (${title})`,
+              )
+            : p;
           return (
             <g>
               <line
@@ -104,9 +124,12 @@ const boxH = 18 + 16 * lineCount;
                 marker-end={`url(#${uid}-a)`}
               />
               {a.label && (
-                <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 8} text-anchor="middle" class="dg-label">
-                  {a.label}
-                </text>
+                <>
+                  <rect x={spot.x - plate.w / 2} y={spot.y - plate.h / 2} width={plate.w} height={plate.h} rx={3} class="dg-label-bg" />
+                  <text x={spot.x} y={spot.y} dominant-baseline="central" text-anchor="middle" class="dg-label">
+                    {a.label}
+                  </text>
+                </>
               )}
             </g>
           );

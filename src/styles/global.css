@@ -1725,10 +1725,9 @@ html[data-theme="dark"] .prose pre.astro-code span {
 .dg-label {
   font-size: 11.5px;
   fill: var(--ink-2) !important;
-  paint-order: stroke;
-  stroke: var(--paper);
-  stroke-width: 4px;
-  stroke-linejoin: round;
+}
+.dg-label-bg {
+  fill: var(--paper);
 }
 .dg-label.on {
   fill: var(--link) !important;
