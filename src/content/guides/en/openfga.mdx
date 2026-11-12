@@ -20,7 +20,7 @@ import Graph from "../../../components/diagram/Graph.astro";
 import Swimlane from "../../../components/diagram/Swimlane.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 
-OpenFGA is an open-source authorization engine whose model language "closely tracks the language in the Zanzibar paper" ([configuration language](https://openfga.dev/docs/configuration-language)). The CNCF post announcing its incubation says it "was developed by a group of Okta employees, and is the foundation for the Auth0 FGA commercial offering" ([CNCF, 2025-11-11](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)). It is written in Go and licensed Apache-2.0 ([repository](https://github.com/openfga/openfga)). Auth0's managed service describes itself as "based on OpenFGA, an open-source project owned by the Cloud Native Computing Foundation" ([Auth0 FGA docs](https://docs.fga.dev/fga)).
+OpenFGA is an open-source authorization engine. Its docs say the JSON form of its model language, the one the API accepts, "closely tracks the language in the Zanzibar paper"; the DSL adds syntactic sugar and compiles to that JSON ([configuration language](https://openfga.dev/docs/configuration-language)). The CNCF post announcing its incubation says it "was developed by a group of Okta employees, and is the foundation for the Auth0 FGA commercial offering" ([CNCF, 2025-11-11](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)). It is written in Go and licensed Apache-2.0 ([repository](https://github.com/openfga/openfga)). Auth0's managed service describes itself as "based on OpenFGA, an open-source project owned by the Cloud Native Computing Foundation" ([Auth0 FGA docs](https://docs.fga.dev/fga)).
 
 ## Paper terms and OpenFGA terms
 
@@ -106,7 +106,7 @@ Which of these tuples does a check for `viewer` on the readme walk through for e
   edges={[
     { from: "anne", to: "doc", label: "owner", on: true },
     { from: "beto", to: "eng", label: "member" },
-    { from: "eng", to: "doc", label: "viewer (eng#member)" },
+    { from: "eng", to: "doc", label: "viewer\n(eng#member)" },
     { from: "chen", to: "folder", label: "viewer" },
     { from: "folder", to: "doc", label: "parent" },
   ]}
@@ -186,7 +186,7 @@ With the cache on, can Chen still see the readme right after he is removed from 
   caption="Row 2 is what the docs warn about: the tuple change “might not be taken in consideration” if the result comes from the cache. A zookie would let the application ask for “at least as fresh as my write” (§2.2); here the choice is all or nothing."
 />
 
-The docs suggest deciding per request: if the application stored when a resource was last modified, it can send `HIGHER_CONSISTENCY` only while that time is within the cache TTL ([consistency](https://openfga.dev/docs/interacting/consistency)). That timestamp plays part of a zookie's role, kept by the application. Cache invalidation flags (`cache-controller-enabled`) also exist and check for recent writes to the store.
+The docs suggest deciding per request: if the application stores when a resource was last modified, it can compare that time with the cache TTL to choose between the two modes ([consistency](https://openfga.dev/docs/interacting/consistency)). That timestamp plays part of a zookie's role, kept by the application. Cache invalidation flags (`cache-controller-enabled`) also exist and check for recent writes to the store.
 
 ## Differences from the paper
 
@@ -196,7 +196,7 @@ The docs suggest deciding per request: if the application stored when a resource
 - **Conditions.** A type restriction like `[user with non_expired_grant]` makes a tuple count only when a CEL condition holds ([conditions](https://openfga.dev/docs/modeling/conditions)). The paper's tuple (§2.1) has no condition.
 - **Contextual tuples.** Tuples sent with a single Check, ListObjects, ListUsers or Expand request, "not persisted in the datastore" ([concepts](https://openfga.dev/docs/concepts), [contextual tuples](https://openfga.dev/docs/interacting/contextual-tuples)).
 - **Wildcards.** `[user, user:*]` allows a public grant ([configuration language](https://openfga.dev/docs/configuration-language)); the paper's tuple grammar has no wildcard (§2.1).
-- **Stores and model versions.** A store holds "one or more versions of an authorization model" and its tuples; "Store data cannot be shared across stores" ([concepts](https://openfga.dev/docs/concepts)). In the paper, configs are keyed by namespace and updated in place, with a changelog of config updates; each request is evaluated at one config snapshot (§3.1.3, §3.2.2). A check in OpenFGA can name the model version it uses.
+- **Stores and model versions.** A store holds "one or more versions of an authorization model" and its tuples; "Store data cannot be shared across stores" ([concepts](https://openfga.dev/docs/concepts)). In the paper, configs are stored in a table keyed by namespace ID, next to a changelog of config updates, and each request is evaluated at one config snapshot timestamp (§3.1.3, §3.2.2). A check in OpenFGA can name the model version it uses.
 - **No Leopard.** The docs cited here describe Check caches and iterator caches, not a precomputed set index like Leopard (§3.2.4).
 - **List APIs.** `ListObjects`, `StreamedListObjects` and `ListUsers` are outside the paper's API (§2.4).
 
@@ -204,7 +204,9 @@ The docs suggest deciding per request: if the application stored when a resource
 
 As of 2026-11-13: active. Latest release v1.22.1 on 2026-10-28; first release v0.1.0 on 2022-06-10; about 6.1k GitHub stars; Apache-2.0 ([repository](https://github.com/openfga/openfga), [releases](https://github.com/openfga/openfga/releases)).
 
-- June 2022: open sourced; December 2022: accepted as a CNCF Sandbox project ([project post, 2026-01-07](https://openfga.dev/blog/incubation-announcement)).
+- June 2022: open sourced ([project post, 2026-01-07](https://openfga.dev/blog/incubation-announcement)).
+- 2022: accepted as a CNCF Sandbox project. The sources disagree on the date: CNCF's project page says OpenFGA "was accepted to CNCF on September 14, 2022" and its announcement says September 2022; the project's own post says December 2022 ([CNCF project page](https://www.cncf.io/projects/openfga/), [CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/), [project post](https://openfga.dev/blog/incubation-announcement)).
+- 2025-10-28: moved to the Incubating maturity level, according to the CNCF project page.
 - 2025-11-11: CNCF announces that its Technical Oversight Committee "has voted to accept OpenFGA as a CNCF incubating project" ([CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)).
 - The managed service is Auth0 FGA ([docs](https://docs.fga.dev/fga)).
 
@@ -225,4 +227,5 @@ As of 2026-11-13: active. Latest release v1.22.1 on 2026-10-28; first release v0
 - [https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga](https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga)
 - [https://openfga.dev/blog/incubation-announcement](https://openfga.dev/blog/incubation-announcement)
 - [https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
+- [https://www.cncf.io/projects/openfga/](https://www.cncf.io/projects/openfga/)
 - [https://docs.fga.dev/fga](https://docs.fga.dev/fga)

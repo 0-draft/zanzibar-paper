@@ -39,7 +39,7 @@ SpiceDB is an open-source database that stores relationships and answers permiss
 | Watch (§2.4.3) | `Watch` |
 | Expand (§2.4.5) | `ExpandPermissionTree` |
 | Not in the paper's API | `LookupResources`, `LookupSubjects`, `ImportBulkRelationships`, `ExportBulkRelationships` |
-| Leopard (§3.2.4) | AuthZed Materialize, a commercial managed service ([docs](https://authzed.com/docs/authzed/concepts/authzed-materialize)) |
+| Leopard (§3.2.4) | AuthZed Materialize, a commercial service for AuthZed Dedicated customers ([docs](https://authzed.com/docs/materialize/getting-started/overview)) |
 | Spanner (§3) | CockroachDB, Cloud Spanner, PostgreSQL, MySQL, memdb ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)) |
 
 API names come from AuthZed's protocol files: [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto) and [`watch_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto).
@@ -105,7 +105,7 @@ Which stored relationships lead each person to `view` on the readme?
   edges={[
     { from: "anne", to: "doc", label: "owner" },
     { from: "beto", to: "eng", label: "member" },
-    { from: "eng", to: "doc", label: "viewer (eng#member)" },
+    { from: "eng", to: "doc", label: "viewer\n(eng#member)" },
     { from: "chen", to: "folder", label: "viewer", on: true },
     { from: "folder", to: "doc", label: "parent", on: true },
   ]}
@@ -123,7 +123,7 @@ How does one SpiceDB deployment answer a check? AuthZed describes SpiceDB as "fu
   height={320}
   minWidth={560}
   title="SpiceDB architecture"
-  desc="An application client sends CheckPermission to one of three SpiceDB nodes. The nodes dispatch sub-requests to each other, routed by consistent hashing. All three nodes read and write one shared datastore (CockroachDB, Spanner, PostgreSQL or MySQL). A Watch consumer receives a stream of changes from a SpiceDB node. AuthZed Materialize, a commercial service, watches the datastore and answers sub-queries that SpiceDB dispatches to it."
+  desc="An application client sends CheckPermission to one of three SpiceDB nodes. The nodes dispatch sub-requests to each other, routed by consistent hashing. All three nodes read and write one shared datastore (CockroachDB, Spanner, PostgreSQL or MySQL). A Watch consumer receives a stream of changes from a SpiceDB node. AuthZed Materialize, a commercial service, watches the datastore and reads periodic snapshots of it, and answers sub-queries that SpiceDB dispatches to it."
   nodes={[
     { id: "app", x: 320, y: 40, label: "Application\n(gRPC / HTTP client)", kind: "client" },
     { id: "a", x: 170, y: 150, label: "SpiceDB\nnode", kind: "server" },
@@ -141,7 +141,7 @@ How does one SpiceDB deployment answer a check? AuthZed describes SpiceDB as "fu
     { from: "b", to: "ds", label: "reads / writes", dir: "both" },
     { from: "c", to: "ds", dir: "both" },
     { from: "a", to: "watch", label: "Watch" },
-    { from: "ds", to: "mat", label: "changes", dashed: true },
+    { from: "ds", to: "mat", label: "changes, snapshots", dashed: true },
     { from: "c", to: "mat", label: "sub-queries", dashed: true },
   ]}
   caption="Yellow: servers. Green: the shared datastore. Blue: clients. Dashed: the optional commercial Materialize path."
@@ -159,6 +159,8 @@ AuthZed calls the ZedToken "the SpiceDB equivalent of Google Zanzibar's Zookie c
 | `at_least_as_fresh` + ZedToken | A snapshot no older than the token | A zookie in a check or read (§2.2, §2.4) |
 | `at_exact_snapshot` + ZedToken | Exactly the token's snapshot | A read zookie reused to get "the same snapshot as a previous read" (§2.4.1) |
 | `fully_consistent` | The newest data | No direct analogue; the paper's content-change check is evaluated at the latest snapshot (§2.4.4) |
+
+On CockroachDB, the docs warn that `fully_consistent` "does not guarantee read-after-write consistency", because node clocks can differ by up to the cluster's `max_offset`; they recommend a ZedToken with `at_least_as_fresh` instead ([consistency docs](https://authzed.com/docs/spicedb/concepts/consistency)).
 
 `fully_consistent` is the default for `WriteRelationships`, `DeleteRelationships`, `ReadSchema` and `WriteSchema`; `minimize_latency` is the default for every other API ([consistency docs](https://authzed.com/docs/spicedb/concepts/consistency)).
 
@@ -201,9 +203,9 @@ In the paper the zookie stored with content comes from a content-change check (�
 - **Caveats.** Relationships can carry a named CEL expression, attached in the schema with `with` (e.g. `relation viewer: user | user with ip_allowlist`) ([caveats](https://authzed.com/docs/spicedb/concepts/caveats)). The paper's tuple (§2.1) has no such field.
 - **Wildcards.** `relation viewer: user | user:*` allows a public grant ([schema](https://authzed.com/docs/spicedb/concepts/schema)). The paper's tuple grammar has a user ID or a userset (§2.1), no wildcard.
 - **Intersection arrow.** `.all()` requires every related object to grant the permission ([schema](https://authzed.com/docs/spicedb/concepts/schema)). The paper's three rewrite leaves (§2.3.1) have no such form.
-- **Default staleness.** The paper picks the default staleness adaptively from out-of-zone read statistics (§3.2.1). SpiceDB rounds request revisions into windows set by `--datastore-revision-quantization-interval` so cache entries can be reused; AuthZed gives "the default is 5s" ([hotspot caching post, 2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)).
+- **Default staleness.** The paper picks the default staleness adaptively from out-of-zone read statistics (§3.2.1), and separately rounds evaluation timestamps up "to a coarse granularity, such as one or ten seconds" so cache entries are shared (§3.2.5). SpiceDB has only the rounding: it groups request revisions into windows set by `--datastore-revision-quantization-interval` so cache entries can be reused; AuthZed gives "the default is 5s" ([hotspot caching post, 2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)), which matches `RevisionQuantization: 5 * time.Second` in the [source](https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go).
 - **Lookup APIs.** `LookupResources` and `LookupSubjects` answer "which resources" and "which subjects" questions ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). The paper's API has Read, Write, Watch, Check and Expand (§2.4).
-- **Leopard.** "AuthZed Materialize takes inspiration from the Leopard index component described in the Zanzibar paper" ([Materialize docs](https://authzed.com/docs/authzed/concepts/authzed-materialize)). It is part of AuthZed's paid offering, not the open-source SpiceDB.
+- **Leopard.** "AuthZed Materialize takes inspiration from the Leopard index component described in the Zanzibar paper" ([Materialize docs](https://authzed.com/docs/materialize/getting-started/overview)). It is part of AuthZed's paid offering, not the open-source SpiceDB: the docs say its Accelerated Queries feature is "generally available to users of AuthZed Dedicated".
 
 ## Status
 
@@ -222,8 +224,9 @@ AuthZed also publishes an annotated copy of the paper at [zanzibar.tech](https:/
 - [https://authzed.com/docs/spicedb/concepts/datastores](https://authzed.com/docs/spicedb/concepts/datastores)
 - [https://authzed.com/docs/spicedb/concepts/caveats](https://authzed.com/docs/spicedb/concepts/caveats)
 - [https://authzed.com/docs/spicedb/ops/performance](https://authzed.com/docs/spicedb/ops/performance)
-- [https://authzed.com/docs/authzed/concepts/authzed-materialize](https://authzed.com/docs/authzed/concepts/authzed-materialize)
+- [https://authzed.com/docs/materialize/getting-started/overview](https://authzed.com/docs/materialize/getting-started/overview)
 - [https://authzed.com/blog/spicedb-architecture](https://authzed.com/blog/spicedb-architecture)
+- [https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go](https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go)
 - [https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)
 - [https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
 - [https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)

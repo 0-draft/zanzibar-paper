@@ -137,7 +137,7 @@ Which database answers a request?
 
 - One Go service serves the HTTP API ([router.go](https://github.com/warrant-dev/warrant/blob/main/pkg/service/router.go)).
 - MySQL and PostgreSQL configurations take a `dsn` and an optional `readerDsn` ([config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)); SQLite is also supported, "in-memory or file" ([README](https://github.com/warrant-dev/warrant)).
-- The rule for choosing a pool is a comment in [sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go): use the writer if the call is a write, if there is no reader, or if the context "contains 'latest' wookie"; otherwise use the reader.
+- The rule for choosing a pool is a comment in [sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go): use the writer if the call is a write, if there is no reader, if the context "contains 'latest' wookie", or if code inside the server has set a writer override; otherwise use the reader.
 
 ## Consistency
 
@@ -166,6 +166,8 @@ What does `Warrant-Token: latest` change for a check right after a write?
   ]}
   caption="The paper's zookie names a snapshot (§2.4); latest only names a database."
 />
+
+The README itself says that low latency at high throughput "requires running Warrant as a distributed service with the use of Warrant-Tokens (also referred to as Zookies in Google Zanzibar)", and that "this open source version of Warrant is only capable of handling low-to-moderate throughput" ([README](https://github.com/warrant-dev/warrant), vendor-authored). Its link for Warrant-Tokens now leads to the general WorkOS FGA overview, which does not describe them.
 
 Notice the difference from the paper. A zookie sets a lower bound, which allows Zanzibar "to choose any timestamp fresher than the one encoded in a zookie" and to serve most checks "at a default staleness with already replicated data" (§2.2). `latest` has no point in time in it: it moves the read to the primary, which is the freshest copy but gives up the replica.
 
