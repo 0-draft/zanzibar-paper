@@ -173,6 +173,47 @@ describe("validateTranslation", () => {
   });
 });
 
+describe("validateTranslation: latency grouping", () => {
+  const tab = src.blocks.find((b) => b.id === "tab-2")!;
+  const base: Translation = { lang: "ja", meta: { title: "t" }, blocks: {} };
+  it("rejects a translation that breaks the Safe / Recent grouping", () => {
+    if (tab.type !== "table") throw new Error("tab-2 is not a table");
+    const rows = tab.rows.map((r) => [...r]);
+    rows[1]![0] = "安全";
+    const one: Source = { meta: src.meta, blocks: [tab] };
+    const errs = validateTranslation(one, {
+      ...base,
+      blocks: { "tab-2": { title: "t", header: tab.header, rows, caption: "c" } },
+    });
+    expect(errs.join("\n")).toMatch(/must keep the grouping/);
+  });
+});
+
+describe("validateSource: schema", () => {
+  it("rejects unknown block types, reserved ids and bad heading levels", () => {
+    const errs = validateSource({
+      meta: src.meta,
+      blocks: [
+        { id: "x", type: "aside" } as never,
+        { id: "ref-3", type: "p", text: "a" },
+        { id: "h", type: "heading", level: 5 as never, text: "h" },
+      ],
+    });
+    const all = errs.join("\n");
+    expect(all).toMatch(/unknown type "aside"/);
+    expect(all).toMatch(/"ref-3" is reserved/);
+    expect(all).toMatch(/level must be 2, 3 or 4/);
+  });
+
+  it("rejects a citation whose number does not match its target", () => {
+    const errs = validateSource({
+      meta: src.meta,
+      blocks: [{ id: "p", type: "p", text: "see [4](#ref-3)" }, ...src.blocks.filter((b) => b.type === "refs")],
+    });
+    expect(errs.join("\n")).toMatch(/cites \[4\] but links to #ref-3/);
+  });
+});
+
 describe("localize", () => {
   it("overrides only translatable fields", () => {
     const b = { id: "f", type: "figure", src: "a.svg", width: 1, height: 1, alt: "A", caption: "C" } as const;
