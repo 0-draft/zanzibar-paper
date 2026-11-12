@@ -6,7 +6,13 @@ import { defineCollection, z } from "astro:content";
 import { glob } from "astro/loaders";
 
 const guides = defineCollection({
-  loader: glob({ pattern: "**/*.mdx", base: "./src/content/guides" }),
+  // Keep the language folder's case in the id ("pt-BR/…", not "pt-br/…"):
+  // the default id is slugified, which lowercases it.
+  loader: glob({
+    pattern: "**/*.mdx",
+    base: "./src/content/guides",
+    generateId: ({ entry }) => entry.replace(/\.mdx$/, ""),
+  }),
   schema: z.object({
     title: z.string(),
     /** One sentence for the index card and the meta description */
