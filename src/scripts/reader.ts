@@ -314,7 +314,12 @@ if (tip) {
     });
     a.addEventListener("mouseleave", hideSoon);
     a.addEventListener("focus", () => show(a, false));
-    a.addEventListener("blur", hideSoon);
+    a.addEventListener("blur", (e) => {
+      // moving into the card (its "go to the reference" link) keeps it open;
+      // a card opened by a tap closes on a tap elsewhere, not on blur
+      if (tapped === a || tip.contains(e.relatedTarget as Node | null)) return;
+      hideSoon();
+    });
     a.addEventListener("click", (e) => {
       if (lastPointer !== "touch" || tapped === a) return; // mouse, keyboard or a second tap: follow the link
       e.preventDefault();
