@@ -614,6 +614,15 @@ html[data-first="translation"] .cell-tr {
 .toc :lang(ko) {
   word-break: keep-all;
 }
+/* CJK has no italic: slanted kana and hanzi are synthetic and hard to read.
+   Emphasis becomes weight instead. */
+.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) em,
+.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) .caption {
+  font-style: normal;
+}
+.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) em {
+  font-weight: 600;
+}
 
 .cell > :first-child,
 .shared > :first-child {
@@ -1215,23 +1224,21 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
     padding-inline: 0.25rem;
     margin-inline: -0.25rem;
   }
-  /* a permalink only where there is room: on headings, at the right */
-  .pl {
-    display: none;
+  /* permalink and report link: small, at the end of each row */
+  html[data-layout] .row .pl {
+    position: static;
+    grid-column: 1;
+    order: 3;
+    justify-self: end;
+    flex-direction: row;
+    width: auto;
+    margin-top: -0.6rem;
+    opacity: 0.45;
+  }
+  html[data-layout] .row .pl-report {
+    visibility: visible;
   }
   html[data-layout] .row-heading .pl {
-    display: flex;
-    flex-direction: row;
-    left: auto;
-    right: 0;
-    top: 0.75rem;
-    width: auto;
-    opacity: 0.5;
-  }
-  .row-heading .pl a {
-    padding: 0.35rem 0.5rem;
-  }
-  .row-heading .pl-report {
     display: none;
   }
   /* figure 2 is a wide diagram: keep it legible and let it scroll */

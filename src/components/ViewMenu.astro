@@ -26,12 +26,12 @@ const { t } = Astro.props;
       <label><input type="radio" name="view" value="original" /> {t.viewOriginal}</label>
       <label><input type="radio" name="view" value="translation" /> {t.viewTranslation}</label>
     </fieldset>
-    <fieldset class="only-wide">
-      <legend>{t.layout}</legend>
-      <label><input type="radio" name="layout" value="side" checked /> {t.layoutSide}</label>
-      <label><input type="radio" name="layout" value="stacked" /> {t.layoutStacked}</label>
-    </fieldset>
     <fieldset>
+      <legend>{t.layout}</legend>
+      <div class="only-wide">
+        <label><input type="radio" name="layout" value="side" checked /> {t.layoutSide}</label>
+        <label><input type="radio" name="layout" value="stacked" /> {t.layoutStacked}</label>
+      </div>
       <label class="check"><input type="checkbox" name="first" value="translation" /> {t.translationFirst}</label>
     </fieldset>
     <fieldset>
