@@ -42,7 +42,7 @@ describe("parseInline", () => {
   });
 
   it("parses emphasis wrapping angle-bracket notation", () => {
-    expect(renderInline("⟨*object#relation*⟩")).toBe("⟨<em>object#relation</em>⟩");
+    expect(renderInline("⟨*object#relation*⟩")).toBe('⟨<em class="latin">object#relation</em>⟩');
   });
 });
 
@@ -84,5 +84,42 @@ describe("invariantTokens", () => {
 describe("escapeHtml", () => {
   it("escapes the five significant characters", () => {
     expect(escapeHtml(`&<>"'`)).toBe("&amp;&lt;&gt;&quot;&#39;");
+  });
+});
+
+describe("hardening", () => {
+  it("keeps currency amounts as text", () => {
+    expect(plainText("costs $5 and $10 per seat")).toBe("costs $5 and $10 per seat");
+    expect(parseInline("$5 and $10").every((n) => n.kind === "text")).toBe(true);
+  });
+
+  it("still reads TeX that ends a clause", () => {
+    expect(parseInline("at $T_c$, then $\\le T$.").filter((n) => n.kind === "math")).toHaveLength(2);
+  });
+
+  it("refuses link schemes other than anchors and http(s)", () => {
+    expect(renderInline("[x](javascript:alert(1))")).not.toContain("<a");
+    expect(renderInline("[x](data:text/html,hi)")).not.toContain("<a");
+    expect(renderInline("[x](https://example.com/a)")).toContain('href="https://example.com/a"');
+  });
+
+  it("does not close strong inside code", () => {
+    expect(renderInline("**a `**` b**")).toBe("<strong>a <code>**</code> b</strong>");
+  });
+
+  it("treats a changed citation number as a changed token", () => {
+    expect(invariantTokens("[15](#ref-15)")).not.toEqual(invariantTokens("[99](#ref-15)"));
+    expect(invariantTokens("[15](#ref-15)")).toEqual(["link:#ref-15=15"]);
+  });
+});
+
+describe("CJK-aware rendering", () => {
+  it("marks Latin-only emphasis so it can keep its italic in CJK text", () => {
+    expect(renderInline("*zookie* と*強調*")).toBe('<em class="latin">zookie</em> と<em>強調</em>');
+  });
+
+  it("keeps a formula and the closing punctuation after it on one line", () => {
+    const html = renderInline("時刻 $T$。次");
+    expect(html).toMatch(/^時刻 <span class="nobr"><span class="katex">.*<\/span>。<\/span>次$/s);
   });
 });

@@ -21,7 +21,7 @@ test.describe("every translation page", () => {
       page.on("pageerror", (e) => errors.push(e.message));
       await page.goto(`${BASE}${l.code}/`);
       await expect(page.locator("html")).toHaveAttribute("lang", l.code);
-      await expect(page.locator(".paper > .row")).toHaveCount(src.blocks.length);
+      await expect(page.locator(".paper > .row")).toHaveCount(src.blocks.filter((b) => b.type !== "note").length);
       expect(await page.locator(".cell-en:not([lang='en'])").count()).toBe(0);
       expect(await page.locator(`.cell-tr:not([lang='${l.code}'])`).count()).toBe(0);
       await expect(page.locator("h1")).toHaveCount(1);
@@ -49,38 +49,105 @@ test("internal anchors resolve to an element", async ({ page }) => {
   expect(missing).toEqual([]);
 });
 
-test("view switch hides a column and is remembered", async ({ page, isMobile }) => {
+async function openView(page: Page) {
+  await page.locator("details.viewmenu > summary").click();
+}
+
+test("view menu: show one text, and the choice is remembered", async ({ page }) => {
   await page.goto(`${BASE}ja/`);
   const cellEn = page.locator("#s1-p1 .cell-en");
   const cellTr = page.locator("#s1-p1 .cell-tr");
   await expect(cellEn).toBeVisible();
   await expect(cellTr).toBeVisible();
-  if (isMobile) await page.locator("[data-view-select]").selectOption("translation");
-  else await page.getByRole("button", { name: "訳文のみ" }).click();
+  await openView(page);
+  await page.locator('input[name="view"][value="translation"]').check();
   await expect(cellEn).toBeHidden();
   await expect(cellTr).toBeVisible();
   await page.reload();
   await expect(cellEn).toBeHidden();
-  if (isMobile) await page.locator("[data-view-select]").selectOption("original");
-  else await page.getByRole("button", { name: "原文のみ" }).click();
+  await openView(page);
+  await page.locator('input[name="view"][value="original"]').check();
   await expect(cellTr).toBeHidden();
   await expect(cellEn).toBeVisible();
+});
+
+test("switching the view at the top of the page does not jump into the paper", async ({ page }) => {
+  await page.goto(`${BASE}ja/`);
+  await openView(page);
+  await page.locator('input[name="view"][value="translation"]').check();
+  expect(await page.evaluate(() => window.scrollY)).toBeLessThan(10);
+});
+
+test("view menu: stacked layout and translation first", async ({ page, isMobile }) => {
+  test.skip(isMobile, "phones are always stacked");
+  await page.goto(`${BASE}de/`);
+  const en = page.locator("#s1-p1 .cell-en");
+  const tr = page.locator("#s1-p1 .cell-tr");
+  // side by side: original on the left
+  expect((await en.boundingBox())!.x).toBeLessThan((await tr.boundingBox())!.x);
+  await openView(page);
+  await page.locator('input[name="first"]').check();
+  expect((await tr.boundingBox())!.x).toBeLessThan((await en.boundingBox())!.x);
+  await page.locator('input[name="layout"][value="stacked"]').check();
+  await expect(page.locator("html")).toHaveAttribute("data-layout", "stacked");
+  const a = (await tr.boundingBox())!;
+  const b = (await en.boundingBox())!;
+  expect(Math.abs(a.x - b.x)).toBeLessThan(20);
+  expect(a.y).toBeLessThan(b.y);
+});
+
+test("phones stack the pair with the translation on top", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "phone layout");
+  await page.goto(`${BASE}ja/`);
+  await expect(page.locator("html")).toHaveAttribute("data-layout", "stacked");
+  const tr = (await page.locator("#s1-p1 .cell-tr").boundingBox())!;
+  const en = (await page.locator("#s1-p1 .cell-en").boundingBox())!;
+  expect(tr.y).toBeLessThan(en.y);
+  // figure captions follow the same order
+  const ftr = (await page.locator("#fig-2 .cell-tr").boundingBox())!;
+  const fen = (await page.locator("#fig-2 .cell-en").boundingBox())!;
+  expect(ftr.y).toBeLessThan(fen.y);
+});
+
+test("code and formulas keep their own faces inside CJK text", async ({ page }) => {
+  await page.goto(`${BASE}ja/`);
+  const codeFont = await page
+    .locator(".cell-tr code")
+    .first()
+    .evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(codeFont).toMatch(/Plex Mono/);
+  const katexFont = await page
+    .locator(".cell-tr .katex")
+    .first()
+    .evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(katexFont).toMatch(/KaTeX/);
+  const refsLang = await page.locator("#refs-list .shared").getAttribute("lang");
+  expect(refsLang).toBe("en");
+});
+
+test("citations preview their reference on hover", async ({ page, isMobile }) => {
+  test.skip(isMobile, "hover preview is for pointer devices; taps follow the link");
+  await page.goto(`${BASE}ja/#s1-p10`);
+  await page.locator("#s1-p10 .cell-tr a.cite").first().hover();
+  const tip = page.locator("#cite-tip");
+  await expect(tip).toBeVisible();
+  await expect(tip).toContainText("Spanner");
 });
 
 test("switching language keeps the paragraph being read", async ({ page }) => {
   await page.goto(`${BASE}ja/#s3-2-5-p3`);
   // the page re-anchors once web fonts have loaded; read the position after that
   await page.evaluate(() => document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(r))));
-  await page.locator(".bar-lang > summary").click();
-  await page.locator('.bar-lang a[hreflang="de"]').click();
+  await page.locator("details.langmenu > summary").click();
+  await page.locator('details.langmenu a[hreflang="de"]').click();
   await expect(page).toHaveURL(/\/de\/#s3-2-5-p3$/);
   await expect(page.locator("#s3-2-5-p3")).toBeInViewport();
 });
 
-test("theme choice is applied and remembered", async ({ page, isMobile }) => {
-  test.skip(isMobile, "the theme control is desktop-only; phones follow the system");
+test("theme choice is applied and remembered", async ({ page }) => {
   await page.goto(`${BASE}ko/`);
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await openView(page);
+  await page.locator('input[name="theme"][value="dark"]').check();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -88,11 +155,18 @@ test("theme choice is applied and remembered", async ({ page, isMobile }) => {
   expect(bg).toBe("rgb(21, 24, 29)");
 });
 
-test("the landing page lists every translation and suggests one", async ({ page }) => {
+test("the landing page lists every translation", async ({ page }) => {
   await page.goto(BASE);
   await expect(page.locator(".landing-langs li")).toHaveCount(TRANSLATIONS.length);
-  await expect(page.locator(".landing-langs .suggested")).toHaveCount(1);
   await noHorizontalScroll(page);
+});
+
+test.describe("with a Korean browser", () => {
+  test.use({ locale: "ko-KR" });
+  test("the landing page marks the Korean translation", async ({ page }) => {
+    await page.goto(BASE);
+    await expect(page.locator(".landing-langs .suggested")).toHaveAttribute("data-code", "ko");
+  });
 });
 
 test("unknown pages get the 404 page", async ({ page }) => {
@@ -121,4 +195,147 @@ test.describe("accessibility (axe, WCAG 2.2 AA)", () => {
     const results = await new AxeBuilder({ page }).withRules(["color-contrast"]).exclude(".katex-mathml").analyze();
     expect(results.violations.map((v) => v.nodes.map((n) => n.target.join(" ")).join(", "))).toEqual([]);
   });
+});
+
+test("reading progress runs from the first paragraph to the references", async ({ page }) => {
+  await page.goto(`${BASE}ja/`);
+  const num = page.locator(".progress-num:visible");
+  await expect(num).toHaveText("0%");
+  await page.locator("#s3-2-4").scrollIntoViewIfNeeded();
+  await page.evaluate(() => document.getElementById("s3-2-4")!.scrollIntoView({ block: "start" }));
+  await expect.poll(async () => Number.parseInt((await num.textContent()) ?? "0", 10)).toBeGreaterThan(20);
+  await expect.poll(async () => Number.parseInt((await num.textContent()) ?? "0", 10)).toBeLessThan(80);
+  await page.evaluate(() => document.getElementById("refs")!.scrollIntoView({ block: "start" }));
+  await expect(num).toHaveText("100%");
+  expect(await page.locator(".progress").getAttribute("aria-hidden")).toBe("true");
+});
+
+test("text size is applied to the paper and remembered", async ({ page }) => {
+  await page.goto(`${BASE}fr/`);
+  const p = page.locator("#s1-p1 .cell-tr p");
+  const before = await p.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+  await openView(page);
+  await page.locator('input[name="size"][value="l"]').check();
+  await expect.poll(() => p.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThan(before);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-size", "l");
+});
+
+test("on touch screens a citation opens its card first", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "touch behaviour");
+  await page.goto(`${BASE}ja/#s1-p10`);
+  const cite = page.locator("#s1-p10 .cell-tr a.cite").first();
+  await cite.tap();
+  await expect(page.locator("#cite-tip")).toBeVisible();
+  await expect(page).toHaveURL(/#s1-p10$/);
+  await page.locator("#cite-tip a.go").tap();
+  await expect(page).toHaveURL(/#ref-15$/);
+});
+
+test("the latency table follows the view: original labels in the original-only view", async ({ page }) => {
+  await page.goto(`${BASE}ja/#tab-2`);
+  await expect(page.locator("#tab-2 .v-tr")).toBeVisible();
+  await expect(page.locator("#tab-2 .v-en")).toBeHidden();
+  await openView(page);
+  await page.locator('input[name="view"][value="original"]').check();
+  await expect(page.locator("#tab-2 .v-en")).toBeVisible();
+  await expect(page.locator("#tab-2 .v-tr")).toBeHidden();
+  await expect(page.locator("#tab-2 .v-en")).toContainText("Latency in milliseconds");
+});
+
+test("translation first keeps both columns on the same line", async ({ page, isMobile }) => {
+  test.skip(isMobile, "side by side only");
+  await page.goto(`${BASE}zh-Hans/#s2-1-p1`);
+  await openView(page);
+  await page.locator('input[name="first"]').check();
+  for (const id of ["s2-1", "s2-1-p1", "s2-2-p3"]) {
+    const en = (await page.locator(`#${id} .cell-en`).boundingBox())!;
+    const tr = (await page.locator(`#${id} .cell-tr`).boundingBox())!;
+    expect(Math.abs(en.y - tr.y), id).toBeLessThan(2);
+    expect(tr.x).toBeLessThan(en.x);
+  }
+});
+
+test("the column heads step aside for the reference list", async ({ page, isMobile }) => {
+  test.skip(isMobile, "column heads are desktop only");
+  await page.goto(`${BASE}ja/#refs`);
+  await page.evaluate(() => document.fonts.ready.then(() => new Promise((r) => setTimeout(r, 200))));
+  await expect(page.locator(".colheads")).toBeHidden();
+  await page.evaluate(() => document.getElementById("s2-2")!.scrollIntoView());
+  await expect(page.locator(".colheads")).toBeVisible();
+});
+
+test("citation cards lead with the title, and the reference links back", async ({ page, isMobile }) => {
+  test.skip(isMobile, "hover card");
+  await page.goto(`${BASE}de/#s1-p10`);
+  await page.locator("#s1-p10 .cell-tr a.cite").first().hover();
+  const tip = page.locator("#cite-tip");
+  await expect(tip.locator(".ti")).toHaveText(/^Spanner: Google’s globally-distributed database\./);
+  await expect(tip).toContainText("[15]");
+  await expect(tip).toContainText("Corbett, J. C., et al.");
+  await page.locator("#s1-p10 .cell-tr a.cite").first().click();
+  await expect(page).toHaveURL(/#ref-15$/);
+  await page.locator("#ref-15 a.back").click();
+  await expect(page).toHaveURL(/#s1-p10$/);
+});
+
+test("permalink and report link are reachable by keyboard and show on focus", async ({ page, isMobile }) => {
+  test.skip(isMobile, "keyboard");
+  await page.goto(`${BASE}ja/`);
+  const pl = page.locator('#s1-p1 .pl a[href="#s1-p1"]');
+  expect(await pl.evaluate((el: HTMLElement) => el.tabIndex)).toBeGreaterThanOrEqual(0);
+  await pl.focus();
+  await expect(page.locator("#s1-p1 .pl")).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#s1-p1 .pl-report")).toBeFocused();
+});
+
+test("the translation-first box follows the layout default", async ({ page, isMobile }) => {
+  test.skip(isMobile, "phones have no layout choice");
+  await page.goto(`${BASE}ja/`);
+  await openView(page);
+  const first = page.locator('input[name="first"]');
+  await expect(first).not.toBeChecked();
+  await page.locator('input[name="layout"][value="stacked"]').check();
+  // stacked puts the translation on top by default, and the box says so
+  await expect(first).toBeChecked();
+  const tr = (await page.locator("#s1-p1 .cell-tr").boundingBox())!;
+  const en = (await page.locator("#s1-p1 .cell-en").boundingBox())!;
+  expect(tr.y).toBeLessThan(en.y);
+});
+
+test("an open citation card survives a resize", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "touch");
+  await page.goto(`${BASE}ja/#s1-p10`);
+  await page.locator("#s1-p10 .cell-tr a.cite").first().tap();
+  await expect(page.locator("#cite-tip")).toBeVisible();
+  await page.setViewportSize({ width: 412, height: 760 });
+  await expect(page.locator("#cite-tip")).toBeVisible();
+});
+
+test("a tapped citation card survives compatibility mouse events on a slow phone", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "touch");
+  // CI runners are slow: reproduce that, then let the emulated mouse leave
+  // the citation before the second tap, as touch screens do
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 8 });
+  await page.goto(`${BASE}ja/#s1-p10`);
+  await page.locator("#s1-p10 .cell-tr a.cite").first().tap();
+  await expect(page.locator("#cite-tip")).toBeVisible();
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(600);
+  await expect(page.locator("#cite-tip")).toBeVisible();
+  await page.locator("#cite-tip a.go").tap();
+  await expect(page).toHaveURL(/#ref-15$/);
+});
+
+test("Enter on a citation follows it even after a touch", async ({ page, isMobile }) => {
+  test.skip(isMobile, "a hover-capable device that was touched once (touchscreen laptop)");
+  await page.goto(`${BASE}ja/#s1-p10`);
+  await page.evaluate(() =>
+    document.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "touch", bubbles: true })),
+  );
+  await page.locator("#s1-p10 .cell-tr a.cite").first().focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#ref-15$/);
 });

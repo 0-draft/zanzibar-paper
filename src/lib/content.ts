@@ -24,7 +24,15 @@ export type Block =
       rows: string[][];
       caption: string;
     }
-  | { id: string; type: "refs"; items: { n: number; text: string }[] };
+  | { id: string; type: "refs"; items: Reference[] };
+
+/** A reference, split so a preview can lead with its title. authors + " " + title + rest is the published text. */
+export interface Reference {
+  n: number;
+  authors?: string;
+  title: string;
+  rest: string;
+}
 
 export type BlockType = Block["type"];
 
@@ -174,6 +182,15 @@ export function validateTranslation(src: Source, tr: Translation): string[] {
       errs.push(`${lang}: missing block "${id}" (${b.type})`);
       continue;
     }
+    // Rows grouped under one label in the source (Safe / Recent) must keep one
+    // label per group, or the rowspans of the rendered table fall apart.
+    if (b.type === "table" && b.variant === "latency" && Array.isArray(t.rows)) {
+      for (let r = 1; r < b.rows.length; r++) {
+        const sameGroup = b.rows[r]![0] === b.rows[r - 1]![0];
+        const tSame = t.rows[r]?.[0] === t.rows[r - 1]?.[0];
+        if (sameGroup !== tSame) errs.push(`${where(id, `rows[${r}][0]`)} must keep the grouping of the source rows`);
+      }
+    }
     const allowed = new Set(requiredFields(b));
     for (const f of Object.keys(t)) {
       if (!allowed.has(f)) errs.push(`${where(id, f)} is not a translatable field of a ${b.type} block`);
@@ -215,25 +232,41 @@ export function validateTranslation(src: Source, tr: Translation): string[] {
   return errs;
 }
 
+/** Ids the page uses itself; a block must not take them. */
+const RESERVED_IDS = /^(ref-\d+|paper|cite-tip)$/;
+
 /** Checks of the source itself: unique ids, resolvable internal links. */
 export function validateSource(src: Source, figureFiles?: Set<string>): string[] {
   const errs: string[] = [];
   const ids = new Set<string>();
   for (const b of src.blocks) {
+    if (!(b.type in TRANSLATABLE)) {
+      errs.push(`en: block "${b.id}" has unknown type "${(b as { type: string }).type}"`);
+      continue;
+    }
     if (!/^[a-z][a-z0-9-]*$/.test(b.id)) errs.push(`en: bad id "${b.id}"`);
+    if (RESERVED_IDS.test(b.id)) errs.push(`en: id "${b.id}" is reserved by the page`);
+    if (b.type === "heading" && ![2, 3, 4].includes(b.level)) errs.push(`en:${b.id} heading level must be 2, 3 or 4`);
+    if (b.type === "figure" && !(Number.isInteger(b.width) && Number.isInteger(b.height))) {
+      errs.push(`en:${b.id} figure width and height must be integers`);
+    }
     if (ids.has(b.id)) errs.push(`en: duplicate id "${b.id}"`);
     ids.add(b.id);
   }
   const refs = src.blocks.find((b) => b.type === "refs");
   const anchors = new Set([...ids, ...(refs?.type === "refs" ? refs.items.map((r) => `ref-${r.n}`) : [])]);
   for (const b of src.blocks) {
+    if (!(b.type in TRANSLATABLE)) continue;
     for (const f of requiredFields(b)) {
       const v = (b as Record<string, unknown>)[f];
       const strings = (Array.isArray(v) ? v.flat() : [v]) as string[];
       for (const s of strings) {
         for (const tok of invariantTokens(s)) {
-          if (tok.startsWith("link:#") && !anchors.has(tok.slice(6))) {
-            errs.push(`en:${b.id}.${f} links to missing anchor ${tok.slice(5)}`);
+          if (!tok.startsWith("link:#")) continue;
+          const [target, label] = tok.slice(6).split("=");
+          if (!anchors.has(target!)) errs.push(`en:${b.id}.${f} links to missing anchor #${target}`);
+          if (label !== undefined && `ref-${label}` !== target) {
+            errs.push(`en:${b.id}.${f} cites [${label}] but links to #${target}`);
           }
         }
       }

@@ -1,10 +1,18 @@
 ---
+// Japanese and Korean faces are large (hundreds of unicode-range subsets):
+// load them only on the page that needs them, not in the shared stylesheet.
+import jp400 from "@fontsource/ibm-plex-sans-jp/400.css?url";
+import jp600 from "@fontsource/ibm-plex-sans-jp/600.css?url";
+import kr400 from "@fontsource/ibm-plex-sans-kr/400.css?url";
+import kr600 from "@fontsource/ibm-plex-sans-kr/600.css?url";
 import LangMenu from "../../components/LangMenu.astro";
 import Toc from "../../components/Toc.astro";
+import ViewMenu from "../../components/ViewMenu.astro";
 import { getLang, TRANSLATIONS } from "../../i18n/langs.ts";
 import { ui } from "../../i18n/ui.ts";
 import Base from "../../layouts/Base.astro";
 import { loadSource, loadTranslation } from "../../lib/content.ts";
+import { renderInline } from "../../lib/inline.ts";
 import { issueUrl, REPO_URL, withBase } from "../../lib/paths.ts";
 import { buildRows, buildToc } from "../../lib/render.ts";
 
@@ -18,156 +26,163 @@ const t = ui(lang);
 const src = loadSource();
 const tr = loadTranslation(lang);
 const base = withBase();
-const rows = buildRows(src, tr, base);
+const rows = buildRows(src, tr, base, { openFigure: t.openFigure });
 const toc = buildToc(src, tr);
 const m = src.meta;
 const pageTitle = `${tr.meta.title} | ${m.title}`;
+// Shared blocks that are the original's own text (not translated)
+const SHARED_EN = new Set(["grammar", "math", "code", "refs"]);
+
+// The author footnote is shown with the byline, not as a row of the paper.
+const note = src.blocks.find((b) => b.type === "note");
+const noteEn = note?.type === "note" ? note.text : "";
+const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
 ---
 
 <Base lang={lang} title={pageTitle} description={t.description} path={`${lang}/`} alternates>
+  <Fragment slot="head">
+    {lang === "ja" && [jp400, jp600].map((href) => <link rel="stylesheet" href={href} />)}
+    {lang === "ko" && [kr400, kr600].map((href) => <link rel="stylesheet" href={href} />)}
+  </Fragment>
   <a class="skip" href="#paper">{t.skip}</a>
 
   <header class="bar">
-    <a class="brand" href={base} lang="en">zanzibar-paper</a>
-    <div class="bar-tools">
-      <details class="toc-pop">
-        <summary>{t.contents}</summary>
-        <div class="toc-pop-panel"><Toc entries={toc} label={t.contents} lang={lang} /></div>
+    <a class="brand" href={base} title={t.tupleCaption}>
+      <span lang="en"><span class="b-long">paper<span class="b-p">:</span></span>zanzibar<span class="b-long"
+        ><span class="b-p">#</span>translation</span
+      ><span class="b-p">@</span><span class="b-user">{lang}</span></span>
+    </a>
+    <span class="progress-num in-bar" aria-hidden="true" data-js-only hidden>0%</span>
+    <nav class="bar-tools" aria-label={t.view}>
+      <details class="toc-pop pop">
+        <summary>
+          {t.contents}
+          <span class="progress-num in-toc" aria-hidden="true" data-js-only hidden>0%</span>
+          <svg class="chev" viewBox="0 0 10 6" aria-hidden="true" width="10" height="6"
+            ><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"></path></svg
+          >
+        </summary>
+        <div class="pop-panel toc-pop-panel"><Toc entries={toc} label={t.contents} lang={lang} /></div>
       </details>
-      <LangMenu current={lang} label={t.language} display="name" class="bar-lang" />
-      <div class="seg" role="group" aria-label={t.view} data-js-only hidden>
-        <button type="button" data-set-view="both" aria-pressed="true">{t.viewBoth}</button>
-        <button type="button" data-set-view="original" aria-pressed="false">{t.viewOriginal}</button>
-        <button type="button" data-set-view="translation" aria-pressed="false">{t.viewTranslation}</button>
-      </div>
-      <label class="view-select" data-js-only hidden>
-        <span class="vh">{t.view}</span>
-        <select data-view-select>
-          <option value="both">{t.viewBoth}</option>
-          <option value="original">{t.viewOriginal}</option>
-          <option value="translation">{t.viewTranslation}</option>
-        </select>
-      </label>
-      <label class="theme" data-js-only hidden>
-        <span class="vh">{t.theme}</span>
-        <select data-theme-select>
-          <option value="system">{t.themeSystem}</option>
-          <option value="light">{t.themeLight}</option>
-          <option value="dark">{t.themeDark}</option>
-        </select>
-      </label>
-    </div>
+      <LangMenu current={lang} label={t.language} class="pop" />
+      <ViewMenu t={t} />
+    </nav>
+    <span class="progress" aria-hidden="true"><span class="progress-fill"></span></span>
   </header>
 
-  <main id="paper" data-lang={lang}>
-    <header class="masthead">
-      <div class="tuple-wrap">
-        <div class="tuple" lang="en">
-          <span class="seg-ns" title={t.tupleParts.namespace}>paper</span><span class="punct">:</span><span
-            class="seg-obj"
-            title={t.tupleParts.object}>zanzibar</span
-          ><span class="punct">#</span><span class="seg-rel" title={t.tupleParts.relation}>translation</span><span
-            class="punct">@</span
-          ><LangMenu current={lang} label={t.language} display="code" class="seg-user" />
-        </div>
-        <p class="tuple-caption">
-          {t.tupleCaption}
-          <span class="legend">
-            <span class="k k-ns">{t.tupleParts.namespace}</span>
-            <span class="k k-obj">{t.tupleParts.object}</span>
-            <span class="k k-rel">{t.tupleParts.relation}</span>
-            <span class="k k-user">{t.tupleParts.user}</span>
-          </span>
-        </p>
-      </div>
+  <div class="shell">
+    <aside class="rail"><Toc entries={toc} label={t.contents} lang={lang} /></aside>
 
-      <div class="title-row">
-        <p class="title-en" lang="en">{m.title}</p>
+    <main id="paper" data-lang={lang}>
+      <header class="masthead">
         <h1 class="title-tr" lang={lang}>{tr.meta.title}</h1>
-      </div>
+        <p class="title-en" lang="en">{m.title}</p>
 
-      <div class="byline" lang="en">
-        <p class="authors">
-          {
-            m.authors.map((a, i) => (
-              <>
-                <span class="author">
-                  {a.name}
-                  <sup>
-                    {a.aff.join(",")}
-                    {a.note ? "∗" : ""}
-                  </sup>
+        <div class="byline" lang="en">
+          <p class="authors">
+            {
+              m.authors.map((a, i) => (
+                <>
+                  <span class="author">
+                    {a.name}
+                    <sup>
+                      {a.aff.join(",")}
+                      {a.note ? "∗" : ""}
+                    </sup>
+                  </span>
+                  {i < m.authors.length - 1 ? ", " : ""}
+                </>
+              ))
+            }
+          </p>
+          <p class="affs">
+            {
+              m.affiliations.map((a, i) => (
+                <span>
+                  <sup>{i + 1}</sup>
+                  {a}
                 </span>
-                {i < m.authors.length - 1 ? ", " : ""}
-              </>
-            ))
-          }
+              ))
+            }
+          </p>
+          <p class="venue">{m.venue}</p>
+          <p class="author-note">
+            <span aria-hidden="true">∗ </span><span lang={noteTr === noteEn ? "en" : lang} set:html={renderInline(noteTr)} />
+            {noteTr !== noteEn && <span class="note-en"> ({noteEn})</span>}
+          </p>
+        </div>
+
+        <p class="howto" lang={lang}>
+          <span class="for-pointer">{t.howto}</span><span class="for-touch">{t.howtoTouch}</span>
         </p>
-        <p class="affs">
-          {
-            m.affiliations.map((a, i) => (
-              <span>
-                <sup>{i + 1}</sup>
-                {a}
-              </span>
-            ))
-          }
-        </p>
-        <p class="venue">{m.venue}</p>
+
+        <div class="provenance">
+          <p class="links">
+            <a href={m.source.usenix} rel="noopener" target="_blank">{t.readOriginal} (USENIX)</a>
+            <a href={m.source.google} rel="noopener" target="_blank">Google Research</a>
+            <a href={REPO_URL} rel="noopener" target="_blank">{t.sourceCode}</a>
+          </p>
+          <p class="notice">{t.notice} {t.aiNote}</p>
+        </div>
+      </header>
+
+      <div class="colheads" aria-hidden="true">
+        <span class="ch-en">{t.original}</span>
+        <span class="ch-tr" lang={lang}>{t.translation}</span>
       </div>
-
-      <div class="provenance">
-        <p class="links">
-          <a href={m.source.usenix} rel="noopener" target="_blank">{t.readOriginal} (USENIX)</a>
-          <a href={m.source.google} rel="noopener" target="_blank">Google Research</a>
-        </p>
-        <p class="notice">{t.notice}</p>
-        <p class="notice">{t.aiNote} <a href={issueUrl(lang)} rel="noopener" target="_blank">{t.fixLink}</a></p>
-      </div>
-    </header>
-
-    <div class="colheads" aria-hidden="true">
-      <span class="ch-en"><span class="ch-role">{t.original}</span><span class="ch-name" lang="en">English</span></span>
-      <span class="ch-tr"><span class="ch-role" lang={lang}>{t.translation}</span></span>
-    </div>
-
-    <div class="layout">
-      <aside class="rail"><Toc entries={toc} label={t.contents} lang={lang} /></aside>
 
       <article class="paper" data-script={L.script}>
         {
           rows.map((r) => (
             <div id={r.id} class:list={["row", `row-${r.type}`, r.shared !== undefined && "has-shared"]}>
-              {r.shared !== undefined && <div class="shared" set:html={r.shared} />}
+              {r.shared !== undefined && (
+                <div class="shared" lang={SHARED_EN.has(r.type) ? "en" : undefined} set:html={r.shared} />
+              )}
               {r.en !== undefined && <div class="cell cell-en" lang="en" set:html={r.en} />}
               {r.tr !== undefined && <div class="cell cell-tr" lang={lang} set:html={r.tr} />}
-              <a class="pl" href={`#${r.id}`} aria-label={`${t.permalink} (${r.id})`}>
-                ¶
-              </a>
+              <span class="pl">
+                <a href={`#${r.id}`} aria-label={`${t.permalink} (${r.id})`}>
+                  ¶
+                </a>
+                <a
+                  class="pl-report"
+                  href={issueUrl(lang, r.id)}
+                  rel="noopener"
+                  target="_blank"
+                  aria-label={t.reportParagraph}
+                  title={t.reportParagraph}
+                >
+                  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"
+                    ><path d="M3.5 14.5V2m0 0h8l-1.8 3 1.8 3h-8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"
+                    ></path></svg
+                  >
+                </a>
+              </span>
             </div>
           ))
         }
       </article>
-    </div>
-  </main>
+    </main>
 
-  <footer class="foot">
-    <p class="notice">{t.notice}</p>
-    <p>
-      <a href={REPO_URL} rel="noopener" target="_blank">{t.sourceCode}</a>
-      <a href={issueUrl(lang)} rel="noopener" target="_blank">{t.fixLink}</a>
-      <a href="#paper">{t.backToTop}</a>
-    </p>
-    <p class="other-langs" lang="en">
-      {
-        TRANSLATIONS.filter((l) => l.code !== lang).map((l) => (
-          <a href={withBase(`${l.code}/`)} hreflang={l.code} lang={l.code}>
-            {l.native}
-          </a>
-        ))
-      }
-    </p>
-  </footer>
+    <footer class="foot">
+      <p>
+        <a href={REPO_URL} rel="noopener" target="_blank">{t.sourceCode}</a>
+        <a href={issueUrl(lang)} rel="noopener" target="_blank">{t.fixLink}</a>
+        <a href="#paper">{t.backToTop}</a>
+      </p>
+      <p class="other-langs">
+        {
+          TRANSLATIONS.filter((l) => l.code !== lang).map((l) => (
+            <a href={withBase(`${l.code}/`)} hreflang={l.code} lang={l.code} data-lang-link>
+              {l.native}
+            </a>
+          ))
+        }
+      </p>
+    </footer>
+  </div>
+
+  <div class="cite-tip" role="tooltip" id="cite-tip" lang="en" data-go={t.goToReference} data-back={t.backToText} hidden></div>
 
   <script>
     import "../../scripts/reader.ts";

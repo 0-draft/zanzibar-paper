@@ -8,9 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push supersedes an older run everywhere, main included, so an older
+# run can never deploy after a newer one.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -167,7 +169,7 @@ jobs:
       # resolve against a root one level above the build output.
       - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
-          args: --offline --include-fragments --no-progress --root-dir "${{ github.workspace }}/site" 'site/**/*.html'
+          args: --offline --include-fragments --index-files index.html --no-progress --root-dir "${{ github.workspace }}/site" 'site/**/*.html'
           fail: true
 
   workflows:
@@ -187,7 +189,7 @@ jobs:
 
   deploy:
     name: Deploy (GitHub Pages)
-    needs: [lint, prose, content, typecheck, test, build, e2e, links]
+    needs: [lint, prose, content, typecheck, test, audit, build, e2e, links, workflows]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

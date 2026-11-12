@@ -2,12 +2,23 @@
  * zanzibar-paper
  *
  * Colour comes from the paper's own Figure 2: client blue, server yellow and
- * Spanner green are the only tints, and each keeps one meaning here.
- *   blue   — where you are (linked/targeted paragraph, current section)
- *   yellow — the paragraph pair under the pointer
+ * Spanner green are the only tints, and each keeps one meaning everywhere.
+ *   blue   — where you are (current language, linked paragraph, current section,
+ *            progress, your text selection, "you" in the tuple headline)
+ *   yellow — what is under the pointer (a paragraph pair, a menu item)
  *   green  — stored notation (code, tuples, grammar)
- * The original is set in a serif, every translation in a sans, so either
+ * The original is set in a serif and every translation in a sans, so either
  * column is recognisable at a glance.
+ *
+ * Scales: radii 4 / 8 px; spacing .25 .5 .75 1 1.5 2 3 rem; small text
+ * .8 / .875 rem.
+ *
+ * Layout state lives on <html>:
+ *   data-view   both | original | translation
+ *   data-layout side | stacked          (narrow screens are always stacked)
+ *   data-first  original | translation  (unset: original left, translation on top when stacked)
+ *   data-size   s | l                   (unset: medium)
+ *   data-in-refs                        (reading the reference list)
  */
 
 :root {
@@ -20,10 +31,10 @@
   --client: #cfe2f3;
   --server: #fff2cc;
   --store: #d9ead3;
-  --store-ink: #274e13;
   --link: #1d5ca8;
   --plate: #ffffff;
-  --bar-bg: rgb(252 252 251 / 0.92);
+  --plate-filter: none;
+  --shadow: 0 12px 32px -14px rgb(0 0 0 / 0.35);
 
   --serif: "Literata Variable", "Literata", Georgia, "Times New Roman", serif;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -37,9 +48,16 @@
   --sans-tc: "IBM Plex Sans", "PingFang TC", "Noto Sans TC", "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  --measure: 36rem;
+  --r1: 4px;
+  --r2: 8px;
+  --fs-xs: 0.8rem;
+  --fs-s: 0.875rem;
+  --gutter: clamp(1rem, 3vw, 2.5rem);
   --gap: clamp(1.5rem, 3vw, 3rem);
+  --pl-w: 1.75rem;
+  --single: 42em;
   --bar-h: 3.25rem;
+  --target-offset: calc(var(--bar-h) + env(safe-area-inset-top, 0px) + 2.75rem);
 
   color-scheme: light;
 }
@@ -49,16 +67,16 @@
     --paper: #15181d;
     --ink: #e2e5e9;
     --ink-2: #a3abb6;
-    --ink-3: #7c8591;
+    --ink-3: #8a929d;
     --rule: #2b3139;
     --rule-strong: #8e959e;
-    --client: rgb(111 168 220 / 0.2);
+    --client: rgb(111 168 220 / 0.22);
     --server: rgb(241 194 50 / 0.13);
     --store: rgb(147 196 125 / 0.16);
-    --store-ink: #b6d7a8;
     --link: #8fbcf2;
-    --plate: #f4f5f6;
-    --bar-bg: rgb(21 24 29 / 0.9);
+    --plate: #d9dde2;
+    --plate-filter: brightness(0.86) contrast(0.95);
+    --shadow: 0 12px 32px -14px rgb(0 0 0 / 0.8);
     color-scheme: dark;
   }
 }
@@ -66,16 +84,16 @@
   --paper: #15181d;
   --ink: #e2e5e9;
   --ink-2: #a3abb6;
-  --ink-3: #7c8591;
+  --ink-3: #8a929d;
   --rule: #2b3139;
   --rule-strong: #8e959e;
-  --client: rgb(111 168 220 / 0.2);
+  --client: rgb(111 168 220 / 0.22);
   --server: rgb(241 194 50 / 0.13);
   --store: rgb(147 196 125 / 0.16);
-  --store-ink: #b6d7a8;
   --link: #8fbcf2;
-  --plate: #f4f5f6;
-  --bar-bg: rgb(21 24 29 / 0.9);
+  --plate: #d9dde2;
+  --plate-filter: brightness(0.86) contrast(0.95);
+  --shadow: 0 12px 32px -14px rgb(0 0 0 / 0.8);
   color-scheme: dark;
 }
 
@@ -92,15 +110,6 @@ html {
   text-size-adjust: 100%;
 }
 
-/* Anchor targets clear the sticky bar and column heads. This is a margin on
-   the targets, not scroll-padding on the root: root scroll-padding also
-   applies to focusing controls inside the sticky bar and makes the page jump
-   when the language menu is opened. */
-.row,
-.refs li {
-  scroll-margin-top: calc(var(--bar-h) + env(safe-area-inset-top, 0px) + 2.75rem);
-}
-
 body {
   margin: 0;
   background: var(--paper);
@@ -109,20 +118,38 @@ body {
   font-size: 1rem;
   line-height: 1.6;
   font-kerning: normal;
-  padding-inline: max(1rem, env(safe-area-inset-left, 0px)) max(1rem, env(safe-area-inset-right, 0px));
+  padding-inline: max(var(--gutter), env(safe-area-inset-left, 0px)) max(var(--gutter), env(safe-area-inset-right, 0px));
 }
 
-:lang(ja) {
+/* Attribute selectors, not :lang(): :lang() matches every descendant directly
+   and would override the mono and KaTeX faces inside CJK text. These match
+   only the element that declares the language; children inherit. */
+[lang="ja"] {
   font-family: var(--sans-ja);
 }
-:lang(ko) {
+[lang="ko"] {
   font-family: var(--sans-ko);
 }
-:lang(zh-Hans) {
+[lang="zh-Hans"] {
   font-family: var(--sans-sc);
 }
-:lang(zh-Hant) {
+[lang="zh-Hant"] {
   font-family: var(--sans-tc);
+}
+[lang="en"] {
+  font-family: var(--sans);
+}
+.cell-en[lang="en"],
+.title-en,
+.byline,
+.refs,
+.cite-tip {
+  font-family: var(--serif);
+}
+
+::selection {
+  background: var(--client);
+  color: var(--ink);
 }
 
 a {
@@ -145,12 +172,14 @@ pre,
 kbd {
   font-family: var(--mono);
   font-size: 0.88em;
+  hyphens: manual;
 }
 
 img {
   max-width: 100%;
   height: auto;
 }
+
 [hidden] {
   display: none !important;
 }
@@ -164,11 +193,28 @@ img {
   white-space: nowrap;
 }
 
+.nobr {
+  white-space: nowrap;
+}
+
+.only-narrow,
+.for-touch {
+  display: none;
+}
+@media (hover: none) {
+  .for-pointer {
+    display: none;
+  }
+  .for-touch {
+    display: inline;
+  }
+}
+
 .skip {
   position: absolute;
   left: 1rem;
   top: -4rem;
-  z-index: 30;
+  z-index: 40;
   padding: 0.5rem 0.75rem;
   background: var(--paper);
   border: 1px solid var(--rule-strong);
@@ -177,82 +223,93 @@ img {
   top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
 }
 
+/* Anchor targets clear the sticky bar and column heads. This is a margin on
+   the targets, not scroll-padding on the root: root scroll-padding also
+   applies to focusing controls inside the sticky bar and makes the page jump
+   when a menu is opened. */
+.row,
+.refs li {
+  scroll-margin-top: var(--target-offset);
+}
+
 /* ── top bar ──────────────────────────────────────────────────────────── */
 
 .bar {
   position: sticky;
   top: 0;
-  z-index: 20;
-  margin-inline: calc(-1 * max(1rem, env(safe-area-inset-left, 0px)));
-  padding: env(safe-area-inset-top, 0px) max(1rem, env(safe-area-inset-right, 0px)) 0
-    max(1rem, env(safe-area-inset-left, 0px));
+  z-index: 30;
+  margin-inline: calc(-1 * max(var(--gutter), env(safe-area-inset-left, 0px)));
+  padding: env(safe-area-inset-top, 0px) max(var(--gutter), env(safe-area-inset-right, 0px)) 0
+    max(var(--gutter), env(safe-area-inset-left, 0px));
   min-height: var(--bar-h);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  background: var(--bar-bg);
-  backdrop-filter: saturate(1.4) blur(8px);
+  gap: 0.75rem;
+  background: var(--paper);
   border-bottom: 1px solid var(--rule);
-  font-size: 0.875rem;
+  font-size: var(--fs-s);
 }
 
+/* The page's address as a Zanzibar relation tuple doubles as the brand. */
 .brand {
   font-family: var(--mono);
-  font-weight: 500;
+  font-size: var(--fs-s);
   color: var(--ink);
   text-decoration: none;
   white-space: nowrap;
+}
+.brand .b-p {
+  color: var(--ink-3);
+}
+.brand .b-user {
+  background: var(--client);
+  border-radius: var(--r1);
+  padding: 0.05em 0.25em;
+}
+.brand:hover {
+  text-decoration: underline;
+}
+
+/* Reading progress: a hairline along the bottom of the bar and a quiet
+   number. Both are visual only (aria-hidden): the contents already mark the
+   current section for assistive tech. 0% is the start of the paper, 100% the
+   start of the references. */
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  pointer-events: none;
+}
+.progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--link);
+  transform-origin: 0 50%;
+  transform: scaleX(var(--read, 0));
+}
+.progress-num.in-toc {
+  display: none;
+}
+.progress-num {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  min-width: 4ch;
+  text-align: right;
 }
 
 .bar-tools {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
   padding-block: 0.375rem;
 }
 
-.seg {
-  display: inline-flex;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.seg button {
-  font: inherit;
-  color: var(--ink-2);
-  background: transparent;
-  border: 0;
-  padding: 0.3rem 0.65rem;
-  cursor: pointer;
-}
-.seg button + button {
-  border-left: 1px solid var(--rule);
-}
-.seg button[aria-pressed="true"] {
-  color: var(--ink);
-  background: var(--client);
-}
-
-.view-select {
-  display: none;
-}
-.theme select,
-.view-select select,
-.toc-pop > summary,
-.bar-lang > summary {
-  font: inherit;
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  padding: 0.3rem 0.6rem;
-  cursor: pointer;
-}
-
-/* ── disclosures (language menu, contents pop-over) ───────────────────── */
+/* ── pop-overs: contents, language, view ──────────────────────────────── */
 
 details > summary {
   list-style: none;
@@ -261,50 +318,65 @@ details > summary::-webkit-details-marker {
   display: none;
 }
 
-.langmenu,
-.toc-pop {
+.pop {
   position: relative;
 }
-.langmenu > summary {
+.pop > summary {
   display: inline-flex;
   align-items: center;
   gap: 0.4em;
+  min-height: 2.25rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--r1);
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pop > summary:hover {
+  background: var(--server);
+}
+.pop[open] > summary {
+  border-color: var(--rule-strong);
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
 }
 .chev {
   transition: transform 0.15s;
 }
-.langmenu[open] .chev {
+.pop[open] .chev {
   transform: rotate(180deg);
 }
 
-.langmenu-list,
-.toc-pop-panel {
+.pop-panel {
   position: absolute;
   right: 0;
-  top: calc(100% + 0.4rem);
-  z-index: 25;
+  top: calc(100% + 0.5rem);
+  z-index: 35;
   margin: 0;
-  padding: 0.35rem;
-  list-style: none;
+  padding: 0.5rem;
   background: var(--paper);
   border: 1px solid var(--rule-strong);
-  border-radius: 8px;
-  box-shadow: 0 10px 30px -12px rgb(0 0 0 / 0.35);
+  border-radius: var(--r2);
+  box-shadow: var(--shadow);
   font-family: var(--sans);
-  font-size: 0.9rem;
+  font-size: var(--fs-s);
   line-height: 1.4;
 }
+
 .langmenu-list {
-  min-width: 15rem;
+  list-style: none;
+  min-width: 17rem;
 }
 .langmenu-list a {
-  display: grid;
-  grid-template-columns: 4.5rem 1fr;
-  gap: 0.5rem;
-  padding: 0.4rem 0.6rem;
-  border-radius: 5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--r1);
   color: var(--ink);
   text-decoration: none;
+  white-space: nowrap;
 }
 .langmenu-list a:hover {
   background: var(--server);
@@ -314,8 +386,8 @@ details > summary::-webkit-details-marker {
 }
 .langmenu-list .code {
   font-family: var(--mono);
-  font-size: 0.85em;
-  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
 }
 
 .toc-pop-panel {
@@ -324,143 +396,111 @@ details > summary::-webkit-details-marker {
   overflow: auto;
 }
 
-/* ── masthead ─────────────────────────────────────────────────────────── */
-
-main,
-.foot {
-  max-width: 78rem;
-  margin-inline: auto;
+.viewmenu-panel {
+  width: min(19rem, calc(100vw - 2rem));
+  padding: 0.5rem 0.75rem 0.75rem;
 }
-
-.masthead {
-  padding-block: clamp(2.5rem, 7vw, 5.5rem) 2.5rem;
-}
-
-.tuple-wrap {
-  margin-bottom: clamp(2.5rem, 6vw, 4rem);
-}
-
-/* The one loud element: the page's own address as a relation tuple. */
-.tuple {
+.viewmenu-panel fieldset {
   margin: 0;
-  font-family: var(--mono);
-  font-weight: 400;
-  font-size: clamp(1.3rem, 4.6vw, 3.4rem);
-  line-height: 1.25;
-  letter-spacing: -0.02em;
-  overflow-wrap: anywhere;
-  color: var(--ink);
+  padding: 0.25rem 0 0.5rem;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
 }
-.tuple > span,
-.tuple .seg-user > summary {
-  border-radius: 0.12em;
-  padding-inline: 0.06em;
+.viewmenu-panel fieldset:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
 }
-.seg-ns {
-  background: var(--store);
+.viewmenu-panel legend {
+  padding: 0.25rem 0;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
 }
-.seg-obj {
-  background: var(--server);
-}
-.seg-rel {
-  box-shadow: inset 0 -0.09em 0 var(--rule-strong);
-}
-.tuple .punct {
-  color: var(--ink-3);
-  padding-inline: 0.02em;
-}
-.tuple .seg-user {
-  display: inline-block;
-  vertical-align: baseline;
-}
-.tuple .seg-user > summary {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.18em;
-  background: var(--client);
+.viewmenu-panel label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  padding: 0 0.25rem;
+  border-radius: var(--r1);
   cursor: pointer;
 }
-.tuple .seg-user > summary .chev {
-  width: 0.32em;
-  height: 0.2em;
-  align-self: center;
-}
-.tuple .seg-user .langmenu-list {
-  left: 0;
-  right: auto;
-  font-size: 1rem;
-  letter-spacing: normal;
-}
-
-.tuple-caption {
-  margin: 1rem 0 0;
-  color: var(--ink-2);
-  font-size: 0.9rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  align-items: baseline;
-}
-.legend {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-.k {
-  font-size: 0.8rem;
-  padding: 0.05rem 0.45rem;
-  border-radius: 3px;
-  color: var(--ink);
-}
-.k-ns {
-  background: var(--store);
-}
-.k-obj {
+.viewmenu-panel label:hover {
   background: var(--server);
 }
-.k-rel {
-  box-shadow: inset 0 -2px 0 var(--rule-strong);
+.viewmenu-panel .sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.25rem;
 }
-.k-user {
-  background: var(--client);
+.viewmenu-panel .sizes legend {
+  width: 100%;
+}
+.viewmenu-panel .sizes label {
+  flex: 1;
+}
+.viewmenu-panel input {
+  accent-color: var(--link);
+  margin: 0;
 }
 
-.title-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--gap);
-  align-items: start;
-  padding-top: 2rem;
-  border-top: 2px solid var(--rule-strong);
+/* ── shell: contents rail + paper ─────────────────────────────────────── */
+
+.shell {
+  max-width: 76rem;
+  margin-inline: auto;
 }
-.title-en,
+.rail {
+  display: none;
+}
+
+/* ── masthead ─────────────────────────────────────────────────────────── */
+
+.masthead {
+  padding-block: clamp(2.5rem, 6vw, 4.5rem) 2rem;
+  max-width: 52rem;
+}
+
 .title-tr {
   margin: 0;
-  font-weight: 400;
+  font-size: clamp(1.85rem, 4vw, 2.9rem);
+  font-weight: 600;
   line-height: 1.2;
+  letter-spacing: -0.01em;
   text-wrap: balance;
 }
-.title-en {
-  font-family: var(--serif);
-  font-size: clamp(1.6rem, 3.2vw, 2.5rem);
-  font-variation-settings: "opsz" 60;
-  letter-spacing: -0.01em;
+.title-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) {
+  letter-spacing: 0;
+  line-height: 1.3;
+  line-break: strict;
 }
-.title-tr {
-  font-size: clamp(1.45rem, 2.9vw, 2.25rem);
-  font-weight: 600;
-  letter-spacing: -0.005em;
+.title-tr[lang="ja"] {
+  word-break: auto-phrase;
+}
+.title-tr[lang="ko"] {
+  word-break: keep-all;
+}
+.title-tr:is([lang="zh-Hans"], [lang="zh-Hant"]) {
+  font-feature-settings: "halt";
+}
+.title-en {
+  margin: 0.75rem 0 0;
+  font-size: clamp(1.15rem, 2vw, 1.45rem);
+  font-variation-settings: "opsz" 36;
+  line-height: 1.3;
+  color: var(--ink-2);
+  text-wrap: balance;
 }
 
 .byline {
-  margin-top: 1.75rem;
-  font-family: var(--serif);
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 2px solid var(--rule-strong);
   color: var(--ink-2);
   font-size: 0.95rem;
   line-height: 1.55;
 }
 .byline p {
-  margin: 0.2rem 0;
+  margin: 0.25rem 0;
 }
 .authors {
   color: var(--ink);
@@ -472,160 +512,246 @@ main,
 .affs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 1.1rem;
+  gap: 0 1rem;
 }
 .venue {
   font-style: italic;
 }
+.author-note {
+  font-size: var(--fs-s);
+}
+
+.howto {
+  margin: 1.5rem 0 0;
+  color: var(--ink);
+}
 
 .provenance {
-  margin-top: 1.5rem;
-  max-width: 52rem;
-  font-size: 0.875rem;
+  margin-top: 0.75rem;
+  font-size: var(--fs-s);
   color: var(--ink-2);
 }
 .provenance p {
-  margin: 0.35rem 0;
+  margin: 0.5rem 0;
 }
 .provenance .links {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 1.25rem;
-  font-size: 0.95rem;
+  gap: 0.25rem 1.5rem;
 }
 
-/* ── column heads ─────────────────────────────────────────────────────── */
+/* ── column heads (side by side, both texts) ──────────────────────────── */
 
 .colheads {
   position: sticky;
   top: calc(var(--bar-h) + env(safe-area-inset-top, 0px));
-  z-index: 10;
+  z-index: 20;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--gap);
-  padding: 0.55rem 0 0.45rem;
+  padding: 0.5rem var(--pl-w) 0.5rem 0;
   background: var(--paper);
   border-bottom: 1px solid var(--rule);
-  font-size: 0.8rem;
+  font-size: var(--fs-xs);
+  font-weight: 600;
   color: var(--ink-2);
 }
-.colheads > span {
-  display: flex;
-  gap: 0.6rem;
-  align-items: baseline;
-}
-.ch-role {
-  color: var(--ink);
-  font-weight: 600;
-}
-.ch-en .ch-role {
+.ch-en {
+  grid-column: 1;
+  grid-row: 1;
   font-family: var(--serif);
   font-weight: 500;
 }
-
-/* ── reading layout ───────────────────────────────────────────────────── */
-
-.layout {
-  display: block;
+.ch-tr {
+  grid-column: 2;
+  grid-row: 1;
 }
-.rail {
+html[data-first="translation"] .ch-en {
+  grid-column: 2;
+}
+html[data-first="translation"] .ch-tr {
+  grid-column: 1;
+}
+html:not([data-layout="side"]) .colheads,
+html:not([data-view="both"]) .colheads,
+html[data-in-refs] .colheads {
   display: none;
 }
 
+/* ── rows ─────────────────────────────────────────────────────────────── */
+
 .paper {
-  padding-block: 1.5rem 4rem;
+  padding-block: 1rem 4rem;
+  font-size: var(--size, 1rem);
+}
+html[data-size="s"] {
+  --size: 0.92rem;
+}
+html[data-size="l"] {
+  --size: 1.12rem;
 }
 
+/* One grid row per block. The right edge keeps room for the permalink, so
+   it never sits on text. Hover and arrival tint spill past the box with a
+   box-shadow, which keeps the columns aligned with the column heads. */
 .row {
   position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: var(--gap);
   align-items: start;
-  border-radius: 6px;
-  padding: 0.15rem 0.5rem;
-  margin-inline: -0.5rem;
-  transition: background-color 0.12s;
+  padding-right: var(--pl-w);
+  border-radius: var(--r1);
+  transition:
+    background-color 0.12s,
+    box-shadow 0.12s;
 }
-.row:hover {
-  background: color-mix(in srgb, var(--server) 55%, transparent);
+@media (hover: hover) {
+  .row:not(.row-refs):hover {
+    --tint: color-mix(in srgb, var(--server) 60%, transparent);
+    background: var(--tint);
+    box-shadow: 0 0 0 0.5rem var(--tint);
+  }
 }
-.row:target {
-  background: var(--client);
+/* the paragraph you arrived at: a lasting marker, and a brief tint once the
+   page has settled (reader.ts adds .arrived) */
+.row:target::before,
+.refs li:target::before {
+  content: "";
+  position: absolute;
+  left: -0.75rem;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--link);
+}
+.arrived {
+  animation: arrived 2.4s ease-out;
+}
+@keyframes arrived {
+  0%,
+  40% {
+    background: var(--client);
+    box-shadow: 0 0 0 0.5rem var(--client);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 0.5rem transparent;
+  }
 }
 
 .cell {
   min-width: 0;
-}
-.cell-en {
   grid-column: 1;
-  font-family: var(--serif);
-  font-size: 1.0625rem;
-  line-height: 1.66;
-  font-variation-settings: "opsz" 16;
-  hyphens: auto;
+  grid-row: 1;
 }
 .cell-tr {
   grid-column: 2;
-  font-size: 1rem;
-  line-height: 1.75;
 }
-.cell-tr:lang(ja),
-.cell-tr:lang(zh-Hans),
-.cell-tr:lang(zh-Hant),
-.cell-tr:lang(ko) {
-  line-height: 1.9;
+.shared {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+}
+.has-shared > .cell {
+  grid-row: 2;
+}
+html[data-first="translation"] .cell-en {
+  grid-column: 2;
+}
+html[data-first="translation"] .cell-tr {
+  grid-column: 1;
+}
+
+/* Original: serif. Translation: sans. Sizes are tuned so the two columns
+   carry a similar visual weight (Literata runs large). */
+.cell-en {
+  font-size: 1em;
+  line-height: 1.62;
+  font-variation-settings: "opsz" 14;
+  hyphens: auto;
+}
+.cell-tr {
+  font-size: 1em;
+  line-height: 1.66;
+  hyphens: auto;
+}
+.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) {
+  font-size: 1.0625em;
+  line-height: 1.85;
   line-break: strict;
   overflow-wrap: anywhere;
   hyphens: none;
 }
-.cell-tr:lang(ko),
-.title-tr:lang(ko),
-.toc :lang(ko) {
+.cell-tr[lang="ko"],
+.toc[lang="ko"],
+.toc [lang="ko"] {
   word-break: keep-all;
 }
-.cell-tr:not(:lang(ja), :lang(zh-Hans), :lang(zh-Hant), :lang(ko)) {
-  hyphens: auto;
+/* CJK has no italic. Emphasis on CJK words becomes emphasis dots (傍点 /
+   着重号); Latin words inside CJK text keep their italic. */
+.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) em:not(.latin) {
+  font-style: normal;
+  text-emphasis: filled dot;
+  text-emphasis-color: var(--ink-3);
 }
-
-.shared {
-  grid-column: 1 / -1;
-  min-width: 0;
+.cell-tr:is([lang="zh-Hans"], [lang="zh-Hant"]) em:not(.latin) {
+  text-emphasis-position: under right;
+}
+.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) .caption {
+  font-style: normal;
 }
 
 .cell > :first-child,
 .shared > :first-child {
-  margin-top: 0.6rem;
+  margin-top: 0.5rem;
 }
 .cell > :last-child,
 .shared > :last-child {
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.5rem;
 }
 .cell p,
 .cell ul,
 .cell ol {
-  margin-block: 0.6rem;
+  margin-block: 0.5rem;
 }
 
-/* permalink in the gutter between the two columns */
+/* permalink and report link: top right of every row, shown on hover/focus */
 .pl {
   position: absolute;
-  left: calc(50% - 0.3rem);
-  top: 0.75rem;
+  right: 0;
+  top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: var(--pl-w);
   font-family: var(--serif);
-  font-size: 0.95rem;
-  line-height: 1;
+  font-size: 0.9rem;
+  line-height: 1.2;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.pl a {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
   color: var(--ink-3);
   text-decoration: none;
-  opacity: 0;
+  border-radius: var(--r1);
+}
+.pl a:hover {
+  color: var(--ink);
+  background: var(--paper);
 }
 .row:hover .pl,
-.pl:focus-visible {
+.row:focus-within .pl,
+.row:target .pl {
   opacity: 1;
 }
-html[data-view="original"] .pl,
-html[data-view="translation"] .pl {
-  left: calc(50% - var(--measure-single, 44rem) / 2 - 1.4rem);
+.row-heading .pl {
+  top: 0;
 }
 
 /* headings */
@@ -642,7 +768,7 @@ html[data-view="translation"] .pl {
   margin-top: 0;
 }
 .row-heading {
-  padding-top: 0.6rem;
+  padding-top: 0.5rem;
   padding-bottom: 0.25rem;
 }
 .cell h2 {
@@ -664,12 +790,16 @@ html[data-view="translation"] .pl {
 }
 .row-heading:has(h2) {
   margin-top: 3rem;
-  padding-top: 1.1rem;
+  padding-top: 1rem;
   border-top: 1px solid var(--rule-strong);
   border-radius: 0;
 }
+.paper > .row:first-child {
+  margin-top: 0;
+  border-top: 0;
+}
 .row-heading:has(h3) {
-  margin-top: 1.75rem;
+  margin-top: 2rem;
 }
 .row-heading:has(h4) {
   margin-top: 1rem;
@@ -696,34 +826,29 @@ html[data-view="translation"] .pl {
 
 /* the "new enemy" examples */
 .example {
-  margin-block: 0.8rem;
+  margin-block: 0.75rem;
   padding: 0.25rem 0 0.25rem 1rem;
   border-left: 3px solid var(--rule-strong);
 }
 .cell .example .example-title {
   font-weight: 600;
-  margin-block: 0.4rem 0.2rem;
+  margin-block: 0.5rem 0.25rem;
 }
-.cell-en .example-title {
+.cell-en .example .example-title {
   font-weight: 560;
-}
-
-.note {
-  font-size: 0.9em;
-  color: var(--ink-2);
 }
 
 /* inline notation */
 .cell code {
   padding: 0.05em 0.3em;
-  border-radius: 3px;
+  border-radius: var(--r1);
   background: var(--store);
   color: var(--ink);
   font-size: 0.86em;
   overflow-wrap: anywhere;
 }
 .cell-en code {
-  font-size: 0.82em;
+  font-size: 0.84em;
 }
 .cell a.cite {
   font-variant-numeric: tabular-nums;
@@ -737,20 +862,20 @@ html[data-view="translation"] .pl {
   font-size: 1em;
 }
 
-/* shared blocks: grammar, display math, code, figures, references */
+/* shared blocks: grammar, display math, code, figures, tables, references */
 .grammar {
   display: grid;
   grid-template-columns: max-content max-content 1fr;
-  gap: 0.25rem 0.9rem;
-  margin: 0.8rem auto;
-  padding: 0.9rem 1.2rem;
+  gap: 0.25rem 1rem;
+  margin: 0.75rem auto;
+  padding: 1rem 1.25rem;
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
   font-family: var(--mono);
   font-size: 0.92rem;
   background: var(--store);
-  border-radius: 6px;
+  border-radius: var(--r2);
 }
 .grammar > div {
   display: contents;
@@ -764,40 +889,46 @@ html[data-view="translation"] .pl {
 }
 
 .math {
-  margin: 0.6rem 0;
+  margin: 0.5rem 0;
   overflow-x: auto;
   overflow-y: hidden;
   padding-block: 0.25rem;
 }
 .math .katex-display {
-  margin: 0.6rem 0;
+  margin: 0.5rem 0;
 }
 
 .codeblock {
-  margin: 0.8rem auto 0.2rem;
+  margin: 0.75rem auto 0.25rem;
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
   padding: 1rem 1.25rem;
-  font-size: 0.86rem;
+  font-size: var(--fs-s);
   line-height: 1.5;
   background: var(--store);
   color: var(--ink);
-  border-radius: 6px;
+  border-radius: var(--r2);
 }
 
 .plate {
+  display: block;
   margin: 1rem auto 0.25rem;
   padding: clamp(0.5rem, 2vw, 1.25rem);
   background: var(--plate);
   border: 1px solid var(--rule);
-  border-radius: 8px;
+  border-radius: var(--r2);
   width: fit-content;
   max-width: 100%;
+  cursor: zoom-in;
 }
-.row-figure .plate img {
+.plate:hover {
+  border-color: var(--rule-strong);
+}
+.plate img {
   display: block;
   width: 100%;
+  filter: var(--plate-filter);
 }
 #fig-2 .plate {
   width: min(100%, 52rem);
@@ -809,34 +940,36 @@ html[data-view="translation"] .pl {
 }
 
 .has-shared .cell {
-  font-size: 0.9rem;
+  font-size: var(--fs-s);
   color: var(--ink-2);
 }
 .cell > .caption,
 .cell > .caption:first-child,
 .cell > .caption:last-child {
-  margin-block: 0.4rem 1rem;
+  margin-block: 0.5rem 1rem;
 }
-.row-figure .cell-en .caption,
-.row-code .cell-en .caption {
+.cell-en > .caption {
   font-style: italic;
 }
 
+.row-refs .shared {
+  margin-top: 0.5rem;
+}
 .refs {
-  margin: 0.5rem 0 0;
-  padding-left: 2.6rem;
-  columns: 2 26rem;
+  margin: 0;
+  padding-left: 2.5rem;
+  columns: 2 24rem;
   column-gap: var(--gap);
-  font-family: var(--serif);
   font-size: 0.9rem;
   line-height: 1.5;
   color: var(--ink-2);
 }
 .refs li {
+  position: relative;
   break-inside: avoid;
-  margin-bottom: 0.55rem;
-  padding: 0.1rem 0.25rem;
-  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  padding: 0.125rem 0.25rem;
+  border-radius: var(--r1);
   overflow-wrap: anywhere;
 }
 .refs li::marker {
@@ -845,30 +978,42 @@ html[data-view="translation"] .pl {
   font-size: 0.85em;
   color: var(--ink-3);
 }
-.refs li:target {
-  background: var(--client);
+.refs .ti {
   color: var(--ink);
+}
+.refs .back {
+  text-decoration: none;
+  font-family: var(--sans);
+}
+@media (hover: hover) {
+  .refs li:hover {
+    background: var(--server);
+  }
 }
 
 /* tables */
 .table {
-  margin: 0.8rem 0;
+  margin: 0.75rem 0;
 }
 .table .scroll {
   overflow-x: auto;
 }
 .table table {
   border-collapse: collapse;
-  font-size: 0.86rem;
+  font-size: var(--fs-s);
   line-height: 1.45;
   width: 100%;
 }
 .table th,
 .table td {
-  padding: 0.4rem 0.6rem 0.4rem 0;
+  padding: 0.5rem 0.75rem 0.5rem 0;
   text-align: left;
   vertical-align: top;
   border-bottom: 1px solid var(--rule);
+}
+.table th {
+  hyphens: manual;
+  white-space: nowrap;
 }
 .table thead tr:last-child th {
   border-bottom: 1.5px solid var(--rule-strong);
@@ -876,22 +1021,40 @@ html[data-view="translation"] .pl {
 .table tbody tr:last-child > * {
   border-bottom: 1.5px solid var(--rule-strong);
 }
-.table th {
-  hyphens: manual;
+.shared .table {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+}
+.table-tuples td.c-tuple {
   white-space: nowrap;
 }
-.table-tuples td:first-child {
-  white-space: nowrap;
+.table-tuples .c-en {
+  font-family: var(--serif);
+}
+html[data-view="original"] .table-tuples .c-tr,
+html[data-view="translation"] .table-tuples .c-en,
+.table-tuples .h-en,
+html[data-view="original"] .table-tuples .h-tr {
+  display: none;
+}
+html[data-view="original"] .table-tuples .h-en {
+  display: inline;
+}
+.table-latency table {
+  width: auto;
 }
 .table-latency td.n {
   font-family: var(--mono);
-  font-size: 0.82rem;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-align: right;
+  padding-left: 1.5rem;
 }
 .table-latency thead th:nth-child(n + 3) {
   text-align: right;
+  padding-left: 1.5rem;
 }
 .table-latency .span-title th {
   text-align: center;
@@ -905,16 +1068,62 @@ html[data-view="translation"] .pl {
   font-weight: 500;
   color: var(--ink-2);
 }
-.table-latency tr.group-start > * {
+.table-latency tbody + tbody tr:first-child > * {
   border-top: 1.5px solid var(--rule-strong);
 }
 .table figcaption {
   margin-top: 0.5rem;
-  font-size: 0.86rem;
+  font-size: var(--fs-s);
   color: var(--ink-2);
 }
-.cell-en .table figcaption {
-  font-style: italic;
+
+/* blocks set once in both languages (the latency table): the original only
+   in the original-only view, the translation otherwise */
+.shared .v-en,
+html[data-view="original"] .shared .v-tr {
+  display: none;
+}
+html[data-view="original"] .shared .v-en {
+  display: block;
+}
+
+/* ── citation preview ─────────────────────────────────────────────────── */
+
+.cite-tip {
+  position: absolute;
+  z-index: 40;
+  padding: 0.75rem 1rem;
+  background: var(--paper);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r2);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-s);
+  line-height: 1.5;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.cite-tip .n {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+.cite-tip .ti {
+  color: var(--ink);
+  font-weight: 600;
+}
+.cite-tip.sheet {
+  position: fixed;
+  left: max(1rem, env(safe-area-inset-left, 0px));
+  right: max(1rem, env(safe-area-inset-right, 0px));
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  max-height: 50vh;
+  overflow: auto;
+}
+.cite-tip .go {
+  display: block;
+  margin-top: 0.5rem;
+  padding-block: 0.5rem;
+  font-family: var(--sans);
 }
 
 /* ── contents ─────────────────────────────────────────────────────────── */
@@ -926,9 +1135,10 @@ html[data-view="translation"] .pl {
 }
 .toc a {
   display: flex;
-  gap: 0.55rem;
-  padding: 0.28rem 0.5rem;
-  border-radius: 5px;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--r1);
   color: var(--ink);
   text-decoration: none;
   line-height: 1.35;
@@ -944,12 +1154,12 @@ html[data-view="translation"] .pl {
   min-width: 1.6rem;
 }
 .toc .lv2 {
-  margin-top: 0.3rem;
+  margin-top: 0.25rem;
   font-weight: 600;
 }
 .toc .lv3 a {
-  padding-left: 1.4rem;
-  font-size: 0.9em;
+  padding-left: 1.5rem;
+  font-size: 0.92em;
   color: var(--ink-2);
 }
 .toc .lv3 a[aria-current] {
@@ -959,179 +1169,211 @@ html[data-view="translation"] .pl {
 /* ── footer ───────────────────────────────────────────────────────────── */
 
 .foot {
-  padding: 2rem 0 calc(3rem + env(safe-area-inset-bottom, 0px));
+  padding: 1.5rem 0 calc(3rem + env(safe-area-inset-bottom, 0px));
   border-top: 2px solid var(--rule-strong);
-  font-size: 0.875rem;
+  font-size: var(--fs-s);
   color: var(--ink-2);
 }
 .foot p {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3rem 1.25rem;
-  margin: 0.6rem 0;
-}
-.foot .notice {
-  display: block;
-  max-width: 52rem;
+  gap: 0.25rem 1.5rem;
+  margin: 0.5rem 0;
 }
 
-/* ── view modes ───────────────────────────────────────────────────────── */
+/* ── one text only: a single centred column ───────────────────────────── */
 
 html[data-view="original"] .cell-tr,
-html[data-view="original"] .ch-tr,
-html[data-view="translation"] .cell-en,
-html[data-view="translation"] .ch-en,
-html[data-view="original"] .title-tr,
-html[data-view="translation"] .title-en {
+html[data-view="translation"] .cell-en {
   display: none;
 }
-html[data-view="original"] .row,
-html[data-view="translation"] .row,
-html[data-view="original"] .colheads,
-html[data-view="translation"] .colheads,
-html[data-view="original"] .title-row,
-html[data-view="translation"] .title-row {
-  grid-template-columns: minmax(0, var(--measure-single, 44rem));
+html:not([data-view="both"]) .row {
+  grid-template-columns: minmax(0, var(--single));
   justify-content: center;
 }
-html[data-view="original"] .cell,
-html[data-view="translation"] .cell {
+html:not([data-view="both"]) .row > :not(.pl) {
   grid-column: 1;
 }
-html[data-view="original"] .title-en,
-html[data-view="translation"] .title-tr {
-  grid-column: 1;
+/* one column of the original alone: about 66 characters a line */
+html[data-view="original"] {
+  --single: 37em;
 }
-html[data-view="original"] .shared,
-html[data-view="translation"] .shared {
-  grid-column: 1;
+/* CJK alone: about 38 characters a line (JLReq: at most 40) */
+html[data-view="translation"]:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) {
+  --single: 40.5em;
 }
 
-/* ── wide: contents rail ──────────────────────────────────────────────── */
+/* ── stacked: one column, the pair one above the other ────────────────── */
 
-@media (min-width: 88rem) {
-  main {
+html[data-layout="stacked"] .row {
+  grid-template-columns: minmax(0, var(--single));
+  justify-content: center;
+}
+html[data-layout="stacked"] .row > :not(.pl) {
+  grid-column: 1;
+  grid-row: auto;
+}
+html[data-layout="stacked"] .shared {
+  order: 0;
+}
+html[data-layout="stacked"]:not([data-first="original"]) .cell-tr,
+html[data-layout="stacked"][data-first="original"] .cell-en {
+  order: 1;
+}
+/* the second text of the pair reads as a quiet companion: colour only */
+html[data-layout="stacked"][data-view="both"]:not([data-first="original"]) .cell-en,
+html[data-layout="stacked"][data-view="both"][data-first="original"] .cell-tr {
+  order: 2;
+  margin-top: -0.25rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.92em;
+  color: var(--ink-2);
+}
+html[data-layout="stacked"][data-view="both"]:not([data-first="original"]) .row-heading .cell-en > *,
+html[data-layout="stacked"][data-view="both"][data-first="original"] .row-heading .cell-tr > * {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+html[data-layout="stacked"][data-view="both"]:not([data-first="original"]) .row-heading .cell-en .num,
+html[data-layout="stacked"][data-view="both"][data-first="original"] .row-heading .cell-tr .num {
+  display: none;
+}
+/* single-column views: the arrival marker sits at the column's left edge */
+html[data-layout="stacked"] .row:target::before,
+html:not([data-view="both"]) .row:target::before {
+  left: max(-0.75rem, calc(50% - var(--pl-w) / 2 - var(--single) / 2 - 0.75rem));
+}
+/* single-column views: the permalink sits at the column's right edge */
+html[data-layout="stacked"] .pl,
+html:not([data-view="both"]) .pl {
+  right: max(0px, calc(50% - var(--single) / 2 - var(--pl-w) / 2 - 1rem));
+}
+
+/* ── wide: contents rail beside the paper ─────────────────────────────── */
+
+@media (min-width: 80rem) {
+  .shell {
     max-width: 92rem;
-  }
-  .layout {
     display: grid;
-    grid-template-columns: 15rem minmax(0, 1fr);
-    gap: 2.5rem;
+    grid-template-columns: 12rem minmax(0, 1fr);
+    column-gap: clamp(2rem, 3vw, 3.5rem);
   }
   .rail {
     display: block;
+    grid-column: 1;
+    grid-row: 1 / span 2;
     position: sticky;
-    top: calc(var(--bar-h) + 3rem);
+    top: calc(var(--bar-h) + 1.5rem);
     align-self: start;
-    max-height: calc(100vh - var(--bar-h) - 4rem);
+    max-height: calc(100vh - var(--bar-h) - 2.5rem);
     overflow: auto;
-    padding: 1.5rem 0.25rem 2rem 0;
-    font-size: 0.84rem;
+    padding: 2.5rem 0.25rem 2rem 0;
+    font-size: var(--fs-s);
   }
-  .colheads,
-  .masthead {
-    margin-left: 17.5rem;
+  #paper,
+  .foot {
+    grid-column: 2;
   }
   .toc-pop {
     display: none;
   }
 }
 
-/* ── narrow: one column, translation first ────────────────────────────── */
+/* ── narrow: always stacked; comfortable targets ──────────────────────── */
 
 @media (max-width: 56rem) {
   :root {
     --gap: 1rem;
+    --pl-w: 1.5rem;
+    --target-offset: calc(var(--bar-h) + env(safe-area-inset-top, 0px) + 1rem);
   }
-  .title-row {
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
-  }
-  .title-tr {
-    order: -1;
-  }
-  .colheads {
-    display: none;
-  }
-  .row {
+  /* without JS the layout attribute is not set from the viewport */
+  html:not(.js) .row {
     grid-template-columns: minmax(0, 1fr);
-    padding-inline: 0.25rem;
-    margin-inline: -0.25rem;
   }
-  .row:hover {
-    background: transparent;
-  }
-  .cell-tr,
-  .cell-en,
-  .shared {
+  html:not(.js) .row > :not(.pl) {
     grid-column: 1;
-  }
-  .cell-tr {
-    grid-row: 1;
-  }
-  .has-shared .cell-tr {
     grid-row: auto;
   }
-  html[data-view="both"] .cell-en {
-    margin: 0 0 0.5rem;
-    padding-left: 0.75rem;
-    border-left: 2px solid var(--rule);
-    font-size: 0.92rem;
-    color: var(--ink-2);
-  }
-  html[data-view="both"] .row-heading .cell-en {
-    border-left: 0;
-    padding-left: 0;
-  }
-  html[data-view="both"] .row-heading .cell-en h2,
-  html[data-view="both"] .row-heading .cell-en h3,
-  html[data-view="both"] .row-heading .cell-en h4 {
-    font-size: 0.95rem;
-    font-weight: 500;
-    color: var(--ink-2);
-  }
-  .row,
-  .refs li {
-    scroll-margin-top: calc(var(--bar-h) + env(safe-area-inset-top, 0px) + 1rem);
-  }
-  .pl {
+  html:not(.js) .colheads {
     display: none;
   }
-  /* one compact row: contents, language, view. Theme follows the system. */
-  .brand,
-  .bar-tools .theme,
-  .bar-tools .seg {
+  .masthead,
+  .paper {
+    max-width: var(--single);
+    margin-inline: auto;
+  }
+  .brand .b-long {
     display: none;
   }
-  .view-select {
-    display: inline-block;
+  /* on phones the number rides in the contents button */
+  .progress-num.in-bar {
+    display: none;
   }
-  .bar {
-    justify-content: flex-end;
-    font-size: 0.8rem;
+  .progress-num.in-toc {
+    display: inline;
+    margin: 0;
+    min-width: 0;
   }
   .bar-tools {
-    flex-wrap: nowrap;
-    gap: 0.35rem;
+    margin-left: auto;
   }
-  .seg button {
-    padding-inline: 0.45rem;
-    white-space: nowrap;
+  .only-wide {
+    display: none;
   }
-  .toc-pop > summary,
-  .bar-lang > summary {
-    padding-inline: 0.45rem;
-    white-space: nowrap;
+  .only-narrow {
+    display: inline;
   }
-  .toc-pop-panel {
+  .pop > summary {
+    min-height: 2.75rem;
+  }
+  .toc a {
+    padding-block: 0.6rem;
+  }
+  .foot a {
+    display: inline-block;
+    padding-block: 0.6rem;
+  }
+  .pop-panel {
     position: fixed;
     left: 1rem;
     right: 1rem;
     top: calc(var(--bar-h) + env(safe-area-inset-top, 0px));
     width: auto;
+    max-height: calc(100dvh - var(--bar-h) - 2rem);
+    overflow: auto;
+  }
+  .viewmenu-panel label {
+    min-height: 2.75rem;
+  }
+  /* the permalink stays at the right edge, faint, so touch readers can use it */
+  html[data-layout] .pl {
+    right: 0;
+    opacity: 0.4;
+  }
+  html[data-layout] .row-heading .pl {
+    display: none;
+  }
+  /* figure 2 is a wide diagram: keep it legible and let it scroll, with a
+     fade on the right edge that shows there is more */
+  #fig-2 .shared {
+    overflow-x: auto;
+    mask-image: linear-gradient(to right, #000 85%, transparent);
+  }
+  #fig-2 .plate {
+    width: 40rem;
+    max-width: none;
   }
   .refs {
-    padding-left: 2.2rem;
+    padding-left: 2.25rem;
+  }
+}
+
+/* the smallest phones: the bar keeps only its three controls */
+@media (max-width: 34rem) {
+  .brand {
+    display: none;
   }
 }
 
@@ -1140,6 +1382,7 @@ html[data-view="translation"] .shared {
   *::before,
   *::after {
     transition: none !important;
+    animation: none !important;
     scroll-behavior: auto !important;
   }
 }
@@ -1149,10 +1392,41 @@ html[data-view="translation"] .shared {
   .colheads,
   .rail,
   .pl,
-  .foot .other-langs {
+  .foot .other-langs,
+  .cite-tip {
     display: none !important;
   }
   .row {
     break-inside: avoid;
   }
+}
+
+/* ── the tuple as a headline (landing and 404 only) ───────────────────── */
+
+.tuple-hero {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(1.15rem, 5vw, 3.1rem);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.tuple-hero .t {
+  background: var(--store);
+  border-radius: var(--r1);
+  padding: 0 0.12em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.tuple-hero .p {
+  color: var(--ink-3);
+}
+.tuple-hero .at {
+  white-space: nowrap;
+}
+.tuple-hero .u {
+  background: var(--client);
+  border-radius: var(--r1);
+  padding-inline: 0.08em;
 }

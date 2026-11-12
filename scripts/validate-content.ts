@@ -6,8 +6,9 @@
 // Exits non-zero on any problem. Also renders every TeX fragment so a broken
 // formula fails here rather than at build time.
 
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isScalar, parseDocument, visit } from "yaml";
 import { LANGS } from "../src/i18n/langs.ts";
 import {
   availableTranslations,
@@ -18,6 +19,26 @@ import {
   validateTranslation,
 } from "../src/lib/content.ts";
 import { invariantTokens, renderMath } from "../src/lib/inline.ts";
+
+/**
+ * Translated strings must be one-line scalars: YAML folding joins lines with
+ * a space, which silently inserts spaces into CJK text.
+ */
+function multilineScalars(file: string): string[] {
+  const text = readFileSync(file, "utf8");
+  const found: string[] = [];
+  visit(parseDocument(text), {
+    Scalar(_key, node) {
+      if (!isScalar(node) || typeof node.value !== "string" || !node.range) return;
+      const raw = text.slice(node.range[0], node.range[1]);
+      if (node.type === "BLOCK_FOLDED" || node.type === "BLOCK_LITERAL" || raw.includes("\n")) {
+        const line = text.slice(0, node.range[0]).split("\n").length;
+        found.push(`${file}:${line} string spans several lines; write it on one line`);
+      }
+    },
+  });
+  return found;
+}
 
 const src = loadSource();
 const figures = new Set(readdirSync(join(process.cwd(), "public", "figures")));
@@ -54,6 +75,7 @@ for (const lang of langs) {
     continue;
   }
   if (tr.lang !== lang) problems.push(`${lang}: "lang" field is ${JSON.stringify(tr.lang)}`);
+  problems.push(...multilineScalars(join(process.cwd(), "content", `${lang}.yaml`)));
   problems.push(...validateTranslation(src, tr));
 }
 for (const l of LANGS) {
