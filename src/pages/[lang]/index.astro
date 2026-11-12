@@ -9,28 +9,30 @@ import LangMenu from "../../components/LangMenu.astro";
 import SiteNav from "../../components/SiteNav.astro";
 import Toc from "../../components/Toc.astro";
 import ViewMenu from "../../components/ViewMenu.astro";
-import { getLang, TRANSLATIONS } from "../../i18n/langs.ts";
+import { getLang, LANGS } from "../../i18n/langs.ts";
 import { ui } from "../../i18n/ui.ts";
 import Base from "../../layouts/Base.astro";
-import { loadSource, loadTranslation } from "../../lib/content.ts";
+import { loadSource, loadTranslation, type Translation } from "../../lib/content.ts";
 import { renderInline } from "../../lib/inline.ts";
 import { issueUrl, REPO_URL, withBase } from "../../lib/paths.ts";
 import { buildRows, buildToc } from "../../lib/render.ts";
 
 export function getStaticPaths() {
-  return TRANSLATIONS.map((l) => ({ params: { lang: l.code } }));
+  return LANGS.map((l) => ({ params: { lang: l.code } }));
 }
 
 const { lang } = Astro.params as { lang: string };
 const L = getLang(lang);
 const t = ui(lang);
 const src = loadSource();
-const tr = loadTranslation(lang);
+// /en/ is the original alone: the same rows with no translation beside them.
+const original = lang === "en";
+const tr: Translation = original ? { lang, meta: { title: src.meta.title }, blocks: {} } : loadTranslation(lang);
 const base = withBase();
 const rows = buildRows(src, tr, base, { openFigure: t.openFigure });
 const toc = buildToc(src, tr);
 const m = src.meta;
-const pageTitle = `${tr.meta.title} | ${m.title}`;
+const pageTitle = original ? m.title : `${tr.meta.title} | ${m.title}`;
 // Shared blocks that are the original's own text (not translated)
 const SHARED_EN = new Set(["grammar", "math", "code", "refs"]);
 
@@ -38,9 +40,20 @@ const SHARED_EN = new Set(["grammar", "math", "code", "refs"]);
 const note = src.blocks.find((b) => b.type === "note");
 const noteEn = note?.type === "note" ? note.text : "";
 const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
+const EN_NOTICE =
+  "Unofficial transcription for reading next to the translations. Not affiliated with or endorsed by Google, USENIX or the authors. The paper is © 2019 its authors and was published at USENIX ATC ’19. Typos are the paper’s own.";
+const EN_DESCRIPTION =
+  "The Zanzibar paper (USENIX ATC ’19), transcribed paragraph by paragraph with links to every section.";
 ---
 
-<Base lang={lang} title={pageTitle} description={t.description} path={`${lang}/`} alternates>
+<Base
+  lang={lang}
+  title={pageTitle}
+  description={original ? EN_DESCRIPTION : t.description}
+  path={`${lang}/`}
+  alternates
+  view={original ? "original" : undefined}
+>
   <Fragment slot="head">
     {lang === "ja" && [jp400, jp600].map((href) => <link rel="stylesheet" href={href} />)}
     {lang === "ko" && [kr400, kr600].map((href) => <link rel="stylesheet" href={href} />)}
@@ -66,8 +79,8 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
         </summary>
         <div class="pop-panel toc-pop-panel"><Toc entries={toc} label={t.contents} lang={lang} /></div>
       </details>
-      <LangMenu current={lang} label={t.language} class="pop" />
-      <ViewMenu t={t} />
+      <LangMenu current={lang} label={t.language} class="pop" langs={LANGS} />
+      <ViewMenu t={t} mode={original ? "prose" : "paper"} />
     </nav>
     <span class="progress" aria-hidden="true"><span class="progress-fill"></span></span>
   </header>
@@ -77,8 +90,20 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
 
     <main id="paper" data-lang={lang}>
       <header class="masthead">
-        <h1 class="title-tr" lang={lang}>{tr.meta.title}</h1>
-        <p class="title-en" lang="en">{m.title}</p>
+        {
+          original ? (
+            <h1 class="title-en title-only">{m.title}</h1>
+          ) : (
+            <>
+              <h1 class="title-tr" lang={lang}>
+                {tr.meta.title}
+              </h1>
+              <p class="title-en" lang="en">
+                {m.title}
+              </p>
+            </>
+          )
+        }
 
         <div class="byline" lang="en">
           <p class="authors">
@@ -114,9 +139,14 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
           </p>
         </div>
 
-        <p class="howto" lang={lang}>
-          <span class="for-pointer">{t.howto}</span><span class="for-touch">{t.howtoTouch}</span>
-        </p>
+        {
+          !original && (
+            <p class="howto" lang={lang}>
+              <span class="for-pointer">{t.howto}</span>
+              <span class="for-touch">{t.howtoTouch}</span>
+            </p>
+          )
+        }
 
         <div class="provenance">
           <p class="links">
@@ -124,14 +154,20 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
             <a href={m.source.google} rel="noopener" target="_blank">Google Research</a>
             <a href={REPO_URL} rel="noopener" target="_blank">{t.sourceCode}</a>
           </p>
-          <p class="notice">{t.notice} {t.aiNote}</p>
+          <p class="notice">{original ? EN_NOTICE : `${t.notice} ${t.aiNote}`}</p>
         </div>
       </header>
 
-      <div class="colheads" aria-hidden="true">
-        <span class="ch-en">{t.original}</span>
-        <span class="ch-tr" lang={lang}>{t.translation}</span>
-      </div>
+      {
+        !original && (
+          <div class="colheads" aria-hidden="true">
+            <span class="ch-en">{t.original}</span>
+            <span class="ch-tr" lang={lang}>
+              {t.translation}
+            </span>
+          </div>
+        )
+      }
 
       <article class="paper" data-script={L.script}>
         {
@@ -141,7 +177,7 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
                 <div class="shared" lang={SHARED_EN.has(r.type) ? "en" : undefined} set:html={r.shared} />
               )}
               {r.en !== undefined && <div class="cell cell-en" lang="en" set:html={r.en} />}
-              {r.tr !== undefined && <div class="cell cell-tr" lang={lang} set:html={r.tr} />}
+              {r.tr !== undefined && !original && <div class="cell cell-tr" lang={lang} set:html={r.tr} />}
               <span class="pl">
                 <a href={`#${r.id}`} aria-label={`${t.permalink} (${r.id})`}>
                   ¶
@@ -169,12 +205,12 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
     <footer class="foot">
       <p>
         <a href={REPO_URL} rel="noopener" target="_blank">{t.sourceCode}</a>
-        <a href={issueUrl(lang)} rel="noopener" target="_blank">{t.fixLink}</a>
+        <a href={issueUrl(lang)} rel="noopener" target="_blank">{original ? "Report a transcription error" : t.fixLink}</a>
         <a href="#paper">{t.backToTop}</a>
       </p>
       <p class="other-langs">
         {
-          TRANSLATIONS.filter((l) => l.code !== lang).map((l) => (
+          LANGS.filter((l) => l.code !== lang).map((l) => (
             <a href={withBase(`${l.code}/`)} hreflang={l.code} lang={l.code} data-lang-link>
               {l.native}
             </a>

@@ -1,5 +1,5 @@
 ---
-import { TRANSLATIONS } from "../i18n/langs.ts";
+import { LANGS, TRANSLATIONS } from "../i18n/langs.ts";
 import { UI } from "../i18n/ui.ts";
 import Base from "../layouts/Base.astro";
 import { loadSource, loadTranslation } from "../lib/content.ts";
@@ -7,8 +7,13 @@ import { allEntries, inSection, pathOf, splitId } from "../lib/guides.ts";
 import { REPO_URL, withBase } from "../lib/paths.ts";
 
 const src = loadSource();
-const titles = Object.fromEntries(TRANSLATIONS.map((l) => [l.code, loadTranslation(l.code).meta.title]));
-const codes = TRANSLATIONS.map((l) => l.code);
+const titles: Record<string, string> = {
+  ...Object.fromEntries(TRANSLATIONS.map((l) => [l.code, loadTranslation(l.code).meta.title])),
+  en: "The original alone, without a translation",
+};
+// The translations first, then the original on its own.
+const listed = [...TRANSLATIONS, ...LANGS.filter((l) => l.code === "en")];
+const codes = listed.map((l) => l.code);
 const en = UI.en!;
 const entries = await allEntries();
 const guides = inSection(entries, "en", "guides");
@@ -29,7 +34,7 @@ const systems = inSection(entries, "en", "ecosystem");
 
     <ul class="landing-langs">
       {
-        TRANSLATIONS.map((l) => (
+        listed.map((l) => (
           <li data-code={l.code}>
             <a href={withBase(`${l.code}/`)} hreflang={l.code}>
               <span class="native" lang={l.code}>

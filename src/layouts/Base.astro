@@ -8,7 +8,7 @@ import "@fontsource/ibm-plex-mono/400.css";
 import "@fontsource/ibm-plex-mono/500.css";
 import "katex/dist/katex.min.css";
 import "../styles/global.css";
-import { TRANSLATIONS } from "../i18n/langs.ts";
+import { LANGS } from "../i18n/langs.ts";
 import { withBase } from "../lib/paths.ts";
 
 interface Props {
@@ -17,18 +17,20 @@ interface Props {
   description: string;
   /** Path below the base, e.g. "ja/". Used for canonical and hreflang links. */
   path: string;
-  /** true: the paper's eight translations. A list: these language versions. */
+  /** true: every paper page (the original and eight translations). A list: these language versions. */
   alternates?: boolean | { code: string; path: string }[];
   /** Error pages: no canonical URL, not indexed */
   noindex?: boolean;
+  /** Fix which text the paper page shows; the saved preference is ignored (/en/ is the original alone). */
+  view?: "original";
 }
-const { lang, title, description, path, alternates = false, noindex = false } = Astro.props;
+const { lang, title, description, path, alternates = false, noindex = false, view } = Astro.props;
 const site = Astro.site!;
 const abs = (p: string) => new URL(withBase(p), site).href;
 ---
 
 <!doctype html>
-<html lang={lang} data-view="both" data-layout="side">
+<html lang={lang} data-view={view ?? "both"} data-view-lock={view ? "" : undefined} data-layout="side">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -37,7 +39,7 @@ const abs = (p: string) => new URL(withBase(p), site).href;
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={abs(path)} />}
     {
       alternates === true &&
-        TRANSLATIONS.map((l) => <link rel="alternate" hreflang={l.code} href={abs(`${l.code}/`)} />)
+        LANGS.map((l) => <link rel="alternate" hreflang={l.code} href={abs(`${l.code}/`)} />)
     }
     {alternates === true && <link rel="alternate" hreflang="x-default" href={abs("")} />}
     {Array.isArray(alternates) && alternates.map((a) => <link rel="alternate" hreflang={a.code} href={abs(a.path)} />)}
@@ -66,7 +68,7 @@ const abs = (p: string) => new URL(withBase(p), site).href;
         const t = get("zp-theme");
         if (t === "light" || t === "dark") d.dataset.theme = t;
         const v = get("zp-view");
-        if (v === "both" || v === "original" || v === "translation") d.dataset.view = v;
+        if (!d.hasAttribute("data-view-lock") && (v === "both" || v === "original" || v === "translation")) d.dataset.view = v;
         const narrow = matchMedia("(max-width: 56rem)").matches;
         d.dataset.layout = narrow || get("zp-layout") === "stacked" ? "stacked" : "side";
         const z = get("zp-size");

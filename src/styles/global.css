@@ -490,6 +490,15 @@ details > summary::-webkit-details-marker {
   color: var(--ink-2);
   text-wrap: balance;
 }
+/* /en/: the original title is the page title, set in the paper's face */
+.title-en.title-only {
+  margin: 0;
+  font-size: clamp(1.85rem, 4vw, 2.9rem);
+  font-weight: 600;
+  font-variation-settings: "opsz" 72;
+  line-height: 1.2;
+  color: var(--ink);
+}
 
 .byline {
   margin-top: 1.5rem;

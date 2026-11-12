@@ -12,7 +12,8 @@ export const REPO_URL = "https://github.com/0-draft/zanzibar-paper";
 
 /** Prefilled issue for a translation error at one block of one language. */
 export function issueUrl(lang: string, blockId?: string): string {
-  const title = blockId ? `[${lang}] translation: ${blockId}` : `[${lang}] translation`;
+  const kind = lang === "en" ? "transcription" : "translation";
+  const title = blockId ? `[${lang}] ${kind}: ${blockId}` : `[${lang}] ${kind}`;
   const body = [
     `Language: ${lang}`,
     blockId ? `Paragraph: #${blockId}` : "",

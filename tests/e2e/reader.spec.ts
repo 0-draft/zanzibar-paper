@@ -1,6 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
-import { TRANSLATIONS } from "../../src/i18n/langs.ts";
+import { LANGS, TRANSLATIONS } from "../../src/i18n/langs.ts";
 import { loadSource } from "../../src/lib/content.ts";
 
 const BASE = "/zanzibar-paper/";
@@ -155,9 +155,21 @@ test("theme choice is applied and remembered", async ({ page }) => {
   expect(bg).toBe("rgb(21, 24, 29)");
 });
 
-test("the landing page lists every translation", async ({ page }) => {
+test("the landing page lists every translation and the original", async ({ page }) => {
   await page.goto(BASE);
-  await expect(page.locator(".landing-langs li")).toHaveCount(TRANSLATIONS.length);
+  await expect(page.locator(".landing-langs li")).toHaveCount(LANGS.length);
+  await noHorizontalScroll(page);
+});
+
+test("/en/ shows the original alone, whatever view was saved", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("zp-view", "translation"));
+  await page.goto(`${BASE}en/#s5`);
+  await expect(page.locator("html")).toHaveAttribute("data-view", "original");
+  await expect(page.locator(".paper > .row")).toHaveCount(src.blocks.filter((b) => b.type !== "note").length);
+  expect(await page.locator(".cell-tr, .colheads, .howto").count()).toBe(0);
+  await expect(page.locator("h1")).toHaveText(src.meta.title);
+  await expect(page.locator("#s5 .cell-en")).toBeInViewport();
+  await expect(page.locator('input[name="view"]')).toHaveCount(0);
   await noHorizontalScroll(page);
 });
 
@@ -176,7 +188,7 @@ test("unknown pages get the 404 page", async ({ page }) => {
 });
 
 test.describe("accessibility (axe, WCAG 2.2 AA)", () => {
-  for (const path of ["", "ja/", "zh-Hans/", "de/"]) {
+  for (const path of ["", "en/", "ja/", "zh-Hans/", "de/"]) {
     test(`/${path}`, async ({ page }) => {
       await page.goto(`${BASE}${path}`);
       const results = await new AxeBuilder({ page })
