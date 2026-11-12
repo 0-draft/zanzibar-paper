@@ -21,7 +21,7 @@ test.describe("every translation page", () => {
       page.on("pageerror", (e) => errors.push(e.message));
       await page.goto(`${BASE}${l.code}/`);
       await expect(page.locator("html")).toHaveAttribute("lang", l.code);
-      await expect(page.locator(".paper > .row")).toHaveCount(src.blocks.length);
+      await expect(page.locator(".paper > .row")).toHaveCount(src.blocks.filter((b) => b.type !== "note").length);
       expect(await page.locator(".cell-en:not([lang='en'])").count()).toBe(0);
       expect(await page.locator(`.cell-tr:not([lang='${l.code}'])`).count()).toBe(0);
       await expect(page.locator("h1")).toHaveCount(1);
@@ -49,38 +49,105 @@ test("internal anchors resolve to an element", async ({ page }) => {
   expect(missing).toEqual([]);
 });
 
-test("view switch hides a column and is remembered", async ({ page, isMobile }) => {
+async function openView(page: Page) {
+  await page.locator("details.viewmenu > summary").click();
+}
+
+test("view menu: show one text, and the choice is remembered", async ({ page }) => {
   await page.goto(`${BASE}ja/`);
   const cellEn = page.locator("#s1-p1 .cell-en");
   const cellTr = page.locator("#s1-p1 .cell-tr");
   await expect(cellEn).toBeVisible();
   await expect(cellTr).toBeVisible();
-  if (isMobile) await page.locator("[data-view-select]").selectOption("translation");
-  else await page.getByRole("button", { name: "訳文のみ" }).click();
+  await openView(page);
+  await page.locator('input[name="view"][value="translation"]').check();
   await expect(cellEn).toBeHidden();
   await expect(cellTr).toBeVisible();
   await page.reload();
   await expect(cellEn).toBeHidden();
-  if (isMobile) await page.locator("[data-view-select]").selectOption("original");
-  else await page.getByRole("button", { name: "原文のみ" }).click();
+  await openView(page);
+  await page.locator('input[name="view"][value="original"]').check();
   await expect(cellTr).toBeHidden();
   await expect(cellEn).toBeVisible();
+});
+
+test("switching the view at the top of the page does not jump into the paper", async ({ page }) => {
+  await page.goto(`${BASE}ja/`);
+  await openView(page);
+  await page.locator('input[name="view"][value="translation"]').check();
+  expect(await page.evaluate(() => window.scrollY)).toBeLessThan(10);
+});
+
+test("view menu: stacked layout and translation first", async ({ page, isMobile }) => {
+  test.skip(isMobile, "phones are always stacked");
+  await page.goto(`${BASE}de/`);
+  const en = page.locator("#s1-p1 .cell-en");
+  const tr = page.locator("#s1-p1 .cell-tr");
+  // side by side: original on the left
+  expect((await en.boundingBox())!.x).toBeLessThan((await tr.boundingBox())!.x);
+  await openView(page);
+  await page.locator('input[name="first"]').check();
+  expect((await tr.boundingBox())!.x).toBeLessThan((await en.boundingBox())!.x);
+  await page.locator('input[name="layout"][value="stacked"]').check();
+  await expect(page.locator("html")).toHaveAttribute("data-layout", "stacked");
+  const a = (await tr.boundingBox())!;
+  const b = (await en.boundingBox())!;
+  expect(Math.abs(a.x - b.x)).toBeLessThan(20);
+  expect(a.y).toBeLessThan(b.y);
+});
+
+test("phones stack the pair with the translation on top", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "phone layout");
+  await page.goto(`${BASE}ja/`);
+  await expect(page.locator("html")).toHaveAttribute("data-layout", "stacked");
+  const tr = (await page.locator("#s1-p1 .cell-tr").boundingBox())!;
+  const en = (await page.locator("#s1-p1 .cell-en").boundingBox())!;
+  expect(tr.y).toBeLessThan(en.y);
+  // figure captions follow the same order
+  const ftr = (await page.locator("#fig-2 .cell-tr").boundingBox())!;
+  const fen = (await page.locator("#fig-2 .cell-en").boundingBox())!;
+  expect(ftr.y).toBeLessThan(fen.y);
+});
+
+test("code and formulas keep their own faces inside CJK text", async ({ page }) => {
+  await page.goto(`${BASE}ja/`);
+  const codeFont = await page
+    .locator(".cell-tr code")
+    .first()
+    .evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(codeFont).toMatch(/Plex Mono/);
+  const katexFont = await page
+    .locator(".cell-tr .katex")
+    .first()
+    .evaluate((el) => getComputedStyle(el).fontFamily);
+  expect(katexFont).toMatch(/KaTeX/);
+  const refsLang = await page.locator("#refs-list .shared").getAttribute("lang");
+  expect(refsLang).toBe("en");
+});
+
+test("citations preview their reference on hover", async ({ page, isMobile }) => {
+  test.skip(isMobile, "hover preview is for pointer devices; taps follow the link");
+  await page.goto(`${BASE}ja/#s1-p10`);
+  await page.locator("#s1-p10 .cell-tr a.cite").first().hover();
+  const tip = page.locator("#cite-tip");
+  await expect(tip).toBeVisible();
+  await expect(tip).toContainText("Spanner");
 });
 
 test("switching language keeps the paragraph being read", async ({ page }) => {
   await page.goto(`${BASE}ja/#s3-2-5-p3`);
   // the page re-anchors once web fonts have loaded; read the position after that
   await page.evaluate(() => document.fonts.ready.then(() => new Promise((r) => requestAnimationFrame(r))));
-  await page.locator(".bar-lang > summary").click();
-  await page.locator('.bar-lang a[hreflang="de"]').click();
+  await page.locator("details.langmenu > summary").click();
+  await page.locator('details.langmenu a[hreflang="de"]').click();
   await expect(page).toHaveURL(/\/de\/#s3-2-5-p3$/);
   await expect(page.locator("#s3-2-5-p3")).toBeInViewport();
 });
 
-test("theme choice is applied and remembered", async ({ page, isMobile }) => {
-  test.skip(isMobile, "the theme control is desktop-only; phones follow the system");
+test("theme choice is applied and remembered", async ({ page }) => {
   await page.goto(`${BASE}ko/`);
-  await page.locator("[data-theme-select]").selectOption("dark");
+  await openView(page);
+  await page.locator('input[name="theme"][value="dark"]').check();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
@@ -88,11 +155,18 @@ test("theme choice is applied and remembered", async ({ page, isMobile }) => {
   expect(bg).toBe("rgb(21, 24, 29)");
 });
 
-test("the landing page lists every translation and suggests one", async ({ page }) => {
+test("the landing page lists every translation", async ({ page }) => {
   await page.goto(BASE);
   await expect(page.locator(".landing-langs li")).toHaveCount(TRANSLATIONS.length);
-  await expect(page.locator(".landing-langs .suggested")).toHaveCount(1);
   await noHorizontalScroll(page);
+});
+
+test.describe("with a Korean browser", () => {
+  test.use({ locale: "ko-KR" });
+  test("the landing page marks the Korean translation", async ({ page }) => {
+    await page.goto(BASE);
+    await expect(page.locator(".landing-langs .suggested")).toHaveAttribute("data-code", "ko");
+  });
 });
 
 test("unknown pages get the 404 page", async ({ page }) => {

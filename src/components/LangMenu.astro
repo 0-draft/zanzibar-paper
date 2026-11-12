@@ -7,35 +7,36 @@ import { withBase } from "../lib/paths.ts";
 interface Props {
   current: string;
   label: string;
-  /** What the closed summary shows */
-  display: "code" | "name";
   class?: string;
 }
-const { current, label, display, class: cls } = Astro.props;
+const { current, label, class: cls } = Astro.props;
 const cur = TRANSLATIONS.find((l) => l.code === current)!;
 ---
 
 <details class:list={["langmenu", cls]}>
   <summary>
     <span class="vh">{label}: </span>
-    <span class="langmenu-value">{display === "code" ? cur.code : cur.native}</span>
+    <span lang={cur.code}>{cur.native}</span>
     <svg class="chev" viewBox="0 0 10 6" aria-hidden="true" width="10" height="6"
       ><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"></path></svg
     >
   </summary>
-  <ul class="langmenu-list">
+  <ul class="pop-panel langmenu-list">
     {
       TRANSLATIONS.map((l) => (
         <li>
           <a
             href={withBase(`${l.code}/`)}
             hreflang={l.code}
-            lang={l.code}
             aria-current={l.code === current ? "page" : undefined}
             data-lang-link
           >
-            <span class="code">{l.code}</span>
-            <span class="native">{l.native}</span>
+            <span class="native" lang={l.code}>
+              {l.native}
+            </span>
+            <span class="code" lang="en">
+              {l.code}
+            </span>
           </a>
         </li>
       ))

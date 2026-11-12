@@ -3,7 +3,7 @@
 // at the same height without any scroll syncing.
 
 import { type Block, localize, type Source, type Translation } from "./content.ts";
-import { escapeHtml, renderInline, renderMath } from "./inline.ts";
+import { escapeHtml, plainText, renderInline, renderMath } from "./inline.ts";
 
 export interface Row {
   id: string;
@@ -32,25 +32,35 @@ function heading(b: Extract<Block, { type: "heading" }>): string {
   return `<h${b.level}>${num}<span class="htext">${renderInline(b.text)}</span></h${b.level}>`;
 }
 
-function table(b: Extract<Block, { type: "table" }>): string {
-  const head = b.header.map((h) => `<th scope="col">${h ? renderInline(h) : ""}</th>`).join("");
+function table(b: Extract<Block, { type: "table" }>, withCaption = true): string {
+  const head = b.header
+    .map((h, i) => (h ? `<th scope="col">${renderInline(h)}</th>` : i === 0 ? "<td></td>" : '<th scope="col"></th>'))
+    .join("");
   let body = "";
+  let cols = "";
   if (b.variant === "latency") {
-    // first column groups rows (Safe / Recent): emit it once with rowspan
-    b.rows.forEach((row, r) => {
-      const group = row[0]!;
-      const first = r === 0 || b.rows[r - 1]![0] !== group;
-      const span = b.rows.filter((x) => x[0] === group).length;
-      const groupCell = first ? `<th scope="rowgroup" rowspan="${span}" class="group">${renderInline(group)}</th>` : "";
-      const api = `<th scope="row">${renderInline(row[1]!)}</th>`;
-      const nums = row
-        .slice(2)
-        .map((c) => `<td class="n">${renderInline(c)}</td>`)
-        .join("");
-      body += `<tr${first && r > 0 ? ' class="group-start"' : ""}>${groupCell}${api}${nums}</tr>`;
-    });
+    // The first column groups consecutive rows (Safe / Recent): one <tbody>
+    // per run, with the group label once as a rowspan header.
+    cols = `<colgroup span="2"></colgroup><colgroup span="${b.header.length - 2}"></colgroup>`;
+    for (let r = 0; r < b.rows.length; ) {
+      let span = 1;
+      while (b.rows[r + span]?.[0] === b.rows[r]![0]) span++;
+      body += "<tbody>";
+      for (let k = 0; k < span; k++) {
+        const row = b.rows[r + k]!;
+        const group =
+          k === 0 ? `<th scope="rowgroup" rowspan="${span}" class="group">${renderInline(row[0]!)}</th>` : "";
+        const nums = row
+          .slice(2)
+          .map((c) => `<td class="n">${renderInline(c)}</td>`)
+          .join("");
+        body += `<tr>${group}<th scope="row">${renderInline(row[1]!)}</th>${nums}</tr>`;
+      }
+      body += "</tbody>";
+      r += span;
+    }
   } else {
-    body = b.rows.map((row) => `<tr>${row.map((c) => `<td>${renderInline(c)}</td>`).join("")}</tr>`).join("");
+    body = `<tbody>${b.rows.map((row) => `<tr>${row.map((c) => `<td>${renderInline(c)}</td>`).join("")}</tr>`).join("")}</tbody>`;
   }
   const title =
     b.title && b.variant === "latency"
@@ -58,8 +68,9 @@ function table(b: Extract<Block, { type: "table" }>): string {
       : "";
   return (
     `<figure class="table table-${b.variant}"><div class="scroll" tabindex="0">` +
-    `<table><thead>${title}<tr>${head}</tr></thead><tbody>${body}</tbody></table></div>` +
-    `<figcaption>${renderInline(b.caption)}</figcaption></figure>`
+    `<table>${cols}<thead>${title}<tr>${head}</tr></thead>${body}</table></div>` +
+    (withCaption ? `<figcaption>${renderInline(b.caption)}</figcaption>` : "") +
+    "</figure>"
   );
 }
 
@@ -87,8 +98,14 @@ export function renderSide(b: Block): string {
   }
 }
 
+export interface SharedLabels {
+  /** Tooltip of the link around a figure, e.g. "Open full size" */
+  openFigure: string;
+}
+const DEFAULT_LABELS: SharedLabels = { openFigure: "Open full size" };
+
 /** HTML rendered once across both columns, or undefined for paired-only blocks. */
-export function renderShared(b: Block, base: string): string | undefined {
+export function renderShared(b: Block, base: string, labels: SharedLabels = DEFAULT_LABELS): string | undefined {
   switch (b.type) {
     case "grammar":
       return `<div class="grammar" role="table" aria-label="Relation tuple text notation">${b.rules
@@ -98,11 +115,13 @@ export function renderShared(b: Block, base: string): string | undefined {
         )
         .join("")}</div>`;
     case "math":
-      return `<div class="math" tabindex="0" role="group" aria-label="formula">${renderMath(b.tex, true)}</div>`;
+      return `<div class="math" tabindex="0" role="group" aria-label="Formula">${renderMath(b.tex, true)}</div>`;
     case "code":
       return `<pre class="codeblock" tabindex="0"><code>${escapeHtml(b.code)}</code></pre>`;
-    case "figure":
-      return `<div class="plate"><img src="${escapeHtml(`${base}figures/${b.src}`)}" width="${b.width}" height="${b.height}" alt="${escapeHtml(b.alt)}" loading="lazy" decoding="async"></div>`;
+    case "figure": {
+      const url = escapeHtml(`${base}figures/${b.src}`);
+      return `<a class="plate" href="${url}" title="${escapeHtml(labels.openFigure)}" target="_blank" rel="noopener"><img src="${url}" width="${b.width}" height="${b.height}" alt="${escapeHtml(plainText(b.alt))}" loading="lazy" decoding="async"></a>`;
+    }
     case "refs":
       return `<ol class="refs">${b.items
         .map((r) => `<li id="ref-${r.n}" value="${r.n}">${renderInline(r.text)}</li>`)
@@ -112,24 +131,40 @@ export function renderShared(b: Block, base: string): string | undefined {
   }
 }
 
-/** Figure alt text in the reader's language (the art itself is the original). */
-function sharedFor(b: Block, tb: Block, base: string): string | undefined {
-  if (b.type === "figure" && tb.type === "figure") return renderShared({ ...b, alt: tb.alt }, base);
-  return renderShared(b, base);
-}
+const caption = (c: string) => `<p class="caption">${renderInline(c)}</p>`;
 
-export function buildRows(src: Source, tr: Translation, base: string): Row[] {
-  return src.blocks.map((b) => {
-    const tb = localize(b, tr.blocks[b.id]);
-    const row: Row = { id: b.id, type: b.type };
-    const shared = sharedFor(b, tb, base);
-    if (shared !== undefined) row.shared = shared;
-    if (b.type !== "grammar" && b.type !== "math" && b.type !== "refs") {
-      row.en = renderSide(b);
-      row.tr = renderSide(tb);
-    }
-    return row;
-  });
+/**
+ * Rows of the reading view. Notes (the author footnote) are not rows: the
+ * page shows them with the byline.
+ *
+ * - figure: the art is shared, with alt text in the reader's language
+ * - latency table: the numbers are identical in every language, so the
+ *   table is set once (translated headers) and only the captions pair up
+ */
+export function buildRows(src: Source, tr: Translation, base: string, labels?: SharedLabels): Row[] {
+  return src.blocks
+    .filter((b) => b.type !== "note")
+    .map((b) => {
+      const tb = localize(b, tr.blocks[b.id]);
+      const row: Row = { id: b.id, type: b.type };
+      if (b.type === "table" && tb.type === "table" && b.variant === "latency") {
+        row.shared = table(tb, false);
+        row.en = caption(b.caption);
+        row.tr = caption(tb.caption);
+        return row;
+      }
+      const shared = renderShared(
+        b.type === "figure" && tb.type === "figure" ? { ...b, alt: tb.alt } : b,
+        base,
+        labels,
+      );
+      if (shared !== undefined) row.shared = shared;
+      if (b.type !== "grammar" && b.type !== "math" && b.type !== "refs") {
+        row.en = renderSide(b);
+        row.tr = renderSide(tb);
+      }
+      return row;
+    });
 }
 
 export function buildToc(src: Source, tr: Translation, maxLevel = 3): TocEntry[] {

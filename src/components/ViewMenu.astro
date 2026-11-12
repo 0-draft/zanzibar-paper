@@ -1,0 +1,44 @@
+---
+// Reading preferences in one place: which text to show, how to lay the pair
+// out, which comes first, and the colour theme. Plain form controls, so the
+// menu is keyboard- and screen-reader-friendly; reader.ts applies them as
+// data attributes on <html> and remembers them. Hidden without JS, where the
+// page falls back to the default side-by-side view.
+import type { UiStrings } from "../i18n/ui.ts";
+
+interface Props {
+  t: UiStrings;
+}
+const { t } = Astro.props;
+---
+
+<details class="viewmenu pop" data-js-only hidden>
+  <summary>
+    {t.view}
+    <svg class="chev" viewBox="0 0 10 6" aria-hidden="true" width="10" height="6"
+      ><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"></path></svg
+    >
+  </summary>
+  <form class="pop-panel viewmenu-panel" data-view-form>
+    <fieldset>
+      <legend>{t.show}</legend>
+      <label><input type="radio" name="view" value="both" checked /> {t.viewBoth}</label>
+      <label><input type="radio" name="view" value="original" /> {t.viewOriginal}</label>
+      <label><input type="radio" name="view" value="translation" /> {t.viewTranslation}</label>
+    </fieldset>
+    <fieldset class="only-wide">
+      <legend>{t.layout}</legend>
+      <label><input type="radio" name="layout" value="side" checked /> {t.layoutSide}</label>
+      <label><input type="radio" name="layout" value="stacked" /> {t.layoutStacked}</label>
+    </fieldset>
+    <fieldset>
+      <label class="check"><input type="checkbox" name="first" value="translation" /> {t.translationFirst}</label>
+    </fieldset>
+    <fieldset>
+      <legend>{t.theme}</legend>
+      <label><input type="radio" name="theme" value="system" checked /> {t.themeSystem}</label>
+      <label><input type="radio" name="theme" value="light" /> {t.themeLight}</label>
+      <label><input type="radio" name="theme" value="dark" /> {t.themeDark}</label>
+    </fieldset>
+  </form>
+</details>

@@ -25,6 +25,9 @@ A static Astro site that shows the Zanzibar paper (USENIX ATC '19) side by side:
 - The unofficial-translation and AI-assistance notices stay on every reading page in every language.
 - Colour roles are documented at the top of `src/styles/global.css` (blue: where you are, yellow: under the pointer, green: stored notation). Do not use them decoratively.
 - Anchor offsets use `scroll-margin-top` on targets, not `scroll-padding` on the root: root scroll-padding makes the page jump when a control in the sticky bar takes focus.
+- Reading preferences live as attributes on `<html>` (`data-view`, `data-layout`, `data-first`, `data-theme`), set before first paint by the inline script in `Base.astro` and kept in sync by `reader.ts`. Narrow screens are always `stacked`.
+- Language fonts use `[lang="…"]` selectors, never `:lang()`: `:lang()` matches every descendant and overrides the mono and KaTeX faces inside CJK text.
+- Japanese and Korean font CSS is linked only on `/ja/` and `/ko/` (`?url` imports in the page), not bundled into the shared stylesheet.
 
 ## Commands
 

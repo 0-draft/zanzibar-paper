@@ -10,8 +10,21 @@ const empty: Translation = { lang: "xx", meta: { title: "t" }, blocks: {} };
 describe("buildRows", () => {
   const rows = buildRows(src, empty, "/zanzibar-paper/");
 
-  it("emits one row per source block, in order", () => {
-    expect(rows.map((r) => r.id)).toEqual(src.blocks.map((b) => b.id));
+  it("emits one row per source block except notes, in order", () => {
+    expect(rows.map((r) => r.id)).toEqual(src.blocks.filter((b) => b.type !== "note").map((b) => b.id));
+  });
+
+  it("sets the latency table once and pairs only its captions", () => {
+    const r = rows.find((x) => x.id === "tab-2")!;
+    expect(r.shared).toContain("401.0 (133.0)");
+    expect(r.shared).not.toContain("figcaption");
+    expect(r.en).toContain("Table 2:");
+    expect(r.en).not.toContain("<table");
+  });
+
+  it("links every figure to its full-size file", () => {
+    const r = rows.find((x) => x.id === "fig-3")!;
+    expect(r.shared).toMatch(/<a class="plate" href="\/zanzibar-paper\/figures\/fig-3.svg"/);
   });
 
   it("pairs text blocks and shares art, code, TeX and references", () => {
