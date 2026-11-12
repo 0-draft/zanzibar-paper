@@ -19,6 +19,11 @@ export interface UiStrings {
   layoutStacked: string;
   translationFirst: string;
   howto: string;
+  textSize: string;
+  sizeSmall: string;
+  sizeMedium: string;
+  sizeLarge: string;
+  goToReference: string;
   reportParagraph: string;
   openFigure: string;
   theme: string;
@@ -54,6 +59,11 @@ const en: UiStrings = {
   translationFirst: "Translation first (left or top)",
   howto:
     "The original and the translation, one paragraph per row. Point at a paragraph to see its pair; ¶ links to it.",
+  textSize: "Text size",
+  sizeSmall: "Small",
+  sizeMedium: "Medium",
+  sizeLarge: "Large",
+  goToReference: "Go to the reference",
   reportParagraph: "Report an error in this paragraph",
   openFigure: "Open full size",
   theme: "Theme",
@@ -92,6 +102,11 @@ export const UI: Record<string, UiStrings> = {
     translationFirst: "訳文を先に (左・上)",
     howto:
       "原文と訳文を 1 段落ずつ並べている。段落にポインタを合わせると対応する段落が色づき、¶ でその段落へのリンクが取れる。",
+    textSize: "文字サイズ",
+    sizeSmall: "小",
+    sizeMedium: "中",
+    sizeLarge: "大",
+    goToReference: "参考文献へ移動",
     reportParagraph: "この段落の誤訳を報告",
     openFigure: "原寸で開く",
     theme: "テーマ",
@@ -126,6 +141,11 @@ export const UI: Record<string, UiStrings> = {
     layoutStacked: "上下排列",
     translationFirst: "译文在前（左侧或上方）",
     howto: "原文与译文逐段并列。将指针移到段落上会突出显示对应段落，¶ 可链接到该段。",
+    textSize: "字号",
+    sizeSmall: "小",
+    sizeMedium: "中",
+    sizeLarge: "大",
+    goToReference: "跳到参考文献",
     reportParagraph: "报告本段翻译错误",
     openFigure: "查看原图",
     theme: "主题",
@@ -160,6 +180,11 @@ export const UI: Record<string, UiStrings> = {
     layoutStacked: "上下排列",
     translationFirst: "譯文在前（左側或上方）",
     howto: "原文與譯文逐段並列。將游標移到段落上會標示對應段落，¶ 可連結到該段。",
+    textSize: "字級",
+    sizeSmall: "小",
+    sizeMedium: "中",
+    sizeLarge: "大",
+    goToReference: "跳至參考文獻",
     reportParagraph: "回報本段翻譯錯誤",
     openFigure: "檢視原圖",
     theme: "主題",
@@ -195,6 +220,11 @@ export const UI: Record<string, UiStrings> = {
     translationFirst: "번역문 먼저 (왼쪽 또는 위)",
     howto:
       "원문과 번역문을 문단 단위로 나란히 놓았습니다. 문단에 포인터를 올리면 짝이 되는 문단이 표시되고, ¶로 그 문단에 링크할 수 있습니다.",
+    textSize: "글자 크기",
+    sizeSmall: "작게",
+    sizeMedium: "보통",
+    sizeLarge: "크게",
+    goToReference: "참고문헌으로 이동",
     reportParagraph: "이 문단의 번역 오류 신고",
     openFigure: "원본 크기로 열기",
     theme: "테마",
@@ -230,6 +260,11 @@ export const UI: Record<string, UiStrings> = {
     translationFirst: "Traducción primero (izquierda o arriba)",
     howto:
       "Original y traducción, párrafo a párrafo. Al pasar el puntero por un párrafo se resalta su pareja; ¶ enlaza a ese párrafo.",
+    textSize: "Tamaño del texto",
+    sizeSmall: "Pequeño",
+    sizeMedium: "Mediano",
+    sizeLarge: "Grande",
+    goToReference: "Ir a la referencia",
     reportParagraph: "Informar de un error en este párrafo",
     openFigure: "Abrir a tamaño completo",
     theme: "Tema",
@@ -265,6 +300,11 @@ export const UI: Record<string, UiStrings> = {
     translationFirst: "Traduction d’abord (à gauche ou en haut)",
     howto:
       "L’original et la traduction, paragraphe par paragraphe. Survolez un paragraphe pour voir son pendant ; ¶ donne un lien vers ce paragraphe.",
+    textSize: "Taille du texte",
+    sizeSmall: "Petite",
+    sizeMedium: "Moyenne",
+    sizeLarge: "Grande",
+    goToReference: "Aller à la référence",
     reportParagraph: "Signaler une erreur dans ce paragraphe",
     openFigure: "Ouvrir en taille réelle",
     theme: "Thème",
@@ -300,6 +340,11 @@ export const UI: Record<string, UiStrings> = {
     translationFirst: "Übersetzung zuerst (links oder oben)",
     howto:
       "Original und Übersetzung, Absatz für Absatz. Zeigen Sie auf einen Absatz, um sein Gegenstück hervorzuheben; ¶ verlinkt auf den Absatz.",
+    textSize: "Schriftgröße",
+    sizeSmall: "Klein",
+    sizeMedium: "Mittel",
+    sizeLarge: "Groß",
+    goToReference: "Zur Quelle springen",
     reportParagraph: "Fehler in diesem Absatz melden",
     openFigure: "In voller Größe öffnen",
     theme: "Design",
@@ -335,6 +380,11 @@ export const UI: Record<string, UiStrings> = {
     translationFirst: "Tradução primeiro (à esquerda ou acima)",
     howto:
       "Original e tradução, parágrafo por parágrafo. Passe o ponteiro sobre um parágrafo para destacar seu par; ¶ cria um link para ele.",
+    textSize: "Tamanho do texto",
+    sizeSmall: "Pequeno",
+    sizeMedium: "Médio",
+    sizeLarge: "Grande",
+    goToReference: "Ir para a referência",
     reportParagraph: "Relatar um erro neste parágrafo",
     openFigure: "Abrir em tamanho original",
     theme: "Tema",

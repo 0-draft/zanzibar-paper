@@ -397,6 +397,17 @@ details > summary::-webkit-details-marker {
 .viewmenu-panel label:hover {
   background: var(--server);
 }
+.viewmenu-panel .sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.25rem;
+}
+.viewmenu-panel .sizes legend {
+  width: 100%;
+}
+.viewmenu-panel .sizes label {
+  flex: 1;
+}
 .viewmenu-panel input {
   accent-color: var(--link);
   margin: 0;
@@ -540,6 +551,13 @@ html:not([data-view="both"]) .colheads {
 
 .paper {
   padding-block: 1.25rem 4rem;
+  font-size: var(--size, 1rem);
+}
+html[data-size="s"] {
+  --size: 0.92rem;
+}
+html[data-size="l"] {
+  --size: 1.12rem;
 }
 .paper > .row:first-child {
   margin-top: 0;
@@ -561,8 +579,24 @@ html:not([data-view="both"]) .colheads {
     background: color-mix(in srgb, var(--server) 60%, transparent);
   }
 }
+/* the paragraph you arrived at: marked, then the mark fades */
 .row:target {
-  background: var(--client);
+  animation: arrived 2.4s ease-out both;
+}
+@keyframes arrived {
+  0%,
+  45% {
+    background: var(--client);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .row:target {
+    animation: none;
+    background: var(--client);
+  }
 }
 
 .cell {
@@ -590,13 +624,13 @@ html[data-first="translation"] .cell-tr {
    carry a similar visual weight (Literata runs large). */
 .cell-en {
   font-family: var(--serif);
-  font-size: 1rem;
+  font-size: 1em;
   line-height: 1.62;
   font-variation-settings: "opsz" 14;
   hyphens: auto;
 }
 .cell-tr {
-  font-size: 1rem;
+  font-size: 1em;
   line-height: 1.66;
   hyphens: auto;
 }
@@ -604,7 +638,7 @@ html[data-first="translation"] .cell-tr {
 .cell-tr:lang(zh-Hans),
 .cell-tr:lang(zh-Hant),
 .cell-tr:lang(ko) {
-  font-size: 1.0625rem;
+  font-size: 1.0625em;
   line-height: 1.85;
   line-break: strict;
   overflow-wrap: anywhere;
@@ -908,7 +942,7 @@ html[data-first="translation"] .cell-tr {
   }
 }
 .refs li:target {
-  background: var(--client);
+  animation: arrived 2.4s ease-out both;
   color: var(--ink);
 }
 
@@ -1010,6 +1044,12 @@ html[data-first="translation"] .cell-tr {
   font-family: var(--mono);
   color: var(--ink-3);
 }
+.cite-tip .go {
+  display: block;
+  margin-top: 0.5rem;
+  font-family: var(--sans);
+  font-size: 0.85rem;
+}
 
 /* ── contents ─────────────────────────────────────────────────────────── */
 
@@ -1076,6 +1116,14 @@ html:not([data-view="both"]) .row {
   grid-template-columns: minmax(0, var(--single));
   justify-content: center;
 }
+/* one column of the original alone: about 66 characters a line */
+html[data-view="original"] {
+  --single: 37em;
+}
+/* CJK alone: about 38 characters a line (JLReq: at most 40) */
+html[data-view="translation"]:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) {
+  --single: 40.5em;
+}
 html:not([data-view="both"]) .row > :not(.pl) {
   grid-column: 1;
 }
@@ -1101,16 +1149,10 @@ html[data-layout="stacked"][data-first="original"] .cell-en {
 html[data-layout="stacked"][data-view="both"]:not([data-first="original"]) .cell-en,
 html[data-layout="stacked"][data-view="both"][data-first="original"] .cell-tr {
   order: 2;
-  margin-bottom: 0.4rem;
-  padding-left: 0.85rem;
-  border-left: 2px solid var(--rule);
-  font-size: 0.92rem;
+  margin-top: -0.2rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.92em;
   color: var(--ink-2);
-}
-html[data-layout="stacked"][data-view="both"] .has-shared > .cell,
-html[data-layout="stacked"][data-view="both"] .row-heading > .cell {
-  border-left: 0;
-  padding-left: 0;
 }
 html[data-layout="stacked"][data-view="both"]:not([data-first="original"]) .row-heading .cell-en > *,
 html[data-layout="stacked"][data-view="both"][data-first="original"] .row-heading .cell-tr > * {

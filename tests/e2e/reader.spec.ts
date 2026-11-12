@@ -209,3 +209,25 @@ test("reading progress runs from the first paragraph to the references", async (
   await expect(num).toHaveText("100%");
   expect(await page.locator(".progress").getAttribute("aria-hidden")).toBe("true");
 });
+
+test("text size is applied to the paper and remembered", async ({ page }) => {
+  await page.goto(`${BASE}fr/`);
+  const p = page.locator("#s1-p1 .cell-tr p");
+  const before = await p.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize));
+  await openView(page);
+  await page.locator('input[name="size"][value="l"]').check();
+  await expect.poll(() => p.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThan(before);
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-size", "l");
+});
+
+test("on touch screens a citation opens its card first", async ({ page, isMobile }) => {
+  test.skip(!isMobile, "touch behaviour");
+  await page.goto(`${BASE}ja/#s1-p10`);
+  const cite = page.locator("#s1-p10 .cell-tr a.cite").first();
+  await cite.tap();
+  await expect(page.locator("#cite-tip")).toBeVisible();
+  await expect(page).toHaveURL(/#s1-p10$/);
+  await page.locator("#cite-tip a.go").tap();
+  await expect(page).toHaveURL(/#ref-15$/);
+});

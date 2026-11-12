@@ -67,6 +67,8 @@ const abs = (p: string) => new URL(withBase(p), site).href;
         if (v === "both" || v === "original" || v === "translation") d.dataset.view = v;
         const narrow = matchMedia("(max-width: 56rem)").matches;
         d.dataset.layout = narrow || get("zp-layout") === "stacked" ? "stacked" : "side";
+        const z = get("zp-size");
+        if (z === "s" || z === "l") d.dataset.size = z;
         const f = get("zp-first");
         if (f === "translation" || f === "original") d.dataset.first = f;
         d.classList.add("js");

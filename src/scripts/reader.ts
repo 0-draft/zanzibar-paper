@@ -74,6 +74,7 @@ if (form) {
   set("view", root.dataset.view ?? "both");
   set("layout", prefLayout());
   set("theme", root.dataset.theme ?? "system");
+  set("size", root.dataset.size ?? "m");
   const first = form.querySelector<HTMLInputElement>('input[name="first"]');
   // unset means "the default for this layout": original left, translation on top
   const syncFirst = () => {
@@ -104,6 +105,13 @@ if (form) {
           root.dataset.first = input.checked ? "translation" : "original";
         });
         store("zp-first", root.dataset.first ?? null);
+        break;
+      case "size":
+        keepPlace(() => {
+          if (input.value === "m") delete root.dataset.size;
+          else root.dataset.size = input.value;
+        });
+        store("zp-size", input.value === "m" ? null : input.value);
         break;
       case "theme": {
         const t = input.value as Theme;
@@ -224,51 +232,110 @@ markCurrent();
 markProgress();
 
 // ── Citation preview: [15] shows reference 15 where you are ─────────────
+// Pointer: after a short hover delay (reading with the pointer over the
+// text should not pop cards). Touch: the first tap opens the card, which
+// links on to the reference list.
 const tip = document.getElementById("cite-tip");
 const canHover = matchMedia("(hover: hover)");
 if (tip) {
   let owner: HTMLAnchorElement | null = null;
+  // the citation whose card a tap opened; a second tap on it follows the link
+  let tapped: HTMLAnchorElement | null = null;
+  let lastPointer = "mouse";
+  document.addEventListener("pointerdown", (e) => {
+    lastPointer = e.pointerType;
+  });
+  let showTimer = 0;
   let hideTimer = 0;
-  const show = (a: HTMLAnchorElement) => {
-    const ref = document.getElementById(a.hash.slice(1));
-    if (!ref) return;
-    window.clearTimeout(hideTimer);
-    owner = a;
-    const n = document.createElement("span");
-    n.className = "n";
-    n.textContent = a.textContent ?? "";
-    tip.replaceChildren(n, " ", ...[...ref.childNodes].map((c) => c.cloneNode(true)));
-    tip.hidden = false;
-    a.setAttribute("aria-describedby", "cite-tip");
+  const place = (a: HTMLAnchorElement) => {
     const r = a.getBoundingClientRect();
     const w = Math.min(28 * 16, window.innerWidth - 32);
     tip.style.width = `${w}px`;
     const left = Math.min(Math.max(16, r.left + r.width / 2 - w / 2), window.innerWidth - w - 16);
     tip.style.left = `${left + window.scrollX}px`;
-    const below = r.bottom + 8;
     const h = tip.offsetHeight;
+    const below = r.bottom + 8;
     const top = below + h < window.innerHeight - 8 ? below : r.top - h - 8;
     tip.style.top = `${top + window.scrollY}px`;
   };
-  const hide = () => {
-    hideTimer = window.setTimeout(() => {
-      tip.hidden = true;
-      owner?.removeAttribute("aria-describedby");
-      owner = null;
-    }, 120);
+  const show = (a: HTMLAnchorElement, withLink: boolean) => {
+    const ref = document.getElementById(a.hash.slice(1));
+    if (!ref) return;
+    window.clearTimeout(hideTimer);
+    owner?.removeAttribute("aria-describedby");
+    owner = a;
+    const n = document.createElement("span");
+    n.className = "n";
+    n.textContent = a.textContent ?? "";
+    const parts: Node[] = [n, document.createTextNode(" "), ...[...ref.childNodes].map((c) => c.cloneNode(true))];
+    if (withLink) {
+      const go = document.createElement("a");
+      go.className = "go";
+      go.href = a.href;
+      go.textContent = tip.dataset.go ?? "↓";
+      go.lang = document.documentElement.lang;
+      parts.push(go);
+    }
+    tip.replaceChildren(...parts);
+    tip.hidden = false;
+    a.setAttribute("aria-describedby", "cite-tip");
+    place(a);
+  };
+  const hideNow = () => {
+    window.clearTimeout(showTimer);
+    tapped = null;
+    tip.hidden = true;
+    owner?.removeAttribute("aria-describedby");
+    owner = null;
+  };
+  const hideSoon = () => {
+    window.clearTimeout(showTimer);
+    hideTimer = window.setTimeout(hideNow, 150);
   };
   for (const a of document.querySelectorAll<HTMLAnchorElement>(".cell a.cite")) {
-    a.addEventListener("mouseenter", () => canHover.matches && show(a));
-    a.addEventListener("mouseleave", hide);
-    a.addEventListener("focus", () => show(a));
-    a.addEventListener("blur", hide);
+    a.addEventListener("mouseenter", () => {
+      if (!canHover.matches) return;
+      window.clearTimeout(showTimer);
+      showTimer = window.setTimeout(() => show(a, false), 400);
+    });
+    a.addEventListener("mouseleave", hideSoon);
+    a.addEventListener("focus", () => show(a, false));
+    a.addEventListener("blur", hideSoon);
+    a.addEventListener("click", (e) => {
+      if (lastPointer !== "touch" || tapped === a) return; // mouse, keyboard or a second tap: follow the link
+      e.preventDefault();
+      show(a, true);
+      tapped = a;
+    });
   }
   tip.addEventListener("mouseenter", () => window.clearTimeout(hideTimer));
-  tip.addEventListener("mouseleave", hide);
+  tip.addEventListener("mouseleave", hideSoon);
+  document.addEventListener("click", (e) => {
+    const t = e.target as Element;
+    if (!tip.hidden && !tip.contains(t) && !t.closest("a.cite")) hideNow();
+  });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !tip.hidden) {
-      tip.hidden = true;
-    }
+    if (e.key === "Escape" && !tip.hidden) hideNow();
+  });
+  window.addEventListener("resize", () => !tip.hidden && hideNow(), { passive: true });
+}
+
+// ── Report a paragraph: attach the selected words, as arXiv does ────────
+for (const a of document.querySelectorAll<HTMLAnchorElement>("a.pl-report")) {
+  a.addEventListener("click", () => {
+    const row = a.closest(".row");
+    const sel = window.getSelection();
+    const text = sel && row && !sel.isCollapsed && row.contains(sel.anchorNode) ? sel.toString().trim() : "";
+    if (!text) return;
+    const url = new URL(a.href);
+    const body = url.searchParams.get("body") ?? "";
+    const quoted = text
+      .slice(0, 800)
+      .split("\n")
+      .map((l) => `> ${l}`)
+      .join("\n");
+    url.searchParams.set("body", `${body}\nSelected text:\n\n${quoted}\n`);
+    a.href = url.toString();
   });
 }
 
