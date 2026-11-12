@@ -6,6 +6,7 @@ import jp600 from "@fontsource/ibm-plex-sans-jp/600.css?url";
 import kr400 from "@fontsource/ibm-plex-sans-kr/400.css?url";
 import kr600 from "@fontsource/ibm-plex-sans-kr/600.css?url";
 import LangMenu from "../../components/LangMenu.astro";
+import SiteNav from "../../components/SiteNav.astro";
 import Toc from "../../components/Toc.astro";
 import ViewMenu from "../../components/ViewMenu.astro";
 import { getLang, TRANSLATIONS } from "../../i18n/langs.ts";
@@ -52,6 +53,7 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
         ><span class="b-p">#</span>translation</span
       ><span class="b-p">@</span><span class="b-user">{lang}</span></span>
     </a>
+    <SiteNav lang={lang} current="paper" />
     <span class="progress-num in-bar" aria-hidden="true" data-js-only hidden>0%</span>
     <nav class="bar-tools" aria-label={t.view}>
       <details class="toc-pop pop">

@@ -1,0 +1,35 @@
+---
+import { render } from "astro:content";
+import ProseTable from "../../../components/ProseTable.astro";
+import GuideLayout from "../../../layouts/GuideLayout.astro";
+import { allEntries, inSection, languagesOf, SECTION_OF, type Section, splitId } from "../../../lib/guides.ts";
+
+export async function getStaticPaths() {
+  const entries = await allEntries();
+  return entries.map((entry) => {
+    const { lang, slug } = splitId(entry.id);
+    return { params: { lang, section: SECTION_OF[entry.data.section], slug }, props: { entry } };
+  });
+}
+
+const { entry } = Astro.props;
+const { lang, slug } = splitId(entry.id);
+const section = SECTION_OF[entry.data.section] as Section;
+const entries = await allEntries();
+const siblings = inSection(entries, lang, section);
+const i = siblings.findIndex((e) => e.id === entry.id);
+const { Content, headings } = await render(entry);
+---
+
+<GuideLayout
+  lang={lang}
+  section={section}
+  slug={slug}
+  entry={entry}
+  headings={headings}
+  langs={languagesOf(entries, slug)}
+  prev={siblings[i - 1]}
+  next={siblings[i + 1]}
+>
+  <Content components={{ table: ProseTable }} />
+</GuideLayout>

@@ -1,0 +1,34 @@
+---
+// The three parts of the site. The current one is marked aria-current.
+import { ui } from "../i18n/ui.ts";
+import { allEntries, inSection, pathOf, type Section } from "../lib/guides.ts";
+import { withBase } from "../lib/paths.ts";
+
+interface Props {
+  lang: string;
+  current: "paper" | "guides" | "ecosystem";
+}
+const { lang, current } = Astro.props;
+const t = ui(lang);
+// English has no paper page of its own: the original is on every paper page,
+// so it links to the language list.
+const paperHref = lang === "en" ? withBase() : withBase(`${lang}/`);
+// A section not yet written in this language links to the English one.
+const entries = await allEntries();
+const sectionHref = (s: Section) => withBase(pathOf(inSection(entries, lang, s).length > 0 ? lang : "en", s));
+const items = [
+  { key: "paper", href: paperHref, label: t.navPaper },
+  { key: "guides", href: sectionHref("guides"), label: t.navGuides },
+  { key: "ecosystem", href: sectionHref("ecosystem"), label: t.navEcosystem },
+] as const;
+---
+
+<nav class="sitenav" aria-label="zanzibar-paper">
+  {
+    items.map((i) => (
+      <a href={i.href} aria-current={i.key === current ? "page" : undefined}>
+        {i.label}
+      </a>
+    ))
+  }
+</nav>

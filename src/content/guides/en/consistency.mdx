@@ -1,0 +1,328 @@
+---
+title: Consistency, snapshots and zookies
+description: Why an authorization system has to respect the order of ACL and content changes, and how Zanzibar does it with Spanner timestamps and zookies.
+section: guide
+part: mechanisms
+order: 4
+checked: "2026-11-13"
+paper: ["2.2", "2.4", "2.4.4", "3.2.1", "3.2.5", "4.1"]
+---
+
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+An ACL check answers "may this user do this, now". In a system replicated across the world, "now" is the hard part: different servers have seen different writes. This page explains which order Zanzibar promises to respect, how [Spanner](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf) makes that promise cheap to keep, and how the *zookie* lets a client set the minimum freshness a check needs.
+
+## The new enemy problem
+
+The paper opens §2.2 with a rule: "ACL checks must respect the order in which users modify ACLs and object contents to avoid unexpected sharing behaviors." It calls the failure the "new enemy" problem: a user who has just been removed from an ACL still sees content that the removal was meant to hide.
+
+The paper gives two examples. This page keeps the paper's own names, Alice, Bob and Charlie, for these two so you can read them next to §2.2; everywhere else it uses the running example of Anne, Beto and Chen.
+
+<Callout kind="paper" title="§2.2, Example A: Neglecting ACL update order">
+
+1. Alice removes Bob from the ACL of a folder;
+2. Alice then asks Charlie to move new documents to the folder, where document ACLs inherit from folder ACLs;
+3. Bob should not be able to see the new documents, but may do so if the ACL check neglects the ordering between the two ACL changes.
+
+</Callout>
+
+What can go wrong if a check sees the second change but not the first? The left frame is a system without ordering; the right frame is the same story under Zanzibar.
+
+<Frames>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="time"
+  ticks={["T_A1", "T_A2"]}
+  title="Example A without ordering"
+  desc="Alice removes Bob from the folder ACL (A1), then asks Charlie, who moves new documents into the folder (A2). Bob's check is evaluated on data that includes A2 but not A1, so Bob is allowed to read the new documents. This is the violation."
+  events={[
+    { lane: 0, t: 0, label: "A1: remove Bob\nfrom folder", kind: "write" },
+    { lane: 1, t: 1, label: "A2: move new\ndocs to folder", kind: "write" },
+    { lane: 2, t: 2, label: "check sees A2\nbut not A1", kind: "bad" },
+    { lane: 2, t: 3, label: "Bob sees the\nnew docs", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "asks" }]}
+  caption="Violation: the check applies A2 without A1, and Bob reads the new documents."
+/>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="time"
+  ticks={["T_A1", "T_A2"]}
+  title="Example A under Zanzibar"
+  desc="A1 and A2 get timestamps T_A1 less than T_A2. A check at a snapshot before T_A2 does not see the documents in the folder. A check at a snapshot at or after T_A2 also sees A1, so Bob is denied either way."
+  events={[
+    { lane: 0, t: 0, label: "A1: remove Bob\nfrom folder", kind: "write" },
+    { lane: 1, t: 1, label: "A2: move new\ndocs to folder", kind: "write" },
+    { lane: 2, t: 2, label: "check at\nT < T_A2", kind: "read", mono: true },
+    { lane: 2, t: 3, label: "docs not in\nfolder yet", kind: "good" },
+    { lane: 2, t: 4, label: "check at\nT ≥ T_A2", kind: "read", mono: true },
+    { lane: 2, t: 5, label: "sees A1:\nBob denied", kind: "good" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "asks" }]}
+  caption="Zanzibar: any snapshot that contains A2 also contains A1."
+/>
+
+</Frames>
+
+Notice that there is no snapshot that contains A2 but not A1. That is the whole guarantee: §2.2 explains that if a check runs at `T < T_A2` "the document ACLs will not include the folder ACL", and if it runs at `T ≥ T_A2 > T_A1` it "will observe update A1, which removed Bob from the folder ACL".
+
+<Callout kind="paper" title="§2.2, Example B: Misapplying old ACL to new content">
+
+1. Alice removes Bob from the ACL of a document;
+2. Alice then asks Charlie to add new contents to the document;
+3. Bob should not be able to see the new contents, but may do so if the ACL check is evaluated with a stale ACL from before Bob's removal.
+
+</Callout>
+
+Example B differs in one detail: the second change is to the document's *contents*, which live in the client application's storage, not in Zanzibar. Zanzibar never sees that write. How can it know that a check about the new contents must be fresh enough?
+
+<Frames>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="time"
+  ticks={["T_B1", "T_B2"]}
+  title="Example B without ordering"
+  desc="Alice removes Bob from the document ACL (B1), then asks Charlie, who adds new contents (B2). Bob's check is evaluated at a stale snapshot from before B1, so it still allows Bob, and Bob reads the new contents. This is the violation."
+  events={[
+    { lane: 0, t: 0, label: "B1: remove Bob\nfrom doc ACL", kind: "write" },
+    { lane: 1, t: 1, label: "B2: add new\ncontents", kind: "write" },
+    { lane: 2, t: 2, label: "check at stale\nT < T_B1", kind: "bad", mono: true },
+    { lane: 2, t: 3, label: "Bob sees the\nnew contents", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "asks" }]}
+  caption="Violation: an old ACL is applied to new content."
+/>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="time"
+  ticks={["T_B1", "T_B2"]}
+  title="Example B under Zanzibar"
+  desc="Alice removes Bob (B1). Charlie's content change gets a zookie encoding its timestamp T_B2, stored with the new contents. Bob's check carries that zookie, so it is evaluated at a snapshot at or after T_B2, which includes B1, and Bob is denied."
+  events={[
+    { lane: 0, t: 0, label: "B1: remove Bob\nfrom doc ACL", kind: "write" },
+    { lane: 1, t: 1, label: "B2 + zookie\n(T_B2)", kind: "write" },
+    { lane: 2, t: 2, label: "check carries\nthe zookie", kind: "read" },
+    { lane: 2, t: 3, label: "sees B1:\nBob denied", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "asks" },
+    { from: [1, 1], to: [2, 2], label: "zookie", dashed: true },
+  ]}
+  caption="Zanzibar: the zookie stored with B2 forces a snapshot at or after T_B2."
+/>
+
+</Frames>
+
+The dashed arrow is the fix. The zookie travels with the content, so the check about B2 cannot run at a snapshot older than B2, and every such snapshot already contains B1. The rest of the page explains the two properties this relies on and the protocol that moves the zookie around.
+
+## Causally meaningful timestamps
+
+§2.2 names two properties: *external consistency* and *snapshot reads with bounded staleness*. The paper cites [Gifford's 1981 dissertation](#sources) for external consistency. The Spanner paper states the same property for transactions: "if a transaction T1 commits before another transaction T2 starts, then T1's commit timestamp is smaller than T2's", and notes that this is "equivalently, linearizability", citing [Herlihy and Wing (1990)](https://doi.org/10.1145/78969.78972).
+
+In Zanzibar's words (§2.2), two causally related updates `x ≺ y` get timestamps with `T_x < T_y`. A snapshot read at timestamp `T` "observes all updates with timestamps ≤ T". Put together: if a read sees `y`, it also sees everything that happened before `y`. This works because the store is multi-version: Spanner defines a snapshot read as "a read in the past that executes without locking" ([Spanner §4.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)), and in a multiversion store "each write on a data item produces a new copy (or version)" ([Bernstein and Goodman, 1983](https://doi.org/10.1145/319996.319998)).
+
+What does a reader see under that rule, and what can a reader of an eventually consistent replica see? In this variation the readme starts outside `folder:A`. Anne first removes Chen as a viewer of `folder:A` (`x`, committed at T=10), then moves `doc:readme` into `folder:A` (`y`, at T=20).
+
+<Swimlane
+  lanes={["ACL writes", "snapshot read", "eventual replica"]}
+  laneWidth={170}
+  rowHeight={64}
+  timeLabel="time"
+  ticks={["T=10", "T=20"]}
+  title="Snapshot reads versus an eventually consistent replica"
+  desc="Write x removes Chen from folder:A at timestamp 10; write y moves doc:readme into folder:A at timestamp 20, and x happens before y. A snapshot read at T=15 sees only x; a snapshot read at T=25 sees x and y. An eventually consistent replica applies y before x, and in that window Chen can see the readme."
+  events={[
+    { lane: 0, t: 0, label: "x: remove Chen\nfrom folder:A", kind: "write" },
+    { lane: 0, t: 1, label: "y: move readme\ninto folder:A", kind: "write" },
+    { lane: 1, t: 2, label: "snapshot at T=15:\nsees x only", kind: "good" },
+    { lane: 2, t: 2, label: "replica has y,\nnot yet x", kind: "bad" },
+    { lane: 1, t: 3, label: "snapshot at T=25:\nsees x and y", kind: "good" },
+    { lane: 2, t: 3, label: "Chen sees readme\n(x not applied)", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [0, 1], label: "x ≺ y" }]}
+  caption="A snapshot at any T is a prefix of the causal order. An eventual replica can expose y without x until it catches up."
+/>
+
+Notice that the two snapshot reads differ in *how much* they see but never in *order*: each one is a prefix of the history. The eventual replica will converge too, but until then it can show a state that never existed. The paper draws this contrast itself in §5: TAO "offers eventual global consistency with asynchronous replication", while Zanzibar "provides external consistency and snapshot reads with bounded staleness".
+
+## Where the timestamps come from: TrueTime
+
+Zanzibar does not compute these timestamps itself. It stores ACLs in Spanner, whose "TrueTime mechanism assigns each ACL write a microsecond-resolution timestamp, such that the timestamps of writes reflect the causal ordering between writes" (§2.2). The outline of how that works is in §3, §4.1.2 and §4.2.1 of the [Spanner paper (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf).
+
+- `TT.now()` returns an interval `[earliest, latest]` that is guaranteed to contain the absolute time at which it was called. The uncertainty `ε` is half the interval's width; in Google's production environment it was "typically a sawtooth function of time, varying from about 1 to 7 ms over each poll interval".
+- **Start**: the leader gives a write a commit timestamp `s` no less than `TT.now().latest`.
+- **Commit wait**: clients cannot see the write until `TT.after(s)` is true, that is, until `s` has definitely passed everywhere. Spanner notes that "the expected wait is at least 2 ∗ ε̄", where `ε̄` is the average error bound (§4.2.1).
+
+How does waiting make the timestamps causal?
+
+<Graph
+  width={640}
+  height={300}
+  title="Commit wait in Spanner"
+  desc="A write arrives at the leader, which calls TT.now() and gets an interval from earliest to latest, of width 2 epsilon. The leader picks s equal to latest. It then waits until TT.after(s) is true, which takes about 2 epsilon, and only then makes the write visible and replies. Any transaction that starts after the reply calls TT.now() later, so its latest, and therefore its timestamp, is greater than s."
+  nodes={[
+    { id: "ear", x: 70, y: 55, label: "earliest", kind: "note" },
+    { id: "lat", x: 240, y: 55, label: "latest", kind: "note" },
+    { id: "req", x: 70, y: 150, label: "write arrives\nTT.now()", kind: "server" },
+    { id: "s", x: 240, y: 150, label: "s = latest", kind: "server", mono: true },
+    { id: "after", x: 420, y: 150, label: "TT.after(s)\nis true", kind: "server", mono: true },
+    { id: "vis", x: 568, y: 150, label: "write visible,\nclient told", kind: "store", on: true },
+    { id: "next", x: 568, y: 255, label: "next write:\ntimestamp > s", kind: "client" },
+  ]}
+  edges={[
+    { from: "ear", to: "lat", label: "uncertainty: 2ε", dir: "both", labelOffset: -16 },
+    { from: "lat", to: "s", label: "start rule", dashed: true },
+    { from: "req", to: "s", label: "pick s" },
+    { from: "s", to: "after", label: "commit wait", on: true, labelOffset: -34 },
+    { from: "after", to: "vis" },
+    { from: "vis", to: "next", label: "causes" },
+  ]}
+  minWidth={520}
+  caption="Time runs left to right, then down to the next write. Waiting out the uncertainty means s is in the past before anyone can act on the write."
+/>
+
+Notice the last step: anything caused by the write starts after the client was told, which is after `s` had definitely passed, so its own `TT.now().latest`, and its timestamp, is larger than `s`. That is external consistency, paid for with a few milliseconds of waiting per write. §5 of the Zanzibar paper sums it up: Zanzibar "builds on Spanner’s TrueTime abstraction" to "provide linearizable commit timestamps encoded as zookies".
+
+The same paper explains why Zanzibar cannot use a logical clock instead: Lamport clocks "require explicit participation of all 'processes', where in Zanzibar’s use cases some of the 'processes' can be external clients or even human users" (§5). In Example A, the "asks" arrow is Alice talking to Charlie, a channel no clock sees.
+
+## The zookie protocol
+
+Snapshot reads at a well-ordered timestamp solve Example A. Example B also needs the check to be *fresh enough*. One way would be to evaluate every check at the latest snapshot, but §2.2 rejects that: it "would require global data synchronization with high-latency round trips and limited availability". Instead, the client carries the needed freshness itself, as a *zookie*: "an opaque byte sequence encoding a globally meaningful timestamp that reflects an ACL write, a client content version, or a read snapshot" (§2.4).
+
+Who holds the zookie at each step? In the figure, Anne saves an edit to `doc:readme`, and later Beto opens it.
+
+<Swimlane
+  lanes={["client app", "client storage", "Zanzibar", "Spanner"]}
+  laneWidth={142}
+  rowHeight={64}
+  timeLabel="time"
+  title="The zookie protocol"
+  desc="1. Anne saves an edit; the client app sends a content-change check to Zanzibar, which evaluates it at the latest snapshot in Spanner. 2. Zanzibar answers allowed with a zookie whose timestamp is later than all prior ACL writes. 3. The app writes the new content and the zookie to its own storage in one atomic write. 4. Later Beto opens the readme; the app loads the content and its zookie. 5. The app sends a check that carries the zookie. 6. Zanzibar evaluates it at a snapshot at least as fresh as the zookie and returns the answer."
+  events={[
+    { lane: 0, t: 0, label: "Anne saves edit", kind: "note" },
+    { lane: 0, t: 1, label: "content-change\ncheck", kind: "read" },
+    { lane: 2, t: 1, label: "evaluate at\nlatest snapshot", kind: "read" },
+    { lane: 3, t: 1, label: "latest snapshot", kind: "good" },
+    { lane: 2, t: 2, label: "allowed +\nzookie z", kind: "good" },
+    { lane: 0, t: 2, label: "gets z", kind: "note" },
+    { lane: 0, t: 3, label: "write v2 + z", kind: "write" },
+    { lane: 1, t: 3, label: "readme v2, z", kind: "write", mono: true },
+    { lane: 0, t: 4, label: "Beto opens\nreadme", kind: "note" },
+    { lane: 0, t: 5, label: "check(Beto, z)", kind: "read", mono: true },
+    { lane: 2, t: 5, label: "evaluate at\nsnapshot ≥ z", kind: "read", mono: true },
+    { lane: 3, t: 5, label: "read at\nT ≥ z", kind: "good", mono: true },
+    { lane: 2, t: 6, label: "answer at\nthat snapshot", kind: "good" },
+    { lane: 0, t: 6, label: "show or hide v2", kind: "note" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [2, 1], label: "no zookie" },
+    { from: [2, 1], to: [3, 1] },
+    { from: [2, 2], to: [0, 2], label: "zookie z" },
+    { from: [0, 3], to: [1, 3], label: "atomic" },
+    { from: [1, 3], to: [0, 4], label: "load v2, z", dashed: true },
+    { from: [0, 5], to: [2, 5], label: "carries z" },
+    { from: [2, 5], to: [3, 5] },
+    { from: [2, 6], to: [0, 6] },
+  ]}
+  caption="The zookie is minted by the content-change check, stored next to the content, and handed back with every later check of that version."
+/>
+
+Step by step, following §2.2 and §2.4.4:
+
+1. **Content-change check.** When a user is about to save a change, the client sends a *content-change* check. It "does not carry a zookie and is evaluated at the latest snapshot" (§2.4.4).
+2. **Zookie minted.** If the change is allowed, the response includes a zookie. Zanzibar "encodes a current global timestamp in the zookie and ensures that all prior ACL writes have lower timestamps" (§2.2).
+3. **Stored with the content.** "The client stores the zookie with the content change in an atomic write to the client storage" (§2.2). The check itself does not have to be in the same transaction as the content write.
+4. **Carried by later checks.** Every later check of that content version sends the stored zookie.
+5. **Evaluated at least as fresh.** "A check is always evaluated at a consistent snapshot no earlier than the given zookie" (§2.4.4).
+
+In Example B, the zookie stored with the new contents encodes `T_B2`, and `T_B2 > T_B1`, so Bob's check in step 5 must see his removal.
+
+The zookie is opaque on purpose. The paper uses "an opaque cookie instead of the actual timestamp to discourage our clients from choosing arbitrary timestamps and to allow future extensions" (§2.4). §5 adds that the protocol "does *not* let clients read or evaluate ACLs at an arbitrary snapshot", which is what leaves the choice to Zanzibar.
+
+## Why "at least as fresh" and not "exactly at"
+
+A zookie is a lower bound. Zanzibar may evaluate a check at the zookie's timestamp or at any later one. §2.2 calls this the protocol's "at-least-as-fresh semantics" and says it "allow[s] Zanzibar to choose any timestamp fresher than the one encoded in a zookie". The freedom is used in three ways.
+
+- **Default staleness (§3.2.1).** With no zookie, the server picks "a default staleness chosen to ensure that all transactions are evaluated at a timestamp that is as recent as possible without impacting latency". Each server tracks how often reads at a given staleness had to leave the zone and moves the default to "the lowest 'safe' value". The paper notes this "is purely a performance optimization" because "Zanzibar always respects zookies when provided".
+- **Quantization (§3.2.5).** Evaluation timestamps are "rounded up to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies". Rounding *up* never breaks a lower bound.
+- **Shared caches (§3.2.5).** Cache keys contain the snapshot timestamp, so results from different snapshots are never mixed. Because of the rounding, "the vast majority of recent checks and reads" are evaluated at the same timestamps and "share cache results".
+
+What does rounding up buy when three checks arrive with zookies a few hundred milliseconds apart?
+
+<Graph
+  width={620}
+  height={250}
+  title="Rounding up evaluation timestamps"
+  desc="Three checks, for Anne, Beto and Chen on doc:readme, carry zookies with different microsecond timestamps within the same second. Zanzibar rounds each up to the same coarse timestamp T_q, which is at least every zookie, so all three are evaluated on one snapshot and share cache entries keyed by T_q. Any later timestamp, up to the newest data at the leader, would also be allowed."
+  nodes={[
+    { id: "a", x: 90, y: 50, label: "Anne's check\nzookie 12.104 s", kind: "client" },
+    { id: "b", x: 90, y: 125, label: "Beto's check\nzookie 12.380 s", kind: "client" },
+    { id: "c", x: 90, y: 200, label: "Chen's check\nzookie 12.911 s", kind: "client" },
+    { id: "q", x: 330, y: 125, label: "evaluate at\nT_q = 13 s", kind: "server", on: true },
+    { id: "cache", x: 330, y: 220, label: "cache key\nincludes T_q", kind: "server" },
+    { id: "now", x: 530, y: 125, label: "newest data\n(leader)", kind: "store" },
+  ]}
+  edges={[
+    { from: "a", to: "q", label: "round up", on: true },
+    { from: "b", to: "q", on: true },
+    { from: "c", to: "q", label: "round up", on: true },
+    { from: "q", to: "cache", label: "shared" },
+    { from: "q", to: "now", label: "also allowed", dashed: true },
+  ]}
+  minWidth={480}
+  caption="All three zookies are lower bounds; 13 s satisfies them all. The timestamps are illustrative, not from the paper."
+/>
+
+Notice that `T_q` may even be slightly in the future. §3.2.5 covers that case: Spanner "ensures that a snapshot read at timestamp T will observe all writes up to T—this holds even if T is in the future, in which case the read will wait until TrueTime has moved past T."
+
+## Safe and Recent requests
+
+The price of freshness is distance. "When a zookie timestamp is higher than that of the most recent data replicated to the region, the storage reads require cross-region round trips to the leader replica" (§4.1). The storage replicates with "replication heartbeats with 8-second intervals", so §4.1 splits requests at 10 seconds:
+
+- *Safe* requests "have zookies more than 10 seconds old and can be served within the region most of time".
+- *Recent* requests "have zookies less than 10 seconds old and often require inter-region round trips".
+
+The 8 seconds match the Spanner paper, where "a leader by default advances MinNextTS() values every 8 seconds", so replicas "can serve reads at timestamps greater than 8 seconds old in the worst case" ([Spanner §4.2.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)).
+
+The paper's Table 2 (§4.2) gives the latency of each kind, in milliseconds, as mean (standard deviation) over a 7-day period in December 2018:
+
+| | API | 50%ile | 95%ile | 99%ile |
+| --- | --- | --- | --- | --- |
+| Safe | Check | 3.0 (0.091) | 9.46 (0.3) | 15.0 (1.19) |
+| Safe | Read | 2.18 (0.031) | 3.71 (0.094) | 8.03 (3.28) |
+| Safe | Expand | 4.27 (0.313) | 8.84 (0.586) | 34.1 (4.35) |
+| Recent | Check | 2.86 (0.087) | 60.0 (2.1) | 76.3 (2.59) |
+| Recent | Read | 2.21 (0.054) | 40.1 (2.03) | 86.2 (3.84) |
+| Recent | Expand | 5.79 (0.224) | 45.6 (3.44) | 121.0 (2.38) |
+| Recent | Write | 127.0 (3.65) | 233.0 (23.0) | 401.0 (133.0) |
+
+The medians are close; the tails are not. A Recent Check's 95th percentile is 60.0 ms against 9.46 ms for a Safe one, the cost of the cross-region trip. Writes are slowest because they "always require distributed coordination among Spanner servers" (§4.2); in Spanner that coordination includes commit wait. Per §4.1 and Figure 3, Safe requests outnumber Recent ones by "about two orders of magnitude", "which allows Zanzibar to serve the vast majority of ACL checks locally". Most requests can be Safe because a zookie is only a lower bound: a check of older content may use older, already replicated data.
+
+<Callout kind="note" title="Not verified">
+
+The paper cites Gifford's work as a 1981 Stanford PhD thesis (reference 18); the Spanner paper cites the same work as Xerox PARC technical report CSL-81-8, July 1982. No online copy was checked for this page.
+
+</Callout>
+
+## Sources
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.2, §2.4, §2.4.4, §3.2.1, §3.2.5, §4.1, §4.2 (Table 2), §5.
+- James C. Corbett et al., [Spanner: Google's Globally-Distributed Database](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), OSDI '12, §1, §3, §4.1, §4.1.2, §4.2.1.
+- Maurice P. Herlihy and Jeannette M. Wing, [Linearizability: A Correctness Condition for Concurrent Objects](https://doi.org/10.1145/78969.78972), ACM TOPLAS 12(3), July 1990, pp. 463–492.
+- Philip A. Bernstein and Nathan Goodman, [Multiversion Concurrency Control: Theory and Algorithms](https://doi.org/10.1145/319996.319998), ACM TODS 8(4), December 1983.
+- David K. Gifford, *Information Storage in a Decentralized Computer System*, PhD thesis, Stanford, 1981 (Zanzibar reference 18); also Xerox PARC CSL-81-8 (Spanner reference 16). No link verified.

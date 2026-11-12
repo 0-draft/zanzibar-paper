@@ -1,0 +1,383 @@
+---
+title: Changing and testing a schema
+description: How the paper keeps namespace config changes consistent inside one request, why removing a relation takes three steps in today's products, and how to test a model with assertion files in CI.
+section: guide
+part: practice
+order: 13
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "3.1.3", "3.2.2", "4"]
+---
+
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+A schema is the part of an authorization system that changes least often and breaks the most when it does. In the paper it is the *namespace configuration*: "A namespace configuration specifies its relations as well as its storage parameters" (§2.3). At Google there were "more than 1,500 namespaces", and their configuration files "range from tens of lines to thousands of lines, with the median near 500 lines" (§4). This page covers three things: how the paper keeps a config change from splitting one request in two, how today's products make you remove a relation in steps, and how to test a model before it ships.
+
+The relation configs themselves (`_this`, `computed_userset`, `tuple_to_userset`) are explained on [Relation tuples and usersets](../relation-tuples/). This page is about changing them.
+
+## How the paper versions namespace configs
+
+Configs live in their own Spanner database: "There is one database to store relation tuples for each client namespace, one database to hold all namespace configurations, and one changelog database shared across all namespaces" (§3). The config database is a table plus a log:
+
+<Callout kind="paper" title="§3.1.3 Namespace Config Storage">
+
+Namespace configs are stored in a database with two tables. One table contains the configs and is keyed by namespace IDs. The other is a changelog of config updates and is keyed by commit timestamps. This structure allows a Zanzibar server to load all configs upon startup and monitor the changelog to refresh configs continuously.
+
+</Callout>
+
+So every config version has a commit timestamp, and every server holds some range of versions. The danger is a request that fans out (see [Architecture](../architecture/)): if the server that receives it has already loaded a new config and the server it delegates to has not, the two halves of one Check would be evaluated under different rules. The paper rules that out: "Zanzibar chooses a single snapshot timestamp for config metadata when evaluating each client request. All `aclservers` in a cluster use that same timestamp for the same request, including for any subrequests that fan out from the original client request" (§3.2.2).
+
+Which timestamp can a request use when the servers in a cluster have loaded different config versions?
+
+<Swimlane
+  lanes={["config storage", "monitoring job", "aclserver 1", "aclserver 2"]}
+  laneWidth={140}
+  rowHeight={62}
+  timeLabel="time"
+  title="One config timestamp per request"
+  desc="A new config version is committed to config storage at timestamp T2. aclserver 1 reads it from the changelog and now holds versions up to T2; aclserver 2 lags and still holds versions up to T1. Both report their ranges to the monitoring job, which reports a globally available range ending at T1. A request arrives at aclserver 1, which picks a time inside that range, so at most T1, and sends a subrequest to aclserver 2 with the same config timestamp. Later aclserver 2 loads T2 and the global range grows to include T2."
+  events={[
+    { lane: 0, t: 0, label: "config v2\ncommitted at T2", kind: "write" },
+    { lane: 2, t: 1, label: "loads v2:\nholds ≤ T2", kind: "note" },
+    { lane: 3, t: 1, label: "lags:\nholds ≤ T1", kind: "note" },
+    { lane: 1, t: 2, label: "global range\nends at T1", kind: "note" },
+    { lane: 2, t: 3, label: "request: picks\na time ≤ T1", kind: "read" },
+    { lane: 3, t: 4, label: "subrequest at\nthe same time", kind: "good" },
+    { lane: 3, t: 5, label: "loads v2:\nholds ≤ T2", kind: "note" },
+    { lane: 1, t: 6, label: "global range\nnow has T2", kind: "note" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 1], label: "changelog" },
+    { from: [2, 1], to: [1, 2], dashed: true },
+    { from: [3, 1], to: [1, 2], label: "ranges", dashed: true },
+    { from: [1, 2], to: [2, 3], label: "range" },
+    { from: [2, 3], to: [3, 4], label: "fan-out" },
+    { from: [0, 0], to: [3, 5], label: "changelog", dashed: true },
+  ]}
+  caption="The request is evaluated under v1 on both servers, because v2 is not yet available on every server."
+/>
+
+Notice that the new config is not used the moment it is committed. It becomes usable when every server in the cluster can serve it. In the paper's words, "each server in a cluster may have access to a different range of config timestamps due to restarts or network latency. Zanzibar must pick a timestamp that is available across all of them. To facilitate this, a monitoring job tracks the timestamp range available to every server and aggregates them, reporting a globally available range to every other server. On each incoming request the server picks a time from this range, ensuring that all servers can continue serving even if they are no longer able to read from the config storage" (§3.2.2).
+
+The paper stops there. It does not say how a client migrates tuples when it removes a relation, whether a config write is checked against existing tuples, or how the config timestamp relates to the tuple snapshot chosen for the same request. It only says that ⟨*namespace*⟩ and ⟨*relation*⟩ "are predefined in client configurations" (§2.1), and that a relation is part of every tuple's primary key (§2.1, §3.1.1). The rest of this page is about how the open-source systems handle that gap.
+
+## Schema versions in two products
+
+The two most documented products made different choices.
+
+- **SpiceDB** has one current schema per deployment, replaced with `WriteSchema`. AuthZed's docs say SpiceDB "processes all calls to the WriteSchema in a **safe** manner: it is not possible to break the type safety of a schema", which means "it is not possible to accidentally remove a relation that is still referenced by one or more relationships" ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)). A 2022 AuthZed post adds that schema writes are fully consistent, so relationship writes after a schema write are evaluated under the new schema ([online schema migrations](https://authzed.com/blog/online-schema-migrations)).
+- **OpenFGA** keeps every version. "Authorization Models in OpenFGA are immutable, they are created once and then can no longer be deleted or modified. Each time you write an authorization model, a new version is created." Requests can name an `authorization_model_id`; without one, "OpenFGA will use the last created Authorization Model for that store" ([immutable models](https://openfga.dev/docs/getting-started/immutable-models)). The docs recommend pinning the ID in configuration, which also allows shadow checks against a new model before switching.
+
+The paper's design sits between the two: a changelog keyed by commit timestamp, like OpenFGA's version history, but with servers always moving to the newest version, like SpiceDB. More on each product: [SpiceDB](../../ecosystem/spicedb/), [OpenFGA](../../ecosystem/openfga/).
+
+## Removing a relation takes three steps
+
+Adding is easy. In SpiceDB, "Adding a new `relation` to a `definition` is always allowed, as it cannot change any existing types or computation", and changing how a permission is computed is allowed as long as it refers to defined relations or permissions ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)).
+
+Removing is not. The same page: "For type safety reasons, any removal of a `relation` with data, or a `relation` or `permission` referenced by _another_ `relation` or `permission` is disallowed." A relation can only go once its tuples are gone, and its tuples can only go safely once nothing computes access from them. So the removal has an order.
+
+Take the running example's `doc` with a hypothetical extra relation, `editor`, that the team wants to drop. In SpiceDB's schema language it starts like this:
+
+```text
+definition doc {
+  relation parent: folder
+  relation owner: user
+  relation editor: user
+  relation viewer: user | group#member
+  permission view = owner + editor + viewer + parent->view
+}
+```
+
+What does each step change, and why can none of them be skipped?
+
+<Frames>
+
+<Graph
+  width={300}
+  height={230}
+  title="Start"
+  desc="The permission view on doc points to four relations: owner, editor, viewer and parent. The editor relation has stored relationships, drawn as a storage box below it."
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, on: true },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "editor tuples", kind: "store", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "e", on: true },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+    { from: "e", to: "t", dir: "none", on: true },
+  ]}
+  caption="Start: view reads editor, and editor holds data."
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="Step 1: stop referencing editor"
+  desc="The schema is written again with view computed from owner, viewer and parent only. The editor relation still exists and still holds relationships, but nothing reads it."
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, kind: "group" },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "editor tuples", kind: "store", mono: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+    { from: "e", to: "t", dir: "none" },
+  ]}
+  caption="Step 1 (WriteSchema): editors lose access through view now."
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="Step 2: delete the editor tuples"
+  desc="A DeleteRelationships call removes every relationship for the editor relation. The relation is still declared in the schema but is empty and unreferenced."
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, kind: "group" },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "no tuples", kind: "group", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+  ]}
+  caption="Step 2 (DeleteRelationships): the relation is empty."
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="Step 3: drop the relation"
+  desc="The schema is written a third time without the editor relation. view reads owner, viewer and parent."
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 60, y: 110, label: "owner", mono: true },
+    { id: "v", x: 150, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 240, y: 110, label: "parent", mono: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+  ]}
+  caption="Step 3 (WriteSchema): editor is gone."
+/>
+
+</Frames>
+
+Notice where access actually changes: in step 1, not step 3. Once the permission stops reading `editor`, an editor who is not also an owner or viewer is denied, while the tuples are still on disk. That is the point to stop and watch. AuthZed suggests keeping that state "while monitoring so you can roll back" before deleting data ([online schema migrations](https://authzed.com/blog/online-schema-migrations)): rolling back step 1 is a schema write, while rolling back step 2 means restoring tuples. The three steps come from [AuthZed's migration docs](https://authzed.com/docs/spicedb/modeling/migrating-schema), which also describe the same pattern for removing one allowed subject type from a relation (delete those relationships first, then edit the schema).
+
+Renaming a relation is a removal plus an addition. SpiceDB's docs walk through it: add the new relation and include it in the permission, make the application write both, backfill, drop the old relation from the permission, stop writing it, then remove it with the three steps above ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)). OpenFGA's version of the same job relies on immutable models: write the new model (a new ID that production does not use yet), update the application, copy the tuples to the new relation name, then deploy the application pointed at the new model ID ([immutable models](https://openfga.dev/docs/getting-started/immutable-models)).
+
+<Callout kind="warn" title="Removing a permission">
+
+SpiceDB allows removing a permission that nothing else in the schema references, but warns that it "*can* break API callers if they are making checks or other API requests against the permission. It is up to your own CI system to verify that removed permissions are no longer referenced externally" ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)). The schema cannot see the application code.
+
+</Callout>
+
+## Testing a model with assertion files
+
+Both products read a YAML file that holds a model, some tuples and the answers you expect. The examples below encode the running example (Anne owns the readme; Beto is in eng; eng members view the readme; Chen views folder A). They follow each product's documented format but were written for this page and have not been run.
+
+### OpenFGA: `.fga.yaml`
+
+A `.fga.yaml` file has a `model` (or `model_file`), optional `tuples`, and `tests`; a test can hold `check`, `list_objects` and `list_users` blocks, each with `assertions` ([testing models](https://openfga.dev/docs/modeling/testing)).
+
+```yaml
+name: Running example
+model: |
+  model
+    schema 1.1
+
+  type user
+
+  type group
+    relations
+      define member: [user]
+
+  type folder
+    relations
+      define viewer: [user]
+
+  type doc
+    relations
+      define parent: [folder]
+      define owner: [user]
+      define viewer: [user, group#member] or owner or viewer from parent
+
+tuples:
+  - user: user:anne
+    relation: owner
+    object: doc:readme
+  - user: user:beto
+    relation: member
+    object: group:eng
+  - user: group:eng#member
+    relation: viewer
+    object: doc:readme
+  - user: folder:A
+    relation: parent
+    object: doc:readme
+  - user: user:chen
+    relation: viewer
+    object: folder:A
+
+tests:
+  - name: readme access
+    check:
+      - user: user:anne
+        object: doc:readme
+        assertions:
+          owner: true
+          viewer: true
+      - user: user:chen
+        object: doc:readme
+        assertions:
+          owner: false
+          viewer: true
+    list_objects:
+      - user: user:beto
+        type: doc
+        assertions:
+          viewer:
+            - doc:readme
+```
+
+The OpenFGA CLI runs it with `fga model test --tests <filename>.fga.yaml` and prints a pass count per kind of test ([testing models](https://openfga.dev/docs/modeling/testing)).
+
+### SpiceDB: validation files
+
+A SpiceDB validation file has a `schema` (or `schemaFile`), `relationships` as one multi-line string rather than a YAML list, `assertions` with `assertTrue` and `assertFalse`, and an optional `validation` block of *expected relations* that lists every subject with access and how it got there ([validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)).
+
+```yaml
+schema: |-
+  definition user {}
+
+  definition group {
+    relation member: user
+  }
+
+  definition folder {
+    relation viewer: user
+    permission view = viewer
+  }
+
+  definition doc {
+    relation parent: folder
+    relation owner: user
+    relation viewer: user | group#member
+    permission view = owner + viewer + parent->view
+  }
+
+relationships: |-
+  doc:readme#owner@user:anne
+  group:eng#member@user:beto
+  doc:readme#viewer@group:eng#member
+  doc:readme#parent@folder:A
+  folder:A#viewer@user:chen
+
+assertions:
+  assertTrue:
+    - doc:readme#view@user:anne
+    - doc:readme#view@user:beto
+    - doc:readme#view@user:chen
+  assertFalse:
+    - doc:readme#owner@user:chen
+```
+
+`zed validate` runs it "using the same parsing logic that the SpiceDB binary uses", and since zed v0.25.0 takes several files at once (`zed validate validations/*`) ([validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)). This page leaves out the `validation` block because its exact output for a group userset was not checked; the docs show the form `"[user:you] is <document:validation-testing-debugging#reader>"`.
+
+Both files test the *model*, against tuples you invent. They are unit tests for the schema, not a check on production data.
+
+## Running them in CI
+
+Where does each kind of check belong between a pull request and production?
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={520}
+  title="Schema tests in a delivery pipeline"
+  desc="A pull request with a schema change and its test file goes to CI, which runs zed validate or fga model test against the tuples in the test file. If they pass, a deploy step writes the schema with WriteSchema or WriteAuthorizationModel to the running service, which stores it in its datastore. For OpenFGA the new model ID is then pinned in the application's configuration. A note beside the deploy step says that data-dependent steps, such as deleting tuples before removing a relation, are not covered by the CI tests."
+  nodes={[
+    { id: "pr", x: 90, y: 60, label: "pull request:\nschema + tests", kind: "client" },
+    { id: "ci", x: 310, y: 60, label: "CI: zed validate /\nfga model test", kind: "server", on: true },
+    { id: "dep", x: 310, y: 170, label: "deploy: WriteSchema /\nWriteAuthorizationModel", kind: "server" },
+    { id: "db", x: 530, y: 170, label: "authorization\ndatastore", kind: "store" },
+    { id: "cfg", x: 310, y: 265, label: "app config: pinned\nmodel ID (OpenFGA)", kind: "note" },
+    { id: "gap", x: 90, y: 170, label: "not covered:\nexisting tuples", kind: "note" },
+  ]}
+  edges={[
+    { from: "pr", to: "ci", label: "on push", on: true },
+    { from: "ci", to: "dep", label: "tests pass" },
+    { from: "dep", to: "db" },
+    { from: "dep", to: "cfg", dashed: true },
+    { from: "gap", to: "dep", dashed: true, dir: "none" },
+  ]}
+  caption="CI checks the model against test tuples. Whether a write succeeds against real data is only known at deploy time."
+/>
+
+Notice the note on the left. AuthZed says so directly: "a schema write can still fail if a relation is removed and there are still instances of that relation in your database. `zed` doesn't know about your data" ([validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)). The three-step removal above is a deployment procedure, not something a test file can prove.
+
+Both projects publish GitHub Actions. For SpiceDB, `authzed/action-spicedb-validate` runs zed's validation on a file; AuthZed calls it "highly recommended because it can prevent deployments of unverified changes" ([docs](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)). For OpenFGA, `openfga/action-openfga-test` installs the CLI and runs `fga model test` on every file matching `*.fga.yaml` under `test_path` ([action.yml](https://github.com/openfga/action-openfga-test/blob/main/action.yml)). A minimal workflow with both:
+
+```yaml
+name: Authorization model
+on:
+  pull_request:
+    paths: ["authz/**"]
+
+jobs:
+  spicedb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: authzed/action-spicedb-validate@v1
+        with:
+          validationfile: authz/spicedb.yaml
+
+  openfga:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: openfga/action-openfga-test@v0.1.1
+        with:
+          test_path: authz/
+```
+
+<Callout kind="note" title="Which input name?">
+
+OpenFGA's testing page still shows the input as `store-file-path` with `v0.1.0`. The action's own `action.yml`, checked on 2026-11-13, defines `test_path` and `test_files_pattern` and no `store-file-path`; Auth0's December 2025 walkthrough also uses `test_path` with `v0.1.1` ([Auth0 blog](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/)). This page follows `action.yml`. Pin a version you have checked.
+
+</Callout>
+
+For larger changes, SpiceDB also ships an integration test server (`spicedb serve-testing`, or the `authzed/action-spicedb` action) that gives each preshared key "an isolated, empty datastore", so application tests can run in parallel against one instance ([docs](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)). OpenFGA's pinned model IDs allow shadow checks: send the same check to the old and new model and compare before switching ([immutable models](https://openfga.dev/docs/getting-started/immutable-models)).
+
+Paper sections: namespace configs §2.3; config storage §3.1.3; one config timestamp per request §3.2.2; numbers of namespaces and config sizes §4. Terms are in the [glossary](../glossary/#namespace-config).
+
+## Sources
+
+- Zanzibar paper, §2.1, §2.3, §3, §3.1.3, §3.2.2, §4 (this site's transcription)
+- AuthZed, Migrating a Schema in SpiceDB: [authzed.com/docs/spicedb/modeling/migrating-schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)
+- AuthZed blog, Online Schema Migrations in SpiceDB (2022-02-03): [authzed.com/blog/online-schema-migrations](https://authzed.com/blog/online-schema-migrations)
+- AuthZed, Validation, Testing, Debugging SpiceDB Schemas: [authzed.com/docs/spicedb/modeling/validation-testing-debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)
+- OpenFGA, Testing Models: [openfga.dev/docs/modeling/testing](https://openfga.dev/docs/modeling/testing)
+- OpenFGA, Immutable Authorization Models: [openfga.dev/docs/getting-started/immutable-models](https://openfga.dev/docs/getting-started/immutable-models)
+- OpenFGA Model Testing Action, action.yml: [github.com/openfga/action-openfga-test](https://github.com/openfga/action-openfga-test/blob/main/action.yml)
+- Carla Urrea Stabile, Continuous Authorization Testing: FGA, GitHub Actions, and CI/CD, Auth0 blog (2025-12-17): [auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/)

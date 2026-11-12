@@ -1,0 +1,319 @@
+---
+title: From Multics to Zanzibar
+description: Sixty years of access control, from capability lists and Multics ACLs through RBAC and ABAC to Zanzibar and the open-source systems that followed it, each step with its primary source.
+section: guide
+part: background
+order: 2
+checked: "2026-11-13"
+paper: ["2.1", "3.2.4", "4", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Timeline from "../../../components/diagram/Timeline.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+The Zanzibar paper describes its own ancestry in [§5 Related Work](../../#s5). It cites Multics, UNIX, POSIX ACLs, VMS and Taos for the data model; RBAC for roles; the IAM systems of Amazon, Google and Microsoft for the idea of one ACL store behind an RPC API; Facebook's TAO as a system of similar scale; and Lamport clocks, Spanner, Chubby and ZooKeeper for the consistency question. This page follows the same threads in time order.
+
+## How the ideas lead to Zanzibar
+
+The first multi-user systems had to decide who could touch what. In 1966 Dennis and Van Horn gave each computation a list of *capabilities*, unforgeable tokens that name an object and grant rights to it ([Dennis and Van Horn](https://www.princeton.edu/~rblee/ELE572Papers/Fall04Readings/ProgramSemantics_DennisvanHorn.pdf)). Lampson's 1971 access matrix showed that capabilities and access control lists are two ways of storing the same table, by row or by column ([Lampson](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)). Multics took the column view: every segment and directory carried an ACL ([Saltzer](https://dl.acm.org/doi/10.1145/361011.361067)). Zanzibar is on the ACL side too: it answers "who can touch this object?".
+
+Operating systems then made the lists cheaper and coarser, and later richer again. The paper traces this itself: in the first edition of UNIX, file flags say "whether owner and non-owner can read or write the file"; by the fourth edition there are read, write and execute bits "for owner, group, and others"; POSIX ACLs add "an arbitrary list of users and groups"; VMS "supports ACL inheritance for files created within a directory tree" (§5). Those four words, permissions, users, groups and inheritance, are what Zanzibar's data model sets out to support.
+
+From the 1970s, models moved away from per-object lists. Bell–LaPadula and Biba let the system, not the owner, decide by labels; Zanzibar is discretionary, so they are contrast rather than ancestry. Role-based access control (1992) put roles between users and permissions; the paper says roles "are similar to Zanzibar relations" (§5). Attribute-based control, defined in NIST's 2014 guide SP 800-162, computes decisions from attributes at request time. Relationship-based control, named by Gates in 2007 and formalised by Fong in 2011, decides from relationships such as "member of" or "parent folder of", which compose ([Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)). The paper never uses the word ReBAC, but its relation tuples are such a graph.
+
+What was new at Google was scale and consistency. The paper says Zanzibar "has been in production use for more than 5 years" (§4) as of the July 2019 paper, so it was running by 2014 at the latest; no public source gives a start year. It serves Calendar, Cloud, Drive, Maps, Photos and YouTube (§1). TAO, which the paper compares it with, offers "eventual global consistency", while Zanzibar provides "external consistency and snapshot reads with bounded staleness" so that it protects against the "new enemy" problem (§5). Lamport clocks were ruled out because they "require explicit participation of all “processes”", and some of Zanzibar’s are "external clients or even human users". Chubby does not support "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness", and ZooKeeper offers neither external consistency across nodes nor bounded-staleness snapshot reads (§5). Spanner and its TrueTime clock supplied the guarantee ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)).
+
+After the paper, others rebuilt the design in the open. Ory Keto was rewritten around it in 2021, and SpiceDB, OpenFGA, Permify and Topaz followed within about eighteen months. At the same time policy engines in the ABAC line, OPA and Cedar, matured, and the OpenID Foundation's AuthZEN working group, formed in 2023, standardised how an application asks an authorization engine for a decision: its Authorization API 1.0 became an OpenID Final Specification in January 2026. The details of each system are on the ecosystem pages.
+
+## Timeline
+
+<Timeline
+  sourceLabel="Source"
+  items={[
+    {
+      era: "Operating systems",
+      year: "1966",
+      title: "Capability lists",
+      body: "Dennis and Van Horn describe a computation's \"sphere of protection\" as its list of capabilities, the C-list. Capabilities answer \"what can this subject touch?\".",
+      href: "https://www.princeton.edu/~rblee/ELE572Papers/Fall04Readings/ProgramSemantics_DennisvanHorn.pdf",
+    },
+    {
+      era: "Operating systems",
+      year: "1971",
+      title: "UNIX First Edition: owner and non-owner bits",
+      body: "chmod has six mode bits: read and write for owner and for non-owner, executable, set-user-ID. No group class. (Date from an archive copy; the original manual was not checked.)",
+      href: "http://man.cat-v.org/unix-1st/2/sys-chmod",
+    },
+    {
+      era: "Operating systems",
+      year: "1973",
+      title: "UNIX Fourth Edition: group bits",
+      body: "The chmod page dated 8/5/73 adds set-group-ID and read, write, execute bits for owner, group and others.",
+      href: "https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2",
+    },
+    {
+      era: "Operating systems",
+      year: "1973–1974",
+      title: "Multics ACLs, described by Saltzer",
+      body: "An ACL on every segment and directory. Presented at SOSP in October 1973, published in CACM in July 1974; Multics itself ran earlier. Zanzibar reference [23].",
+      href: "https://dl.acm.org/doi/10.1145/361011.361067",
+    },
+    {
+      era: "Operating systems",
+      year: "1997–1998",
+      title: "POSIX.1e ACLs: draft 17, then withdrawn",
+      body: "Draft 17 (October 1997) became the basis of Linux ACLs; sponsorship for 1003.1e was withdrawn in January 1998.",
+      href: "https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html",
+    },
+    {
+      era: "Models and standards",
+      year: "1971",
+      title: "Lampson, \"Protection\": the access matrix",
+      body: "Rows are domains (subjects), columns are objects, cells are access attributes. An ACL is one column, attached to the object; capabilities are a domain's entries.",
+      href: "https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf",
+    },
+    {
+      era: "Models and standards",
+      year: "1973",
+      title: "Bell–LaPadula",
+      body: "Mandatory confidentiality: no read up, no write down. MITRE MTR-2547 Vol. I, cited from Bell's own retrospective.",
+      href: "https://www.acsac.org/2005/papers/Bell.pdf",
+    },
+    {
+      era: "Models and standards",
+      year: "1975–1977",
+      title: "Biba integrity model",
+      body: "The integrity dual of Bell–LaPadula. MITRE MTR-3153 (June 1975), usually cited as ESD-TR-76-372 (April 1977).",
+      href: "https://seclab.cs.ucdavis.edu/projects/history/CD/index.html",
+    },
+    {
+      era: "Models and standards",
+      year: "1992",
+      title: "Role-based access control",
+      body: "Ferraiolo and Kuhn, 15th National Computer Security Conference. Zanzibar reference [17].",
+      href: "https://csrc.nist.gov/projects/role-based-access-control",
+    },
+    {
+      era: "Models and standards",
+      year: "1996",
+      title: "RBAC96",
+      body: "Sandhu et al. formalise a family of RBAC models in IEEE Computer, February 1996.",
+      href: "https://csrc.nist.gov/projects/role-based-access-control",
+    },
+    {
+      era: "Models and standards",
+      year: "2003",
+      title: "XACML 1.0, OASIS Standard",
+      body: "An XML policy language that separates the enforcement point from the decision point. The exact approval day in February 2003 varies by source.",
+      href: "https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html",
+    },
+    {
+      era: "Models and standards",
+      year: "2004",
+      title: "ANSI INCITS 359-2004 (RBAC)",
+      body: "The unified NIST RBAC model becomes an ANSI standard on 11 February 2004; revised as INCITS 359-2012.",
+      href: "https://csrc.nist.gov/projects/role-based-access-control",
+    },
+    {
+      era: "Models and standards",
+      year: "2007",
+      title: "\"Relationship-Based Access Control\" coined",
+      body: "Carrie Gates, W2SP 2007, as credited in Fong's 2011 abstract. Gates's paper itself was not checked.",
+      href: "https://dl.acm.org/doi/10.1145/1943513.1943539",
+    },
+    {
+      era: "Models and standards",
+      year: "2011",
+      title: "Fong: a ReBAC protection model",
+      body: "Decisions based on the relationship between owner and accessor in a social network; relations compose, unlike roles.",
+      href: "https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf",
+    },
+    {
+      era: "Models and standards",
+      year: "2013",
+      title: "XACML 3.0, OASIS Standard",
+      body: "The core specification is dated 22 January 2013.",
+      href: "https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html",
+    },
+    {
+      era: "Models and standards",
+      year: "2014",
+      title: "NIST SP 800-162 (ABAC)",
+      body: "Attribute-based access control defined; published January 2014, updated 2 August 2019.",
+      href: "https://csrc.nist.gov/pubs/sp/800/162/upd2/final",
+    },
+    {
+      era: "Planet scale",
+      year: "2012",
+      title: "Spanner",
+      body: "Google's globally distributed database, with TrueTime and external consistency. Zanzibar stores its tuples in it (reference [15]).",
+      href: "https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf",
+    },
+    {
+      era: "Planet scale",
+      year: "by 2014",
+      title: "Zanzibar in production",
+      body: "The paper says it \"has been in production use for more than 5 years\" (§4). That puts the start before mid-2014; no public source gives the year.",
+      href: "https://www.usenix.org/conference/atc19/presentation/pang",
+    },
+    {
+      era: "Planet scale",
+      year: "2019",
+      title: "The Zanzibar paper, USENIX ATC '19",
+      body: "Pang et al., presented in Renton, WA, in July 2019. The paper this site translates.",
+      href: "https://www.usenix.org/conference/atc19/presentation/pang",
+      on: true,
+    },
+    {
+      era: "Open source and standards",
+      year: "2016",
+      title: "Open Policy Agent v0.1.0",
+      body: "A general-purpose policy engine with the Rego language; first GitHub release on 14 July 2016.",
+      href: "https://github.com/open-policy-agent/opa/releases",
+    },
+    {
+      era: "Open source and standards",
+      year: "2021",
+      title: "OPA graduates in the CNCF",
+      body: "Announced 4 February 2021.",
+      href: "https://www.cncf.io/announcements/2021/02/04/cloud-native-computing-foundation-announces-open-policy-agent-graduation/",
+    },
+    {
+      era: "Open source and standards",
+      year: "2021",
+      title: "Ory Keto's Zanzibar rewrite",
+      body: "v0.6.0-alpha.1, 7 April 2021. Keto itself dates from 2018.",
+      href: "https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1",
+    },
+    {
+      era: "Open source and standards",
+      year: "2021",
+      title: "SpiceDB first release",
+      body: "30 September 2021, from AuthZed.",
+      href: "https://github.com/authzed/spicedb",
+    },
+    {
+      era: "Open source and standards",
+      year: "2022",
+      title: "OpenFGA first release",
+      body: "10 June 2022. Developed by Okta employees; a CNCF Incubating project since November 2025 (CNCF blog, 11 November 2025).",
+      href: "https://github.com/openfga/openfga",
+    },
+    {
+      era: "Open source and standards",
+      year: "2022",
+      title: "Permify first release",
+      body: "3 August 2022.",
+      href: "https://github.com/Permify/permify",
+    },
+    {
+      era: "Open source and standards",
+      year: "2022",
+      title: "Topaz first release",
+      body: "25 October 2022, from Aserto.",
+      href: "https://github.com/aserto-dev/topaz",
+    },
+    {
+      era: "Open source and standards",
+      year: "2023",
+      title: "Cedar open-sourced",
+      body: "AWS releases the Cedar policy language under Apache-2.0 on 10 May 2023.",
+      href: "https://aws.amazon.com/about-aws/whats-new/2023/05/cedar-open-source-language-access-control",
+    },
+    {
+      era: "Open source and standards",
+      year: "2023",
+      title: "Amazon Verified Permissions GA",
+      body: "A managed service that evaluates Cedar policies, generally available on 13 June 2023.",
+      href: "https://aws.amazon.com/about-aws/whats-new/2023/06/amazon-verified-permissions-generally-available/",
+    },
+    {
+      era: "Open source and standards",
+      year: "2023",
+      title: "OpenID AuthZEN working group",
+      body: "Announced 20 October 2023, to define \"standard mechanisms, protocols and formats for communication between authorization components\".",
+      href: "https://openid.net/announcing-authzen-working-group/",
+    },
+    {
+      era: "Open source and standards",
+      year: "2026",
+      title: "AuthZEN Authorization API 1.0 Final",
+      body: "Approved as an OpenID Final Specification, announced 12 January 2026 (81 approve, 1 object, 25 abstain). The API lets policy enforcement points (PEPs) ask policy decision points (PDPs) for decisions.",
+      href: "https://openid.net/authorization-api-1-0-final-specification-approved/",
+    },
+  ]}
+/>
+
+## What Zanzibar took from where
+
+The paper is careful about the difference between building on something and resembling it. It runs on Spanner and Leopard; it supports the features of earlier ACL systems; and it calls RBAC roles similar to its relations and the "blessings" of Abadi et al. similar to its tuples (§5).
+
+Which earlier work shows up in which part of Zanzibar?
+
+<Graph
+  width={620}
+  height={340}
+  minWidth={540}
+  title="What Zanzibar took from where"
+  desc="Left column, earlier work and the systems Zanzibar runs on: Multics, UNIX, POSIX ACLs, VMS (ACLs, groups, inheritance); Abadi et al., 2015 (blessings); RBAC, 1992 (roles); Spanner, 2012 (TrueTime, snapshot reads), green; the Leopard index, a Zanzibar component, green. Right column, parts of Zanzibar: relation tuples and usersets (§2.1); relations and userset rewrites (§2.3.1); external consistency and zookies (§2.2); nested-group checks (§3.2.4). Dashed arrows labelled supports features of, and similar to, run from the ACL systems and from Abadi et al. to tuples and usersets, and from RBAC to relations. Solid arrows labelled built on run from Spanner to external consistency and from Leopard to nested-group checks."
+  nodes={[
+    { id: "acl", x: 140, y: 40, label: "Multics, UNIX, POSIX ACLs, VMS\nACLs, groups, inheritance", kind: "object" },
+    { id: "taos", x: 140, y: 110, label: "Abadi et al. (2015)\n\"blessings\"", kind: "object" },
+    { id: "rbac", x: 140, y: 180, label: "RBAC (1992)\nroles", kind: "object" },
+    { id: "span", x: 140, y: 250, label: "Spanner (2012)\nTrueTime, snapshot reads", kind: "store" },
+    { id: "leo", x: 140, y: 315, label: "Leopard index\n(part of Zanzibar)", kind: "store" },
+    { id: "tup", x: 505, y: 75, label: "relation tuples\nand usersets (§2.1)", kind: "object", on: true },
+    { id: "rel", x: 505, y: 180, label: "relations and userset\nrewrites (§2.3.1)", kind: "object", on: true },
+    { id: "ext", x: 505, y: 250, label: "external consistency,\nzookies (§2.2)", kind: "object", on: true },
+    { id: "nest", x: 505, y: 315, label: "nested-group\nchecks (§3.2.4)", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "acl", to: "tup", label: "supports features of", dashed: true },
+    { from: "taos", to: "tup", label: "similar to", dashed: true },
+    { from: "rbac", to: "rel", label: "similar to", dashed: true },
+    { from: "span", to: "ext", label: "built on" },
+    { from: "leo", to: "nest", label: "built on" },
+  ]}
+  caption="Solid arrows: Zanzibar runs on it. Dashed arrows: the paper names it as a precedent or a similar idea (§5, §3.2.4)."
+/>
+
+Notice the split. The data model on the top half is a recombination of old ideas; the paper's own claim is the unification, modelling with tuples "allows us to unify the concepts of ACLs and groups" (§2.1), where Abadi et al. kept them separate (§5). The bottom half is what made it work at Google's scale: Spanner for "external consistency and snapshot reads with bounded staleness" (§5), and Leopard, "an indexing system used to optimize operations on large and deeply nested sets" (§3), for groups that pointer chasing cannot serve fast enough (§3.2.4).
+
+<Callout kind="note" title="IAM on top">
+
+The paper also notes that Google's Cloud IAM system "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (§5): a role-based product running on the relationship store. See [ACL, RBAC, ABAC, ReBAC](../access-control-models/) for how the models fit together.
+
+</Callout>
+
+<Callout kind="paper" title="In the paper">
+
+Related work, with every system named on this page: §5. Production history: §4. Leopard: §3 and §3.2.4.
+
+</Callout>
+
+## Sources
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- J. B. Dennis and E. C. Van Horn, "Programming Semantics for Multiprogrammed Computations", CACM 9(3), 1966, [PDF](https://www.princeton.edu/~rblee/ELE572Papers/Fall04Readings/ProgramSemantics_DennisvanHorn.pdf)
+- B. W. Lampson, "Protection", 1971; reprinted in ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
+- UNIX First Edition sys-chmod(2), archive copy, [man.cat-v.org/unix-1st/2/sys-chmod](http://man.cat-v.org/unix-1st/2/sys-chmod)
+- UNIX Fourth Edition chmod(2), Unix history repository, [github.com/dspinellis/unix-history-repo](https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2)
+- J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
+- A. Grünbacher, "POSIX Access Control Lists on Linux", USENIX ATC 2003 FREENIX, [usenix.org](https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html)
+- D. E. Bell, "Looking Back at the Bell-La Padula Model", ACSAC 2005, [PDF](https://www.acsac.org/2005/papers/Bell.pdf)
+- UC Davis Computer Security Lab history archive (Biba), [seclab.cs.ucdavis.edu/projects/history/CD](https://seclab.cs.ucdavis.edu/projects/history/CD/index.html)
+- NIST, Role Based Access Control project, [csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
+- OASIS, XACML 3.0 core specification, [docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html)
+- NIST SP 800-162, [csrc.nist.gov/pubs/sp/800/162/upd2/final](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)
+- P. W. L. Fong, "Relationship-Based Access Control: Protection Model and Policy Language", CODASPY '11, [dl.acm.org/doi/10.1145/1943513.1943539](https://dl.acm.org/doi/10.1145/1943513.1943539), [PDF](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)
+- J. C. Corbett et al., "Spanner: Google's Globally-Distributed Database", OSDI '12, [PDF](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
+- Open Policy Agent releases, [github.com/open-policy-agent/opa/releases](https://github.com/open-policy-agent/opa/releases); CNCF graduation announcement, [cncf.io](https://www.cncf.io/announcements/2021/02/04/cloud-native-computing-foundation-announces-open-policy-agent-graduation/)
+- Ory Keto v0.6.0-alpha.1, [github.com/ory/keto/releases/tag/v0.6.0-alpha.1](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)
+- SpiceDB, [github.com/authzed/spicedb](https://github.com/authzed/spicedb)
+- OpenFGA, [github.com/openfga/openfga](https://github.com/openfga/openfga)
+- Permify, [github.com/Permify/permify](https://github.com/Permify/permify)
+- Topaz, [github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
+- AWS, Cedar open-source announcement, [aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/05/cedar-open-source-language-access-control); Amazon Verified Permissions GA, [aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/06/amazon-verified-permissions-generally-available/)
+- CNCF, OpenFGA becomes a CNCF incubating project, 11 November 2025, [cncf.io](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
+- OpenID Foundation, AuthZEN working group announcement, [openid.net/announcing-authzen-working-group](https://openid.net/announcing-authzen-working-group/); Authorization API 1.0 Final, [openid.net/authorization-api-1-0-final-specification-approved](https://openid.net/authorization-api-1-0-final-specification-approved/); the specification, [openid.net/specs/authorization-api-1_0.html](https://openid.net/specs/authorization-api-1_0.html)

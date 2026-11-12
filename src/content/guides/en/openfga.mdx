@@ -1,0 +1,228 @@
+---
+title: OpenFGA
+description: The CNCF authorization engine inspired by Zanzibar, read against the paper.
+section: ecosystem
+order: 2
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.4"]
+product:
+  name: OpenFGA
+  maintainer: CNCF project (Okta core maintainer)
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/openfga/openfga
+  docs: https://openfga.dev/docs
+  status: Active, CNCF Incubating
+  latest: v1.22.1 (2026-10-28)
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+OpenFGA is an open-source authorization engine whose model language "closely tracks the language in the Zanzibar paper" ([configuration language](https://openfga.dev/docs/configuration-language)). The CNCF post announcing its incubation says it "was developed by a group of Okta employees, and is the foundation for the Auth0 FGA commercial offering" ([CNCF, 2025-11-11](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)). It is written in Go and licensed Apache-2.0 ([repository](https://github.com/openfga/openfga)). Auth0's managed service describes itself as "based on OpenFGA, an open-source project owned by the Cloud Native Computing Foundation" ([Auth0 FGA docs](https://docs.fga.dev/fga)).
+
+## Paper terms and OpenFGA terms
+
+OpenFGA's own docs include a table of "Equivalent Zanzibar Concepts" ([configuration language](https://openfga.dev/docs/configuration-language#equivalent-zanzibar-concepts)); this one extends it to the API and the storage.
+
+| In the paper | In OpenFGA |
+| --- | --- |
+| Namespace config (§2.3) | A `type` in an authorization model, written in the DSL or JSON ([configuration language](https://openfga.dev/docs/configuration-language)) |
+| Relation tuple `object#relation@user` (§2.1) | Relationship tuple with `user`, `relation`, `object`, e.g. `user:anne`, `owner`, `doc:readme`; a userset is written `group:eng#member` |
+| `_this` (§2.3.1) | A direct type restriction such as `[user, group#member]` (`this` in JSON) |
+| `computed_userset` | A bare relation name, e.g. `or owner` |
+| `tuple_to_userset` | `viewer from parent` (`tupleToUserset` in JSON) |
+| `union` / `intersection` / `exclusion` | `or` / `and` / `but not` (`union` / `intersection` / `difference` in JSON) |
+| Zookie (§2.4) | None; a query chooses `MINIMIZE_LATENCY` or `HIGHER_CONSISTENCY` ([consistency](https://openfga.dev/docs/interacting/consistency)) |
+| Check (§2.4.4) | `Check`, `BatchCheck` |
+| Read (§2.4.1) | `Read` |
+| Write (§2.4.2) | `Write` |
+| Watch (§2.4.3) | `ReadChanges`, a paginated list read with a continuation token ([tuple changes](https://openfga.dev/docs/interacting/read-tuple-changes)) |
+| Expand (§2.4.5) | `Expand` |
+| Not in the paper's API | `ListObjects`, `StreamedListObjects`, `ListUsers`; stores; model versions (`WriteAuthorizationModel`, `ReadAuthorizationModel(s)`) |
+| Leopard (§3.2.4) | No equivalent in the documentation cited here |
+| Spanner (§3) | `memory` (the default), `postgres`, `mysql`, `sqlite` ([configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)) |
+
+API names come from [`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto).
+
+## The running example as a model
+
+The paper's Figure 1 makes owners editors, editors viewers, and viewers of the parent folder viewers of the document (§2.3.1). In OpenFGA's DSL the same rules sit on one line per relation:
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type folder
+  relations
+    define viewer: [user, group#member]
+
+type doc
+  relations
+    define parent: [folder]
+    define owner: [user]
+    define editor: [user, group#member] or owner
+    define viewer: [user, group#member] or editor or viewer from parent
+```
+
+<Callout kind="note" title="Not run through a validator">
+
+This model uses only constructs that appear on OpenFGA's [configuration language page](https://openfga.dev/docs/configuration-language) and in the maintainers' Google Drive sample ([`model.fga`](https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga)) as of 2026-11-13: `model`, `schema 1.1`, `type`, `relations`, `define`, type restrictions with `group#member`, `or`, and `from`. It has not been run through the OpenFGA CLI or Playground.
+
+</Callout>
+
+The tuples for Anne, Beto and Chen:
+
+| user | relation | object |
+| --- | --- | --- |
+| `user:anne` | `owner` | `doc:readme` |
+| `folder:A` | `parent` | `doc:readme` |
+| `user:beto` | `member` | `group:eng` |
+| `group:eng#member` | `viewer` | `doc:readme` |
+| `user:chen` | `viewer` | `folder:A` |
+
+Which of these tuples does a check for `viewer` on the readme walk through for each person?
+
+<Graph
+  width={600}
+  height={270}
+  title="The running example as OpenFGA tuples"
+  desc="Five tuples. user:anne is owner of doc:readme. user:beto is member of group:eng, and group:eng#member is viewer of doc:readme. user:chen is viewer of folder:A, and folder:A is parent of doc:readme. Anne's path is highlighted: owner leads to editor, which leads to viewer."
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 225, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 280, y: 135, label: "group:eng", kind: "object", mono: true },
+    { id: "folder", x: 280, y: 225, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 500, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer (eng#member)" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="Each arrow is one stored tuple. Anne's owner tuple (highlighted) counts as editor, then as viewer; Beto comes in through the group and Chen through viewer from parent."
+/>
+
+Notice that the model, not a tuple, carries "owners are editors" and "editors are viewers": this is the paper's point that relationships between relations belong in the config, not in one tuple per object (§2.3.1).
+
+## Architecture
+
+What does an OpenFGA deployment consist of? The docs describe servers on one SQL datastore. Each server can keep in-memory caches for Check, and the production guide advises "a small pool of servers with high capacity (memory and CPU cores) instead of a big pool of servers, to increase cache hit ratios" ([running in production](https://openfga.dev/docs/best-practices/running-in-production)). For PostgreSQL a secondary (read replica) datastore can be configured; `HIGHER_CONSISTENCY` reads go to the primary ([configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)). Consumers of changes call `ReadChanges` and keep the continuation token ([tuple changes](https://openfga.dev/docs/interacting/read-tuple-changes)).
+
+<Graph
+  width={640}
+  height={320}
+  minWidth={560}
+  title="OpenFGA architecture"
+  desc="An application client sends Check to one of two OpenFGA servers over gRPC or HTTP. Each server has an optional in-memory Check cache. Both servers write to a primary PostgreSQL datastore and may read from an optional read replica, which is fed by PostgreSQL replication. A change consumer calls ReadChanges on a server with a continuation token."
+  nodes={[
+    { id: "app", x: 230, y: 40, label: "Application\n(gRPC / HTTP client)", kind: "client" },
+    { id: "cons", x: 520, y: 40, label: "Change consumer\n(polls ReadChanges)", kind: "client" },
+    { id: "s1", x: 200, y: 155, label: "OpenFGA server\n+ Check cache", kind: "server" },
+    { id: "s2", x: 440, y: 155, label: "OpenFGA server\n+ Check cache", kind: "server" },
+    { id: "pri", x: 200, y: 275, label: "Primary datastore\nPostgreSQL · MySQL · SQLite", kind: "store" },
+    { id: "rep", x: 480, y: 275, label: "Read replica\n(PostgreSQL, optional)", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "s1", label: "Check" },
+    { from: "cons", to: "s2", label: "ReadChanges + token" },
+    { from: "s1", to: "pri", label: "writes, HIGHER_CONSISTENCY", dir: "both" },
+    { from: "s2", to: "pri", dir: "both" },
+    { from: "s2", to: "rep", label: "other reads", dashed: true },
+    { from: "pri", to: "rep", label: "replication", dashed: true },
+  ]}
+  caption="Yellow: servers. Green: datastores. Blue: clients. Dashed: optional. The docs describe no server-to-server dispatch."
+/>
+
+Compare the paper's Figure 2 (§3): `aclservers` fan work out to each other, `watchservers` push a stream, and Leopard keeps a denormalized index. The OpenFGA docs cited here describe none of the three; servers answer from the datastore and their own caches.
+
+## Consistency without zookies
+
+OpenFGA has no zookie. Its docs say so under "Future work": the paper "has a feature called `Zookies`", and OpenFGA "is considering a similar feature in future releases" ([consistency](https://openfga.dev/docs/interacting/consistency)). Instead, Read and the query APIs take one of two values:
+
+| Mode | Behaviour ([consistency docs](https://openfga.dev/docs/interacting/consistency)) | Paper analogue |
+| --- | --- | --- |
+| `MINIMIZE_LATENCY` (default) | "will serve queries from the cache when possible" | A request without a zookie: "a reasonably recent snapshot" (§2.4.1) |
+| `HIGHER_CONSISTENCY` | "will skip the cache and query the database directly" | None exactly; closest is evaluating at the latest snapshot |
+
+Caching is "disabled by default", and then "all queries will have strong consistency regardless of the consistency mode specified" ([consistency](https://openfga.dev/docs/interacting/consistency)). The mode only matters once a cache is turned on.
+
+With the cache on, can Chen still see the readme right after he is removed from folder A?
+
+<Swimlane
+  lanes={["Application", "OpenFGA server", "Datastore"]}
+  laneWidth={190}
+  timeLabel="time"
+  title="Cache and consistency modes in OpenFGA"
+  desc="With the Check cache enabled, a first check for Chen on the readme is allowed and cached. The application then deletes Chen's viewer tuple on folder A. A second check with MINIMIZE_LATENCY may be answered from the cache and still say allowed. A third check with HIGHER_CONSISTENCY skips the cache, reads the datastore and is denied."
+  events={[
+    { lane: 0, t: 0, label: "can Chen view?", kind: "read" },
+    { lane: 1, t: 0, label: "allowed, cached", kind: "note" },
+    { lane: 0, t: 1, label: "delete Chen's tuple", kind: "write" },
+    { lane: 2, t: 1, label: "tuple deleted", kind: "write" },
+    { lane: 0, t: 2, label: "can Chen view?", kind: "read" },
+    { lane: 1, t: 2, label: "cache: allowed", kind: "bad" },
+    { lane: 0, t: 3, label: "can Chen view?", kind: "read" },
+    { lane: 2, t: 3, label: "read tuples", kind: "read" },
+    { lane: 1, t: 4, label: "denied", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0], label: "Check" },
+    { from: [0, 1], to: [2, 1], label: "Write (delete)" },
+    { from: [0, 2], to: [1, 2], label: "MINIMIZE_LATENCY" },
+    { from: [0, 3], to: [2, 3], label: "HIGHER_CONSISTENCY" },
+    { from: [2, 3], to: [1, 4], dashed: true },
+  ]}
+  caption="Row 2 is what the docs warn about: the tuple change “might not be taken in consideration” if the result comes from the cache. A zookie would let the application ask for “at least as fresh as my write” (§2.2); here the choice is all or nothing."
+/>
+
+The docs suggest deciding per request: if the application stored when a resource was last modified, it can send `HIGHER_CONSISTENCY` only while that time is within the cache TTL ([consistency](https://openfga.dev/docs/interacting/consistency)). That timestamp plays part of a zookie's role, kept by the application. Cache invalidation flags (`cache-controller-enabled`) also exist and check for recent writes to the store.
+
+## Differences from the paper
+
+- **No zookie.** No consistency token is returned or accepted; two modes plus an off-by-default cache replace it ([consistency](https://openfga.dev/docs/interacting/consistency)). The paper's consistency model rests on zookies (§2.2).
+- **Changes are polled.** `ReadChanges` returns a page of tuple changes "sorted by ascending time" with a continuation token ([`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)). The paper's Watch is a stream with heartbeat zookies (§2.4.3).
+- **Storage.** The paper uses Spanner (§3.1). OpenFGA offers `memory` (default, "Data is lost between server restarts"), PostgreSQL (with an optional read replica), MySQL and SQLite ([configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)).
+- **Conditions.** A type restriction like `[user with non_expired_grant]` makes a tuple count only when a CEL condition holds ([conditions](https://openfga.dev/docs/modeling/conditions)). The paper's tuple (§2.1) has no condition.
+- **Contextual tuples.** Tuples sent with a single Check, ListObjects, ListUsers or Expand request, "not persisted in the datastore" ([concepts](https://openfga.dev/docs/concepts), [contextual tuples](https://openfga.dev/docs/interacting/contextual-tuples)).
+- **Wildcards.** `[user, user:*]` allows a public grant ([configuration language](https://openfga.dev/docs/configuration-language)); the paper's tuple grammar has no wildcard (§2.1).
+- **Stores and model versions.** A store holds "one or more versions of an authorization model" and its tuples; "Store data cannot be shared across stores" ([concepts](https://openfga.dev/docs/concepts)). In the paper, configs are keyed by namespace and updated in place, with a changelog of config updates; each request is evaluated at one config snapshot (§3.1.3, §3.2.2). A check in OpenFGA can name the model version it uses.
+- **No Leopard.** The docs cited here describe Check caches and iterator caches, not a precomputed set index like Leopard (§3.2.4).
+- **List APIs.** `ListObjects`, `StreamedListObjects` and `ListUsers` are outside the paper's API (§2.4).
+
+## Status
+
+As of 2026-11-13: active. Latest release v1.22.1 on 2026-10-28; first release v0.1.0 on 2022-06-10; about 6.1k GitHub stars; Apache-2.0 ([repository](https://github.com/openfga/openfga), [releases](https://github.com/openfga/openfga/releases)).
+
+- June 2022: open sourced; December 2022: accepted as a CNCF Sandbox project ([project post, 2026-01-07](https://openfga.dev/blog/incubation-announcement)).
+- 2025-11-11: CNCF announces that its Technical Oversight Committee "has voted to accept OpenFGA as a CNCF incubating project" ([CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)).
+- The managed service is Auth0 FGA ([docs](https://docs.fga.dev/fga)).
+
+## Sources
+
+- [https://github.com/openfga/openfga](https://github.com/openfga/openfga)
+- [https://github.com/openfga/openfga/releases](https://github.com/openfga/openfga/releases)
+- [https://openfga.dev/docs](https://openfga.dev/docs)
+- [https://openfga.dev/docs/concepts](https://openfga.dev/docs/concepts)
+- [https://openfga.dev/docs/configuration-language](https://openfga.dev/docs/configuration-language)
+- [https://openfga.dev/docs/interacting/consistency](https://openfga.dev/docs/interacting/consistency)
+- [https://openfga.dev/docs/interacting/read-tuple-changes](https://openfga.dev/docs/interacting/read-tuple-changes)
+- [https://openfga.dev/docs/interacting/contextual-tuples](https://openfga.dev/docs/interacting/contextual-tuples)
+- [https://openfga.dev/docs/modeling/conditions](https://openfga.dev/docs/modeling/conditions)
+- [https://openfga.dev/docs/best-practices/running-in-production](https://openfga.dev/docs/best-practices/running-in-production)
+- [https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)
+- [https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)
+- [https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga](https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga)
+- [https://openfga.dev/blog/incubation-announcement](https://openfga.dev/blog/incubation-announcement)
+- [https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
+- [https://docs.fga.dev/fga](https://docs.fga.dev/fga)

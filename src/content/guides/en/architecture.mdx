@@ -1,0 +1,370 @@
+---
+title: Architecture, from one Check to Spanner
+description: The servers and databases behind Zanzibar, followed through a single Check request and the Watch stream.
+section: guide
+part: mechanisms
+order: 5
+checked: "2026-11-13"
+paper: ["3", "3.1", "3.2.5", "3.2.6", "3.2.7", "4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar is a set of servers in front of a set of Spanner databases. This page names the parts, then follows one Check request through them, then looks at how the data is laid out on disk. The numbers at the end are the ones the paper reports for production in 2018.
+
+## The parts
+
+Which boxes are there, and which way does data flow between them? The paper answers with its Figure 2. The version below keeps its colours (clients blue, servers yellow, Spanner databases green) and drops the detail.
+
+<Graph
+  width={640}
+  height={400}
+  minWidth={560}
+  title="Zanzibar architecture, simplified"
+  desc="Clients send Check, Read, Expand and Write to the aclservers in a Zanzibar serving cluster; the watchserver is drawn outside the cluster, as in the paper. The aclservers load namespace configs from Spanner, read and write relation tuples in one Spanner database per namespace, and append every write to the changelog, also in Spanner. A watchserver tails the changelog and streams changes to clients (the Watch API) and to Leopard (the paper's Figure 2 draws Leopard as a separate indexing system). A periodic offline pipeline reads the tuple databases, dumps snapshots and garbage-collects old versions; Leopard builds its index from those snapshots and answers set computations for the aclservers."
+  groups={[
+    { x: 178, y: 28, w: 184, h: 112, label: "Zanzibar serving cluster" },
+    { x: 425, y: 20, w: 210, h: 262, label: "Spanner" },
+  ]}
+  nodes={[
+    { id: "cl", x: 55, y: 90, label: "clients", kind: "client" },
+    { id: "acl", x: 270, y: 90, label: "aclservers", kind: "server" },
+    { id: "watch", x: 270, y: 250, label: "watchserver", kind: "server" },
+    { id: "wcl", x: 55, y: 250, label: "clients", kind: "client" },
+    { id: "cfg", x: 531, y: 70, label: "namespace configs", kind: "store" },
+    { id: "tup", x: 531, y: 150, label: "relation tuples\n(one DB per namespace)", kind: "store" },
+    { id: "log", x: 495, y: 248, label: "changelog", kind: "store" },
+    { id: "pipe", x: 585, y: 360, label: "offline\npipeline\n(periodic)", kind: "server" },
+    { id: "leo", x: 120, y: 360, label: "Leopard", kind: "server" },
+  ]}
+  edges={[
+    { from: "cl", to: "acl", label: "Check, Read,\nExpand, Write", dir: "both" },
+    { from: "cfg", to: "acl", label: "load" },
+    { from: "acl", to: "tup", label: "read, write", dir: "both", labelOffset: 12 },
+    { from: "acl", to: "log", label: "append", labelOffset: -12 },
+    { from: "log", to: "watch", label: "tail" },
+    { from: "watch", to: "wcl", label: "Watch" },
+    { from: "watch", to: "leo", label: "changes" },
+    { from: "tup", to: "pipe", label: "dump,\nGC", dir: "both", labelOffset: -24 },
+    { from: "pipe", to: "leo", label: "snapshots" },
+    { from: "leo", to: "acl", label: "set\ncomputation", labelOffset: -34 },
+  ]}
+  caption="Redrawn and simplified from the paper's Figure 2. Arrows show the direction of data flow. Clients appear twice only to keep the lines apart: the same clients call the aclservers and subscribe to Watch."
+/>
+
+Notice that the clients talk to two kinds of server. `aclservers` answer the four request types; `watchservers` only stream changes. In the paper's words, `aclservers` "are organized in clusters and respond to Check, Read, Expand, and Write requests", while `watchservers` "tail the changelog and serve a stream of namespace changes to clients in near real time" (§3). Leopard is an index for large and deeply nested groups; it has [its own page](../leopard/).
+
+The offline pipeline produces "dumps of the relation tuples in each namespace at a known snapshot timestamp" and garbage-collects "tuple versions older than a threshold configured per namespace" (§3).
+
+## One Check, step by step
+
+The request to follow: is Beto a viewer of the readme? In the running example the readme's viewers include the members of `group:eng`, and Beto is one of them, so the answer is yes. Zanzibar has to find that out by reading two objects, `doc:readme` and `group:eng`.
+
+### It lands on any server, which fans out
+
+Which server does the work? Any of them can take the request, and the work is then spread by object.
+
+<Graph
+  width={640}
+  height={260}
+  title="A Check fans out across a cluster"
+  desc="A client sends Check to aclserver A. Server A asks aclserver B, which handles doc:readme, whether Beto is a viewer of the readme. Server B finds that members of group:eng are viewers and asks aclserver C, which handles group:eng, whether Beto is a member. Answers travel back along the same arrows to A, which replies to the client."
+  nodes={[
+    { id: "cl", x: 60, y: 130, label: "client", kind: "client" },
+    { id: "a", x: 240, y: 130, label: "aclserver A\nreceives Check", kind: "server" },
+    { id: "b", x: 480, y: 60, label: "aclserver B\nkey: doc:readme", kind: "server", on: true },
+    { id: "c", x: 480, y: 210, label: "aclserver C\nkey: group:eng", kind: "server", on: true },
+  ]}
+  edges={[
+    { from: "cl", to: "a", label: "Check", dir: "both" },
+    { from: "a", to: "b", label: "viewer of readme?", dir: "both", labelOffset: -12 },
+    { from: "b", to: "c", label: "member of eng?", dir: "both" },
+  ]}
+  caption="Check(user:beto, viewer, doc:readme). Answers come back along the same arrows; A replies to the client."
+/>
+
+Server A did not need to own either object. The paper describes exactly this shape: "Requests arrive at any server in a cluster and that server fans out the work to other servers in the cluster as necessary. Those servers may in turn contact other servers to compute intermediate results. The initial server gathers the final result and returns it to the client." (§3)
+
+### Consistent hashing picks the peer
+
+How did A know to ask B about the readme? The servers of a cluster form one distributed cache: "Cache entries are distributed across Zanzibar servers with consistent hashing" (§3.2.5). The scheme is from [Karger et al. (STOC '97)](https://people.csail.mit.edu/karger/Papers/web.pdf), which the paper cites as [20]. For most namespaces the forwarding key is computed from the object ID (§3.2.5).
+
+<Graph
+  width={640}
+  height={350}
+  title="Forwarding keys mapped onto a ring of servers"
+  desc="Four aclservers, A, B, C and D, sit on a ring. The requests doc:readme#viewer and doc:readme#owner both hash on the object doc:readme and go to server B. group:eng#member goes to server C. folder:A#viewer goes to server D."
+  nodes={[
+    { id: "A", x: 320, y: 60, label: "aclserver A", kind: "server" },
+    { id: "B", x: 420, y: 165, label: "aclserver B", kind: "server" },
+    { id: "C", x: 320, y: 270, label: "aclserver C", kind: "server" },
+    { id: "D", x: 220, y: 165, label: "aclserver D", kind: "server" },
+    { id: "kv", x: 545, y: 50, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "ko", x: 545, y: 275, label: "doc:readme#owner", kind: "object", mono: true },
+    { id: "kg", x: 130, y: 325, label: "group:eng#member", kind: "object", mono: true },
+    { id: "kf", x: 100, y: 60, label: "folder:A#viewer", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "A", to: "B", dir: "none" },
+    { from: "B", to: "C", dir: "none" },
+    { from: "C", to: "D", dir: "none" },
+    { from: "D", to: "A", dir: "none" },
+    { from: "kv", to: "B", label: "hash(doc:readme)", dashed: true, on: true, labelOffset: -14 },
+    { from: "ko", to: "B", label: "hash(doc:readme)", dashed: true, on: true, labelOffset: 14 },
+    { from: "kg", to: "C", label: "hash(group:eng)", dashed: true, labelOffset: 14 },
+    { from: "kf", to: "D", label: "hash(folder:A)", dashed: true, labelOffset: -12 },
+  ]}
+  caption="Both readme requests go to B because the key is the object, not the relation. The ring is the textbook picture of consistent hashing; the paper does not say which variant Zanzibar uses."
+/>
+
+Notice that `viewer` and `owner` on the readme meet on the same server. That is the point of keying on the object: "processing a check on ⟨*object#relation*⟩ often involves indirect ACL checks on other relations of the same object and reading relation tuples of the object. These checks and reads can be processed by the same server since they share the same forwarding key with the parent check request." (§3.2.5) Karger et al. design consistent hashing so that when a cache is added or removed, only the minimum fraction of objects needed to keep the load balanced has to move, which is why it suits a cache.
+
+For keys that are hot, the paper adds that it uses [Slicer](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya) "to help distribute hot keys to multiple servers" (§3.2.5).
+
+### Both ends of a call cache the answer
+
+What happens when many servers ask C about `group:eng` at once, say because a search result page checks dozens of documents that are all shared with eng?
+
+<Graph
+  width={640}
+  height={300}
+  title="Caches at the caller and the callee form a tree"
+  desc="Three aclservers, A, D and E, each with a cache, ask aclserver C whether a user is a member of group:eng. Server C has its own cache and reads group:eng's tuples from Spanner only on a miss."
+  nodes={[
+    { id: "a", x: 100, y: 60, label: "aclserver A\n+ cache", kind: "server" },
+    { id: "d", x: 100, y: 150, label: "aclserver D\n+ cache", kind: "server" },
+    { id: "e", x: 100, y: 240, label: "aclserver E\n+ cache", kind: "server" },
+    { id: "c", x: 340, y: 150, label: "aclserver C\n+ cache", kind: "server", on: true },
+    { id: "db", x: 570, y: 150, label: "group tuples\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "a", to: "c", label: "eng member?" },
+    { from: "d", to: "c" },
+    { from: "e", to: "c" },
+    { from: "c", to: "db", label: "on a miss", on: true },
+  ]}
+  caption="A hit at a caller saves an RPC to C. A hit at C saves a read from Spanner."
+/>
+
+The callers' caches and the callee's cache stack into a tree: "To handle hot forwarding keys, we cache results at both the caller and the callee of internal RPCs, effectively forming cache trees." (§3.2.5) Cache keys include the snapshot timestamp, and timestamps are "rounded up to a coarse granularity, such as one or ten seconds", so that most recent requests share entries (§3.2.5). In production, check caching had "a 10% hit rate on the delegate’s side" and "a 2% hit rate" on the delegator’s side; the paper notes that, low as these rates look, "they prevent 500K internal RPCs per second from creating hot spots" (§4.4).
+
+### The lock table collapses identical requests
+
+A cache only helps once it holds the answer. If many identical requests arrive before the first one has finished, they would all miss and all go to Spanner: a [cache stampede](https://en.wikipedia.org/wiki/Cache_stampede) (the paper's reference [3]). How does C avoid that?
+
+<Swimlane
+  lanes={["request 1", "aclserver C", "request 2", "Spanner"]}
+  laneWidth={140}
+  rowHeight={58}
+  timeLabel="time"
+  title="A lock table lets one of several identical requests through"
+  desc="Request 1 asks C for cache key K; C misses and records K in its lock table. Request 2 asks for the same key and is made to wait. C reads the rows from Spanner once, fills the cache and releases the entry. Both requests get the answer."
+  events={[
+    { lane: 0, t: 0, label: "ask for key K", kind: "read" },
+    { lane: 1, t: 0, label: "miss: lock K", kind: "write" },
+    { lane: 2, t: 1, label: "ask for key K", kind: "read" },
+    { lane: 1, t: 1, label: "K locked: wait", kind: "note" },
+    { lane: 1, t: 2, label: "read once", kind: "read" },
+    { lane: 3, t: 2, label: "rows", kind: "read" },
+    { lane: 1, t: 3, label: "fill cache", kind: "good" },
+    { lane: 0, t: 4, label: "answer", kind: "good" },
+    { lane: 2, t: 4, label: "answer", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [2, 1], to: [1, 1] },
+    { from: [1, 2], to: [3, 2] },
+    { from: [1, 3], to: [0, 4] },
+    { from: [1, 3], to: [2, 4] },
+  ]}
+  caption="Request 2 blocks instead of going to Spanner. Only one read is issued for key K."
+/>
+
+The paper: "we maintain a *lock table* on each server to track outstanding reads and checks. Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated." (§3.2.5) For checks, the lock table saved "an additional 12%" on the delegate’s side and "an additional 3%" on the delegator’s side (§4.4).
+
+Two refinements came later (§3.2.5). For a very popular object, Zanzibar reads and caches *all* tuples of ⟨*object#relation*⟩ at once, "trading read bandwidth for cacheability". And because a cancelled sub-check leaves its cache key empty, it delays "eager cancellation when there are waiters on the corresponding lock table entry".
+
+### Reads to Spanner are pooled
+
+Now take a check that touches several relations of one object: is Chen a viewer of the readme? Under the paper's Figure 1 config, `viewer` includes `editor`, `editor` includes `owner`, and viewers of the `parent` folder are viewers of the document. So server B has four tuple sets of the readme to read.
+
+<Graph
+  width={640}
+  height={300}
+  title="Leaf reads for one check share one pool"
+  desc="Evaluating whether Chen is a viewer of doc:readme needs the readme's viewer, editor, owner and parent tuples. The four leaves are evaluated at the same time on aclserver B, which pools their reads before sending them to the doc database in Spanner."
+  nodes={[
+    { id: "v", x: 110, y: 50, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "e", x: 110, y: 117, label: "doc:readme#editor", kind: "object", mono: true },
+    { id: "o", x: 110, y: 184, label: "doc:readme#owner", kind: "object", mono: true },
+    { id: "p", x: 110, y: 251, label: "doc:readme#parent", kind: "object", mono: true },
+    { id: "b", x: 350, y: 150, label: "aclserver B\npools the reads", kind: "server", on: true },
+    { id: "db", x: 575, y: 150, label: "doc tuples\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "v", to: "b" },
+    { from: "e", to: "b" },
+    { from: "o", to: "b" },
+    { from: "p", to: "b" },
+    { from: "b", to: "db", label: "fewer RPCs", on: true },
+  ]}
+  caption="Check(user:chen, viewer, doc:readme). All four leaves start at once; their reads go out together."
+/>
+
+The leaves run concurrently: "we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled." (§3.2.3) Their reads are grouped: "We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner." (§3.2.3) The parent tuple then points at `folder:A`, and `folder:A#viewer` is forwarded to the server that owns `folder:A`, where Chen is found. The paper does not say how many RPCs a pool turns into; "fewer" is as far as it goes.
+
+The tuple layout makes this cheap: the primary key order "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair" (§3.1.1, see [Storage](#storage) below).
+
+### Slow Spanner reads are hedged
+
+Some reads will be slow for reasons that have nothing to do with the request. For calls to Spanner and to Leopard, Zanzibar uses request hedging, from [Dean and Barroso, "The Tail at Scale" (CACM, 2013)](https://research.google/pubs/the-tail-at-scale/), the paper's reference [16]. When does the second request go out?
+
+<Swimlane
+  lanes={["aclserver", "Spanner replica 1", "Spanner replica 2"]}
+  laneWidth={180}
+  rowHeight={58}
+  timeLabel="time"
+  title="A deferred hedged read"
+  desc="The aclserver sends a read to Spanner replica 1, which is slow. After the hedging delay, the aclserver sends the same read to replica 2. Replica 2 answers first; the aclserver uses that answer and cancels the read at replica 1."
+  events={[
+    { lane: 0, t: 0, label: "send read", kind: "read" },
+    { lane: 1, t: 0, label: "slow", kind: "bad" },
+    { lane: 0, t: 1, label: "delay passed", kind: "note" },
+    { lane: 2, t: 1, label: "same read", kind: "read" },
+    { lane: 2, t: 2, label: "reply", kind: "good" },
+    { lane: 0, t: 3, label: "use first reply", kind: "good" },
+    { lane: 1, t: 4, label: "cancelled", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [0, 1], to: [2, 1], label: "hedge" },
+    { from: [2, 2], to: [0, 3] },
+    { from: [0, 3], to: [1, 4], label: "cancel", dashed: true },
+  ]}
+  caption="The hedge is sent only after the first read is known to be slow."
+/>
+
+Hedging means "we send the same request to multiple servers, use whichever response comes back first, and cancel the other requests" (§3.2.7). The second request waits: "we first send one request and defer sending hedged requests until the initial request is known to be slow", with the delay set by an estimator of an "*N*th percentile latency based on recent measurements" (§3.2.7). In production "1% of Spanner reads, or 200K reads per second, benefit from hedging" (§4.4).
+
+<Callout kind="note" title="Not between aclservers">
+Zanzibar does not hedge its own internal calls. Checks differ in cost: "Hedging check requests would result in duplicating the most expensive workloads and, ironically, worsening latency." (§3.2.7) It relies on replicas and monitoring to avoid slow servers instead.
+</Callout>
+
+### Each client is fenced in
+
+A shared service has to stop one client from slowing down the others. §3.2.6 lists four limits:
+
+- CPU: each RPC is costed in "generic *cpu-seconds*"; each client has a global CPU limit, and "its RPCs will be throttled if it exceeds the limit *and* there is no spare capacity in the overall system."
+- Outstanding RPCs: each server limits the total, and the number per client.
+- Spanner: "the maximum number of concurrent reads per *(object, client)* and per client on each Spanner server."
+- Lock tables: "different lock table keys for requests from different clients", so that Spanner throttling one client does not block another.
+
+## The Watch path
+
+Writes also feed a stream. Where does a change go after Anne writes a tuple?
+
+<Graph
+  width={640}
+  height={330}
+  title="From a write to the Watch stream"
+  desc="A client sends a Write to an aclserver. In one Spanner transaction the aclserver writes the tuple to the doc namespace database and an entry to a changelog shard. The watchserver tails the changelog and streams the change to Watch clients and to Leopard's incremental indexer."
+  nodes={[
+    { id: "w", x: 60, y: 70, label: "client\nWrite", kind: "client" },
+    { id: "acl", x: 230, y: 70, label: "aclserver", kind: "server" },
+    { id: "tup", x: 470, y: 40, label: "doc tuples", kind: "store" },
+    { id: "log", x: 470, y: 140, label: "changelog shard", kind: "store", on: true },
+    { id: "watch", x: 470, y: 240, label: "watchserver", kind: "server", on: true },
+    { id: "cl", x: 300, y: 300, label: "Watch clients", kind: "client" },
+    { id: "leo", x: 580, y: 300, label: "Leopard\nindexer", kind: "server" },
+  ]}
+  edges={[
+    { from: "w", to: "acl", label: "tuple" },
+    { from: "acl", to: "tup", label: "same txn", labelOffset: -10 },
+    { from: "acl", to: "log", label: "same txn", labelOffset: 10 },
+    { from: "log", to: "watch", label: "tail", on: true },
+    { from: "watch", to: "cl", label: "changes" },
+    { from: "watch", to: "leo" },
+  ]}
+  caption="The tuple and its changelog entry are committed in one transaction, so the stream cannot miss a write or show one that did not commit."
+/>
+
+"Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction." The Spanner server that hosts the changelog shard acts as transaction coordinator "to minimize blocking of changelog reads on pending transactions" (§3.1.2). Leopard is one consumer of this stream: its incremental indexer "calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications" (§3.2.4).
+
+## Storage
+
+Which databases are there, and what does a row look like? There are three kinds (§3).
+
+<Graph
+  width={640}
+  height={300}
+  title="Zanzibar's Spanner databases"
+  desc="One database per namespace holds relation tuples: here doc, group and folder. A single namespace config database holds the configs and a changelog of config updates. A single changelog database, shared by all namespaces, records tuple updates. The aclservers read and write the tuple databases, load and monitor the config database, and append to the changelog."
+  nodes={[
+    { id: "doc", x: 90, y: 60, label: "doc tuples", kind: "store" },
+    { id: "grp", x: 90, y: 150, label: "group tuples", kind: "store" },
+    { id: "fol", x: 90, y: 240, label: "folder tuples", kind: "store" },
+    { id: "acl", x: 320, y: 150, label: "aclservers", kind: "server" },
+    { id: "cfg", x: 520, y: 60, label: "namespace configs\n(configs + their changelog)", kind: "store" },
+    { id: "log", x: 520, y: 240, label: "changelog\n(all namespaces)", kind: "store" },
+  ]}
+  edges={[
+    { from: "acl", to: "doc", dir: "both" },
+    { from: "acl", to: "grp", label: "read, write", dir: "both" },
+    { from: "acl", to: "fol", dir: "both" },
+    { from: "cfg", to: "acl", label: "load, monitor" },
+    { from: "acl", to: "log", label: "append" },
+  ]}
+  caption="One tuple database per namespace (left), one config database and one changelog shared by every namespace (right)."
+/>
+
+**Tuple databases.** "We store relation tuples of each namespace in a separate database, where each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*." (§3.1.1) Because the commit timestamp is part of the key, old versions stay on their own rows, "so that we can evaluate checks and reads at any timestamp within the garbage collection window". The running example's tuples would sit in the `doc` and `group` databases like this:
+
+| Database | shard ID | object ID | relation | user | commit timestamp |
+| --- | --- | --- | --- | --- | --- |
+| `doc` | *s*(readme) | `readme` | `owner` | `user:anne` | *t*₁ |
+| `doc` | *s*(readme) | `readme` | `parent` | `folder:A#...` | *t*₂ |
+| `doc` | *s*(readme) | `readme` | `viewer` | `group:eng#member` | *t*₃ |
+| `group` | *s*(eng) | `eng` | `member` | `user:beto` | *t*₄ |
+
+Rows of one object sort together; the paper says this key order "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair". "Usually the shard ID is determined solely by the object ID"; for groups with very many members it can be "computed from both object ID and user" (§3.1.1). The paper does not give the shard function, so *s*(…) above is a placeholder, and the exact encoding of the user column is not described either.
+
+**Changelog.** One database for all namespaces, keyed by *(changelog shard ID, timestamp, unique update ID)*, "where a changelog shard is randomly selected for each write" (§3.1.2).
+
+**Namespace configs.** One database with two tables: the configs, "keyed by namespace IDs", and "a changelog of config updates", "keyed by commit timestamps". A server loads every config at startup and then follows that changelog (§3.1.3).
+
+**Replication.** "Replicas exist in dozens of locations around the world, with multiple replicas per region. The 5 voting replicas are in eastern and central United States, in 3 different metropolitan areas to isolate failures but within 25 milliseconds of each other so that Paxos transactions commit quickly." (§3.1.4) Spanner itself is described in [Corbett et al. (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), the paper's reference [15].
+
+## Operational numbers
+
+The paper's §4 reports these figures. The per-API peaks and the latencies come from 7-day periods in December 2018 (§4, §4.2); the paper does not tie the other figures to a stated period. Each cell is quoted as written.
+
+| What | The paper's words | § |
+| --- | --- | --- |
+| Time in production | "more than 5 years" | 4 |
+| Namespaces | "more than 1,500 namespaces defined by hundreds of client applications" | 4 |
+| Tuples | "more than 2 trillion relation tuples that occupy close to 100 terabytes" | 4 |
+| Replication | "fully replicated in more than 30 locations around the world" | 4 |
+| Client load | "more than 10 million client queries per second (QPS)" | 4 |
+| Peak by API | "Check requests peak at roughly 4.2M QPS, Read at 8.2M, Expand at 760K, and Write at 25K" | 4 |
+| Servers | "more than 10,000 servers organized in several dozen clusters around the world" | 4 |
+| Servers per cluster | "from fewer than 100 to more than 1,000, with the median near 500" | 4 |
+| Check Safe latency | "At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively." | 4.2 |
+| Availability | "above 99.999% over the past 3 years of operation at Google" | 4.3 |
+| Internal RPCs | "22 million internal “delegated” RPCs per second, split about evenly between reads and checks" | 4.4 |
+| Cache lookups | "approximately 200 million lookups per second at peak, 150 million from checks and 50 million from reads" | 4.4 |
+| Reads to Spanner | "only 20 million read RPCs per second to Spanner" | 4.4 |
+| Spanner read latency | "0.5 msec at the median, and 2 msec at the 95th percentile" | 4.4 |
+| Hedged reads | "1% of Spanner reads, or 200K reads per second, benefit from hedging" | 4.4 |
+
+Notice the ratio in the last rows: 200 million cache lookups per second against 20 million read RPCs to Spanner, about ten in-memory lookups for every read sent to storage.
+
+## Sources
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3, §3.1, §3.2.3, §3.2.5–§3.2.7, §4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- Karger et al., "Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the World Wide Web", STOC '97 (paper ref. [20]): [https://people.csail.mit.edu/karger/Papers/web.pdf](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- Dean and Barroso, "The Tail at Scale", Communications of the ACM 56(2), 2013 (paper ref. [16]): [https://research.google/pubs/the-tail-at-scale/](https://research.google/pubs/the-tail-at-scale/)
+- "Cache stampede", Wikipedia, as cited by the paper (ref. [3]): [https://en.wikipedia.org/wiki/Cache_stampede](https://en.wikipedia.org/wiki/Cache_stampede)
+- Adya et al., "Slicer: Auto-sharding for datacenter applications", OSDI '16 (paper ref. [12]): [https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya)
+- Corbett et al., "Spanner: Google's globally-distributed database", OSDI '12 (paper ref. [15]): [https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)

@@ -17,7 +17,8 @@ interface Props {
   description: string;
   /** Path below the base, e.g. "ja/". Used for canonical and hreflang links. */
   path: string;
-  alternates?: boolean;
+  /** true: the paper's eight translations. A list: these language versions. */
+  alternates?: boolean | { code: string; path: string }[];
   /** Error pages: no canonical URL, not indexed */
   noindex?: boolean;
 }
@@ -35,10 +36,11 @@ const abs = (p: string) => new URL(withBase(p), site).href;
     <meta name="description" content={description} />
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={abs(path)} />}
     {
-      alternates &&
+      alternates === true &&
         TRANSLATIONS.map((l) => <link rel="alternate" hreflang={l.code} href={abs(`${l.code}/`)} />)
     }
-    {alternates && <link rel="alternate" hreflang="x-default" href={abs("")} />}
+    {alternates === true && <link rel="alternate" hreflang="x-default" href={abs("")} />}
+    {Array.isArray(alternates) && alternates.map((a) => <link rel="alternate" hreflang={a.code} href={abs(a.path)} />)}
     <meta property="og:type" content="article" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />

@@ -1,0 +1,645 @@
+---
+title: "Modeling patterns: from rewrite rules to real permissions"
+description: Eight common authorization requirements, each written as tuples, as a rule in the paper's namespace-config notation where it can be, and in SpiceDB's and OpenFGA's schema languages.
+section: guide
+part: practice
+order: 10
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4.2", "3.2.3", "5", "6"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+The paper describes its data model and configuration language but gives only one worked policy, Figure 1. Its conclusion claims more: the "simple yet flexible data model and configuration language support a variety of access control policies from both consumer and enterprise applications" (§6). Its related-work section names the patterns it covers: "Zanzibar’s data model supports permissions, users, groups, and inheritance" as found in Multics, UNIX, POSIX ACLs and VMS, and "a number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language" (§5).
+
+This page writes out eight requirements that come up in practice. Each section gives the question the pattern answers, the tuples, the rule in the paper's notation from Figure 1 where the paper can express it, the same rule in SpiceDB's schema language and in OpenFGA's DSL, and a graph of the tuples with the path that decides the answer highlighted. The pattern list follows OpenFGA's [modeling guides](https://openfga.dev/docs/modeling); the [tuples page](../relation-tuples/) explains the notation.
+
+The running example: Anne, Beto and Chen (`user:anne`, `user:beto`, `user:chen`); the document `doc:readme` in `folder:A`; the group `group:eng`. Anne owns the readme, Beto is in eng, eng members view the readme, and Chen views folder A.
+
+<Callout kind="note" title="How the schemas on this page were checked">
+
+The paper's notation is copied from Figure 1. Figure 1 uses only `union`; the paper names intersection and exclusion (§2.3.1) but does not show how they are written, so the two blocks that use them are written by analogy and say so. SpiceDB schemas use only constructs shown in AuthZed's [schema docs](https://authzed.com/docs/spicedb/concepts/schema) and modeling pages; OpenFGA models use only DSL keywords listed on OpenFGA's [configuration language page](https://openfga.dev/docs/configuration-language) (`or`, `and`, `but not`, `from`, type restrictions such as `[user, user:*, team#member]`). Each block shows only the types the pattern needs. All were checked against the documentation on 2026-11-13; none was run through a validator, `zed`, the OpenFGA CLI or either Playground.
+
+</Callout>
+
+## Roles and permissions
+
+The question: may Anne edit the readme, and may Beto? A *role* is something you grant (owner, editor, viewer). A *permission* is something you check (edit, view). Granting roles and checking permissions keeps the checks stable when the roles change.
+
+Tuples:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+```
+
+In the paper's notation, roles are relations with stored tuples and permissions are relations whose rule has no `_this`, so nobody can write a tuple to them directly. Only `union` and `computed_userset` are needed, both from Figure 1:
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+relation { name: "editor" }
+relation { name: "viewer" }
+
+relation {
+ name: "edit"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "owner" } }
+   child { computed_userset { relation: "editor" } }
+} } }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+} } }
+```
+
+Figure 1 does the same job differently: it puts `_this` and the larger role in the same relation ("All owners are editors, and all editors are viewers"). Both forms are rewrite rules; the one above keeps grant names and check names apart.
+
+SpiceDB separates the two kinds in the syntax: `relation` lines are what may be stored, `permission` lines are computed. Its docs say "relations should be named as nouns" and "permissions should be named as verbs or nouns" ([schema docs](https://authzed.com/docs/spicedb/concepts/schema)).
+
+```text
+definition user {}
+
+definition group {
+    relation member: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+OpenFGA has one kind of relation. A relation with no type restriction in brackets cannot be written directly; OpenFGA's [roles and permissions guide](https://openfga.dev/docs/modeling/roles-and-permissions) uses such relations (`booking_viewer`, `booking_adder`) as permissions, and its other guides prefix them with `can_`.
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA DSL; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+Where does Anne's `edit` come from?
+
+<Graph
+  width={600}
+  height={220}
+  minWidth={500}
+  title="Roles and permissions: Anne's edit"
+  desc="user:anne has a stored owner edge to doc:readme#owner. A dashed arrow labelled rewrite goes from doc:readme#owner to the dashed box doc:readme#edit, and another from edit to the dashed box doc:readme#view. The path from Anne through owner to edit is highlighted. user:beto reaches doc:readme#viewer through the group, and viewer has a dashed arrow to view only."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 170, label: "user:beto", kind: "subject", mono: true },
+    { id: "owner", x: 300, y: 50, label: "doc:readme#owner", kind: "object", mono: true, on: true },
+    { id: "viewer", x: 300, y: 170, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "edit", x: 510, y: 50, label: "doc:readme#edit", kind: "group", mono: true, on: true },
+    { id: "view", x: 510, y: 170, label: "doc:readme#view", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "owner", label: "tuple", on: true },
+    { from: "beto", to: "viewer", label: "via group:eng", dashed: true },
+    { from: "owner", to: "edit", label: "rewrite", dashed: true, on: true },
+    { from: "viewer", to: "view", label: "rewrite", dashed: true },
+    { from: "edit", to: "view", label: "rewrite", dashed: true },
+  ]}
+  caption="Solid arrows are stored tuples; dashed arrows and boxes are computed by rewrite rules. Anne edits because she is an owner; Beto reaches view but not edit."
+/>
+
+Notice that `edit` and `view` hold no tuples. Adding a new role, say `commenter`, means one new relation and one more child in the permission rules; no existing tuple changes.
+
+### How many relations
+
+A frequent criticism of this style concerns the names. In Oso's blog post "Google Zanzibar Isn't Flexible" (Oso sells a competing authorization product), Greg Sarjeant writes that "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`", calls that "essentially the same thing as creating a relation for every authorized action", and concludes that it is "an indication that relations are the wrong abstraction for authorization" ([Oso, 2024-11-01, updated 2025-11-07](https://www.osohq.com/post/google-zanzibar-isnt-flexible)).
+
+The count does grow: every action the application checks needs a name in the schema. What rewrite rules keep small is the number of stored tuples and the number of relations anyone writes to. In the schemas above, three relations hold tuples (`owner`, `editor`, `viewer`) and the permissions are pure functions of them, so adding `can_archive` touches the schema once and no tuple. The paper's own motivation for rewrites is the same: storing a derived relation as a tuple for each object "would be wasteful and make it hard to make modifications across all objects" (§2.3.1). Whether permission names in the schema are a cost or documentation is the point Oso and the Zanzibar-style products disagree on; this page does not settle it.
+
+## Parent-child inheritance
+
+The question: can Chen, who views folder A, view the readme inside it? Inheritance from a container is the `tuple_to_userset` leaf: read the object's `parent` tuples, then ask a relation on each parent.
+
+Tuples:
+
+```text
+doc:readme#parent@folder:A#...
+folder:A#viewer@user:chen
+```
+
+The paper's Figure 1 already contains this rule as the third child of `viewer`. Added to the `view` permission from the previous section:
+
+```text
+relation { name: "parent" }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+In SpiceDB the arrow `parent->view` follows the `parent` relation and asks `view` on what it finds ([schema docs](https://authzed.com/docs/spicedb/concepts/schema)):
+
+```text
+definition folder {
+    relation parent: folder
+    relation viewer: user | group#member
+    permission view = viewer + parent->view
+}
+
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+}
+```
+
+*SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+In OpenFGA the same is `X from Y`; the [parent-child guide](https://openfga.dev/docs/modeling/parent-child) uses it to make editors of a folder editors of its documents.
+
+```text
+type folder
+  relations
+    define parent: [folder]
+    define viewer: [user, group#member] or viewer from parent
+
+type doc
+  relations
+    define parent: [folder]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA DSL; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+Both product versions also give `folder` a `parent` pointing at `folder`, so a folder inherits from the folder above it and the chain is as deep as the tuples make it. The paper's Figure 1 shows only the document side.
+
+Which tuples decide Chen's access?
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="Parent-child: Chen views the readme through folder A"
+  desc="user:chen has a viewer edge to folder:A; folder:A has a parent edge to doc:readme. Both edges and all three nodes are highlighted. user:anne has an owner edge to doc:readme that is not highlighted."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 150, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "folder", x: 300, y: 150, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 515, y: 100, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="No tuple names Chen and the readme together. The parent tuple turns the question about the readme into a question about folder A."
+/>
+
+Notice that moving the readme to another folder is one tuple change (delete one `parent` tuple, write another), and every inherited grant follows. That is the same move the paper's new-enemy Example A is about: "document ACLs inherit from folder ACLs" (§2.2), so the order of ACL changes and moves matters; see [consistency](../consistency/).
+
+## Groups and nested groups
+
+The question: Beto is in a sub-team; does a grant to eng reach him? This variant of the running example adds a hypothetical sub-team `group:sre`, with Beto in sre and sre inside eng.
+
+Tuples:
+
+```text
+group:sre#member@user:beto
+group:eng#member@group:sre#member
+doc:readme#viewer@group:eng#member
+```
+
+A group needs no rewrite rule in the paper. `member` is a plain relation, and because a tuple's user may be a userset, "a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership" (§2.1):
+
+```text
+name: "group"
+
+relation { name: "member" }
+```
+
+The paper's configs say nothing about which kinds of user a relation accepts. Both products require that in the schema: nesting works only where `group#member` is listed as an allowed subject.
+
+```text
+definition group {
+    relation member: user | group#member
+}
+```
+
+*SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+```text
+type group
+  relations
+    define member: [user, group#member]
+```
+
+*OpenFGA DSL; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+How does the grant reach Beto?
+
+<Graph
+  width={600}
+  height={210}
+  minWidth={480}
+  title="Nested groups: Beto reaches the readme through sre and eng"
+  desc="user:beto has a member edge to the dashed userset group:sre#member. group:sre#member has a member edge to the dashed userset group:eng#member. group:eng#member has a viewer edge to doc:readme. The whole chain is highlighted."
+  nodes={[
+    { id: "beto", x: 80, y: 50, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "sre", x: 310, y: 50, label: "group:sre#member", kind: "group", mono: true, on: true },
+    { id: "eng", x: 310, y: 160, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "doc", x: 525, y: 160, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "sre", label: "member", on: true },
+    { from: "sre", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+  ]}
+  caption="Three tuples, three hops. Check chases the usersets from the readme outwards until it finds Beto."
+/>
+
+Notice that the document's tuples did not change when sre joined eng. That is why the paper treats groups and ACLs as one concept, and also why deep or wide groups are slow to check by pointer chasing; the paper's answer is the [Leopard index](../leopard/) (§3.2.4).
+
+## Blocklists (exclusion)
+
+The question: eng members may view the readme, except one person. In this variant Beto is blocked on the readme. Exclusion removes a set from another.
+
+Tuples:
+
+```text
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+doc:readme#blocked@user:beto
+```
+
+The paper lists exclusion as an operator (§2.3.1) and as a node in Expand's userset tree (§2.4.5), but Figure 1 does not show how it is written. The block below copies Figure 1's shape with `exclusion` in place of `union`; the keyword and the rule that the first child is the base and the second is subtracted are this page's assumption, not the paper's syntax.
+
+```text
+relation { name: "blocked" }
+
+relation {
+ name: "can_view"
+ userset_rewrite {
+  exclusion {
+   child { computed_userset { relation: "view" } }
+   child { computed_userset { relation: "blocked" } }
+} } }
+```
+
+SpiceDB writes exclusion as `-` ([schema docs](https://authzed.com/docs/spicedb/concepts/schema)). Defining the blocked permission on top of `view` keeps the expression free of parentheses:
+
+```text
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+    relation blocked: user
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+    permission can_view = view - blocked
+}
+```
+
+*SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+OpenFGA writes it as `but not` (`difference` in its JSON form); its [blocklists guide](https://openfga.dev/docs/modeling/blocklists) blocks one member of a team from editing a document the team can edit.
+
+```text
+type doc
+  relations
+    define parent: [folder]
+    define blocked: [user]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: (viewer or can_edit) but not blocked
+```
+
+*OpenFGA DSL; follows the documented syntax as of 2026-11-13 (the configuration language page allows parentheses to group operators); no validator was run.*
+
+Which tuple decides?
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="Blocklist: Beto is excluded"
+  desc="user:beto has a member edge to the dashed userset group:eng#member, which has a viewer edge to doc:readme. Separately, user:beto has a blocked edge straight to doc:readme. The blocked edge is highlighted and decides the answer: no."
+  nodes={[
+    { id: "beto", x: 80, y: 150, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 45, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 520, y: 150, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "beto", to: "doc", label: "blocked", on: true },
+  ]}
+  caption="Beto is in view (through eng) and in blocked. view minus blocked does not contain him, so can_view answers no."
+/>
+
+Notice that a path to the document is no longer enough: exclusion has to look at both sides. Zanzibar cancels the rest of a subtree only "when the outcome of one node determines the result of a subtree" (§3.2.3). One yes decides a union; for an exclusion, a yes on the base side decides nothing until the subtracted side is known. Notice also what is blocked: because `can_view` subtracts from all of `view`, a blocked owner loses `can_view` too.
+
+## Public access (wildcards)
+
+The question: can anyone at all view a public document? The paper has no answer in its notation. A ⟨*user*⟩ is "⟨*user_id*⟩ | ⟨*userset*⟩" and a user ID "is an integer" (§2.1); there is no value that means every user, and the paper does not discuss public objects. Within the paper's model the closest construction is a group that contains every user, which needs one tuple per user; how Google handles public sharing is not described.
+
+Both products add a *wildcard* subject, `user:*`, that is allowed only where the schema lists it. The tuple:
+
+```text
+doc:readme#viewer@user:*
+```
+
+```text
+definition doc {
+    relation viewer: user | user:* | group#member
+    permission view = viewer
+}
+```
+
+*SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+```text
+type doc
+  relations
+    define viewer: [user, user:*, group#member]
+```
+
+*OpenFGA DSL; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+Both projects warn about it. AuthZed: "Be **very careful** with wildcard support in your schema!" and "**Only** grant it to read permissions, unless you intend to allow for universal writing" ([schema docs](https://authzed.com/docs/spicedb/concepts/schema)). OpenFGA: "type-bound public access is not a wildcard or a regex expression"; `user:*` may appear only as the user, not as the object (`document:*`) and not inside a userset (`org:*#member`) ([public access guide](https://openfga.dev/docs/modeling/public-access)).
+
+## Multiple restrictions (intersection)
+
+The question: only owners who are also members of the document's team may publish it. Can Anne publish the readme? Intersection requires a user to be in every child.
+
+This variant adds a `team` relation from the readme to `group:eng`. Tuples:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#team@group:eng#...
+group:eng#member@user:beto
+```
+
+As with exclusion, the paper names intersection (§2.3.1) but does not show it written. This block copies Figure 1's shape; the `intersection` keyword is an assumption:
+
+```text
+relation { name: "team" }
+
+relation {
+ name: "publish"
+ userset_rewrite {
+  intersection {
+   child { computed_userset { relation: "owner" } }
+   child { tuple_to_userset {
+     tupleset { relation: "team" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # the doc's team
+       relation: "member"
+   } } }
+} } }
+```
+
+SpiceDB writes intersection as `&`:
+
+```text
+definition doc {
+    relation owner: user
+    relation team: group
+    permission publish = owner & team->member
+}
+```
+
+*SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+OpenFGA writes it as `and`; its [multiple restrictions guide](https://openfga.dev/docs/modeling/multiple-restrictions) builds the same shape, `can_delete` as writers who are also members of the owning organization.
+
+```text
+type doc
+  relations
+    define owner: [user]
+    define team: [group]
+    define can_publish: owner and member from team
+```
+
+*OpenFGA DSL; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+Why is Anne refused?
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="Intersection: Anne is an owner but not on the team"
+  desc="user:anne has a highlighted owner edge to doc:readme. group:eng has a team edge to doc:readme. user:beto has a member edge to group:eng. A highlighted note says there is no tuple group:eng#member@user:anne. One child of the intersection is satisfied and the other is not, so the answer is no."
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 185, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 185, label: "group:eng", kind: "object", mono: true },
+    { id: "doc", x: 520, y: 115, label: "doc:readme", kind: "object", mono: true, on: true },
+    { id: "miss", x: 230, y: 112, label: "no tuple\ngroup:eng#member@user:anne", kind: "note", on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "team" },
+  ]}
+  caption="publish = owner ∩ (team → member). Anne is in the first set, not in the second, so the answer is no. Beto is in the second, not the first."
+/>
+
+Notice that the decisive fact is a missing tuple. Adding `group:eng#member@user:anne` would make the answer yes without touching the document.
+
+## Custom roles
+
+The question: an administrator defines a new role, "reviewer", at run time and gives it view access to the readme. Can Chen, who holds the role, view it? Roles fixed in the schema (owner, editor) change only when the schema does; custom roles are data.
+
+OpenFGA's [custom roles guide](https://openfga.dev/docs/modeling/custom-roles) models them as a separate type "because our roles are going to be dynamic and might change frequently": users are related to a `role` object as `assignee`, and the role's assignees are granted relations as a userset (`role:media-manager#assignee` as `editor` of `asset-category:logos`). AuthZed's [user-defined roles post](https://authzed.com/blog/user-defined-roles) (2021-10-27) does the same with `role#member`.
+
+Tuples (a variant: Chen holds a role instead of a folder grant):
+
+```text
+role:reviewer#assignee@user:chen
+doc:readme#viewer@role:reviewer#assignee
+doc:readme#editor@role:maintainer#assignee
+```
+
+In the paper this is the groups pattern with another namespace name: `role` is a namespace with one plain relation, and the readme's `viewer` stores a userset that points at it. No rule changes:
+
+```text
+name: "role"
+
+relation { name: "assignee" }
+```
+
+```text
+definition role {
+    relation assignee: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member | role#assignee
+    relation viewer: user | group#member | role#assignee
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+```text
+type role
+  relations
+    define assignee: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member, role#assignee]
+    define viewer: [user, group#member, role#assignee]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA DSL; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+How does a run-time role grant access?
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="Custom roles: Chen views through the reviewer role"
+  desc="user:chen has a highlighted assignee edge to the dashed userset role:reviewer#assignee, which has a highlighted viewer edge to doc:readme. A second dashed userset, role:maintainer#assignee, has an editor edge to doc:readme and no members."
+  nodes={[
+    { id: "chen", x: 80, y: 70, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "rev", x: 300, y: 70, label: "role:reviewer#assignee", kind: "group", mono: true, on: true },
+    { id: "mnt", x: 300, y: 180, label: "role:maintainer#assignee", kind: "group", mono: true },
+    { id: "doc", x: 525, y: 125, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "rev", label: "assignee", on: true },
+    { from: "rev", to: "doc", label: "viewer", on: true },
+    { from: "mnt", to: "doc", label: "editor" },
+  ]}
+  caption="Creating the role, assigning Chen and granting it on the readme are three tuple writes; the schema is unchanged."
+/>
+
+Notice that the role's grants are per object. A role that should mean "may create issues and delete issues anywhere in this repository" needs its permission set stored as data too. AuthZed's [access-control management page](https://authzed.com/docs/spicedb/modeling/access-control-management) shows that finer pattern: a `role` definition with one wildcard relation per permission (`relation create_issue: user:*`), a `role_grant` object tying a role to grantees, and permissions of the form `permission create_issue = role->create_issue & grantee`. The price is one schema relation per permission, which brings back the naming question above.
+
+## Ownership transfer
+
+The question: Anne hands the readme to Beto. Afterwards Beto must be the owner and Anne must not, with no moment where both or neither are. This is not a schema pattern: none of the three notations can declare "exactly one owner", and the schema documentation cited here shows no cardinality constraint. It is a write pattern.
+
+The tuple change:
+
+```text
+delete  doc:readme#owner@user:anne
+write   doc:readme#owner@user:beto
+```
+
+The paper's Write API covers it. Clients "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control": read the object's tuples including a per-object "lock" tuple, send the writes "along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read", and retry otherwise (§2.4.2). The lock tuple stops two concurrent transfers from both succeeding.
+
+- **SpiceDB.** `WriteRelationships` "atomically writes and/or deletes a set of specified relationships", and "if any preconditions fail, the entire transaction will be reverted" ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). A `MUST_MATCH` precondition on `doc:readme#owner@user:anne` plays the paper's lock tuple: the transfer fails if Anne is no longer the owner.
+- **OpenFGA.** "You can combine both writes and deletes in a single transactional API request", and "all operations in the request will either succeed together or fail together", up to 100 tuples per request ([update tuples](https://openfga.dev/docs/getting-started/update-tuples)). Whether the request fails when the tuple to delete is already gone, which would make the delete act like the lock tuple, is not stated on the page cited and was not verified here.
+
+What changes?
+
+<Frames min="16rem">
+
+<Graph
+  width={320}
+  height={150}
+  title="Ownership before the transfer"
+  desc="user:anne has a highlighted owner edge to doc:readme. user:beto has no edge."
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner", on: true }]}
+  caption="Before: one owner tuple, for Anne."
+/>
+
+<Graph
+  width={320}
+  height={150}
+  title="Ownership after the transfer"
+  desc="user:beto has a highlighted owner edge to doc:readme. user:anne has no edge."
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "beto", to: "doc", label: "owner", on: true }]}
+  caption="After: one owner tuple, for Beto. Both changes commit together or not at all."
+/>
+
+</Frames>
+
+Notice that everything derived from ownership (`edit`, `view`) moves with the one tuple. Anne keeps any access she has through other paths, such as a direct `viewer` tuple or a group; a transfer that should remove all of Anne's access has to delete those tuples too.
+
+<Callout kind="paper" title="In the paper">
+
+Tuples and usersets: §2.1. Rewrite rules, the three leaves and the operators: §2.3.1 and Figure 1. Write with a lock tuple: §2.4.2. Expand's userset tree with union, intersection and exclusion: §2.4.5. Patterns the paper says it supports (permissions, users, groups, inheritance, RBAC): §5. Terms are collected in the [glossary](../glossary/).
+
+</Callout>
+
+## Sources
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- OpenFGA modeling guides: [roles and permissions](https://openfga.dev/docs/modeling/roles-and-permissions), [parent-child](https://openfga.dev/docs/modeling/parent-child), [blocklists](https://openfga.dev/docs/modeling/blocklists), [public access](https://openfga.dev/docs/modeling/public-access), [multiple restrictions](https://openfga.dev/docs/modeling/multiple-restrictions), [custom roles](https://openfga.dev/docs/modeling/custom-roles)
+- OpenFGA, [configuration language](https://openfga.dev/docs/configuration-language)
+- OpenFGA, [update tuples](https://openfga.dev/docs/getting-started/update-tuples)
+- AuthZed, [SpiceDB schema docs](https://authzed.com/docs/spicedb/concepts/schema)
+- AuthZed, [access-control management](https://authzed.com/docs/spicedb/modeling/access-control-management)
+- AuthZed, [User Defined Roles](https://authzed.com/blog/user-defined-roles), 2021-10-27
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- Greg Sarjeant, [Google Zanzibar Isn't Flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible), Oso, 2024-11-01 (updated 2025-11-07)

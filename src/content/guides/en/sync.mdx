@@ -1,0 +1,273 @@
+---
+title: Keeping tuples in step with your data
+description: Why the paper never discusses dual writes, what goes wrong when an application database and an authorization service disagree, and the patterns used to keep them in step.
+section: guide
+part: practice
+order: 9
+checked: "2026-11-13"
+paper: ["1", "2.2", "2.4.2", "2.4.3", "2.4.4", "3.1.2"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+An authorization service only knows what it has been told. When Anne shares `doc:readme` or removes Beto from `group:eng`, the fact usually starts in the application's own database and has to reach the authorization service as a tuple. Two systems, two writes, no shared transaction. This page explains why the paper barely mentions the problem, how the two writes fail, and the patterns used to keep them in step.
+
+## Why the paper can leave this out
+
+The paper describes Zanzibar as "a system for storing permissions and performing authorization checks based on the stored permissions" (§1), and lists "unified ACL storage and an RPC-based API" as "a philosophy also core to Zanzibar’s design" (§5). ACLs and groups live in Zanzibar. The client application keeps its *content* in its own storage, and the one thing it stores about authorization is the zookie.
+
+The paper's protocol is shaped so that the only write spanning both sides is atomic on the client side: "The client stores the zookie with the content change in an atomic write to the client storage" (§2.2). The check that produced the zookie is a read; "the content-change check does not need to be evaluated in the same transaction as the application content modification" (§2.2). Inside Zanzibar, the tuple and its change-log entry are one transaction: "Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction" (§3.1.2), so Watch cannot miss a committed write.
+
+The paper does not say whether Google's applications also keep their own copy of facts such as "who owns this document", or how they would reconcile one. It does not discuss the case.
+
+Most adopters start elsewhere. The owner is a column on the `documents` table; team membership is a join table; billing seats live in another service. The same fact then exists twice, and every change to it is a *dual write*.
+
+## How dual writes fail
+
+AuthZed's post on the subject puts it plainly: "The dual-write problem presents itself in all distributed systems" ([AuthZed, The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). No ordering of the two writes is safe on its own, because the process can stop between them. What happens in each order?
+
+<Frames>
+
+<Swimlane
+  lanes={["app", "app database", "authz service"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="time"
+  title="Database first, tuple write lost"
+  desc="Anne removes Beto from group eng. The app commits the change to its database. Before it deletes the tuple in the authorization service, the app crashes. The tuple is still there, so a later check lets Beto view the readme, although the app's own data says he is no longer a member."
+  events={[
+    { lane: 0, t: 0, label: "Anne removes\nBeto from eng", kind: "note" },
+    { lane: 1, t: 1, label: "delete member\nrow, COMMIT", kind: "write" },
+    { lane: 0, t: 2, label: "crash before\ntuple delete", kind: "bad" },
+    { lane: 2, t: 3, label: "eng member\nbeto: still there", kind: "bad" },
+    { lane: 2, t: 4, label: "Beto views\nreadme: allowed", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1] },
+    { from: [0, 2], to: [2, 3], label: "never sent", dashed: true },
+  ]}
+  caption="A lost revocation fails open, and nothing in the app shows it."
+/>
+
+<Swimlane
+  lanes={["app", "app database", "authz service"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="time"
+  title="Tuple first, database rolled back"
+  desc="Anne makes Beto an editor of the readme. The app opens a database transaction and inserts a share row, then writes the editor tuple to the authorization service, then crashes before committing. The database rolls back, so the app shows no share, but the authorization service lets Beto edit."
+  events={[
+    { lane: 0, t: 0, label: "Anne makes Beto\nan editor", kind: "note" },
+    { lane: 1, t: 1, label: "BEGIN, insert\nshare row", kind: "write" },
+    { lane: 2, t: 2, label: "write readme\neditor beto", kind: "write" },
+    { lane: 0, t: 3, label: "crash before\nCOMMIT", kind: "bad" },
+    { lane: 1, t: 4, label: "rolled back:\nno share row", kind: "bad" },
+    { lane: 2, t: 4, label: "Beto may edit", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1] },
+    { from: [1, 1], to: [2, 2] },
+  ]}
+  caption="The two systems disagree; here the grant exists only where the UI cannot show it."
+/>
+
+</Frames>
+
+Notice that the left frame is the dangerous one for security and the right one for trust: Beto keeps access he should have lost, or holds access no one can see to revoke. The right frame is the case AuthZed walks through: "we've written to SpiceDB but we haven't committed the transaction to our database, and now SpiceDB and our database disagree about the state of the world" ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). Retrying in the request handler does not close either gap, because the crash can happen before the retry.
+
+## The options
+
+The AuthZed post lists the choices: do nothing, out-of-band consistency checking, make the authorization service the source of truth, event sourcing/CQRS, durable execution environments, and the transactional outbox ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). Doing nothing "*is* an option that may be viable in the right context"; out-of-band checking means "you can check that the two systems agree on a periodic basis", which finds drift but does not prevent it. The three below are the ones that remove the window structurally or close it reliably.
+
+### The authorization service as the source of truth
+
+Store each relationship once, in the authorization service, and nowhere else. This is the paper's arrangement. AuthZed: "make a single write to SpiceDB and avoid the dual-write problem entirely" ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)).
+
+The cost is that the application can no longer query that data like its own: with ownership only in SpiceDB, "you wouldn't be able to filter, sort, or paginate" by it in the application database. The list problem from [Listing what a user can see](../listing/) then applies to every screen that shows the relationship. Oso argues the opposite direction for its own product, letting you "apply your application data to authorization decisions without synchronizing it" ([Oso, Launching Local Authorization](https://www.osohq.com/post/local-authorization), vendor post), which avoids the sync by leaving the data in the application database rather than moving it.
+
+### Transactional outbox and relay
+
+Keep the application database as the source of truth, and make the second write durable instead of immediate. In the same transaction as the business change, insert a row into an *outbox* table that describes the tuple change. A separate *relay* reads the outbox and applies the changes to the authorization service, retrying until they succeed. The pattern's general form: "first store the message in the database as part of the transaction that updates the business entities" ([Chris Richardson, Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)).
+
+What does the relay do when the authorization service is briefly unavailable?
+
+<Swimlane
+  lanes={["app", "app database", "relay", "authz service"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="time"
+  title="Transactional outbox and relay"
+  desc="Anne removes Beto from group eng. In one database transaction the app deletes the member row and inserts an outbox row. The relay reads the outbox row and sends the tuple delete; the first attempt fails, so it retries. The second attempt succeeds, and the relay marks the outbox row done. Until then, the authorization service still lets Beto in."
+  events={[
+    { lane: 0, t: 0, label: "Anne removes\nBeto from eng", kind: "note" },
+    { lane: 1, t: 1, label: "one txn: member\nrow + outbox row", kind: "write" },
+    { lane: 2, t: 2, label: "read next\noutbox row", kind: "read" },
+    { lane: 3, t: 2, label: "Beto still\nallowed", kind: "bad" },
+    { lane: 2, t: 3, label: "delete fails:\nretry", kind: "bad" },
+    { lane: 3, t: 4, label: "tuple deleted", kind: "good" },
+    { lane: 1, t: 5, label: "outbox row\nmarked done", kind: "write" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "atomic" },
+    { from: [1, 1], to: [2, 2] },
+    { from: [2, 3], to: [3, 4], label: "retry" },
+    { from: [3, 4], to: [1, 5], label: "ack" },
+  ]}
+  caption="Nothing is lost, but the change reaches the authorization service later than the database."
+/>
+
+Notice the red box on the right: the outbox guarantees the change *arrives*, not that it arrives *at once*. Between the commit and the relay's success, the old access still holds. The relay also has to tolerate repeats, because, in the pattern's own words, "The Message relay might publish a message more than once" ([Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)); AuthZed points to "SpiceDB allowing for idempotent writes with its TOUCH operation", and to order: "As long as this process is effectively single-threaded and retries operations until they succeed" ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). Applying a delete before the earlier create would leave the wrong state.
+
+### Change data capture
+
+Instead of polling the outbox, read the database's own commit log. [Debezium](https://debezium.io/documentation/reference/stable/connectors/postgresql.html), for example, uses PostgreSQL logical decoding: after an initial snapshot, it "continuously captures row-level changes that insert, update, and delete database content and that were committed to a PostgreSQL database" and streams them to Kafka topics. AuthZed describes it as one of the most commonly used tools for the outbox pattern: "It watches changes in an outbox table and submits them as events to Kafka" ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)).
+
+Where does a change travel on the way from the commit to a tuple?
+
+<Graph
+  width={640}
+  height={250}
+  title="Change data capture into the authorization service"
+  desc="The app commits business rows and an outbox row in one transaction to its database. Debezium reads the committed changes from the write-ahead log and publishes them to a Kafka topic. A consumer reads the topic, turns each event into a tuple write or delete, and applies it to the authorization service. Duplicates are possible after a connector restart, so the consumer's writes must be idempotent."
+  nodes={[
+    { id: "app", x: 70, y: 50, label: "app", kind: "client" },
+    { id: "db", x: 250, y: 50, label: "app database\nrows + outbox", kind: "store" },
+    { id: "dbz", x: 470, y: 50, label: "Debezium\n(reads WAL)", kind: "server", on: true },
+    { id: "kafka", x: 470, y: 185, label: "Kafka topic", kind: "store", on: true },
+    { id: "cons", x: 250, y: 185, label: "consumer:\nevent → tuple", kind: "server" },
+    { id: "authz", x: 70, y: 185, label: "authz service", kind: "server" },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "one txn" },
+    { from: "db", to: "dbz", label: "committed\nchanges", on: true },
+    { from: "dbz", to: "kafka", label: "publish", on: true },
+    { from: "kafka", to: "cons", label: "consume" },
+    { from: "cons", to: "authz", label: "TOUCH /\nDELETE" },
+  ]}
+  minWidth={520}
+  caption="Each hop adds lag; only committed changes enter the pipeline, so a rolled-back transaction never becomes a tuple."
+/>
+
+Notice the first hop: because Debezium reads *committed* changes, the right-hand failure above cannot happen. Duplicates still can. Debezium's PostgreSQL documentation says that "while it is recovering from the fault, it's possible that the connector might emit some duplicate change events", and that "consumers should always anticipate some duplicate events" ([Debezium PostgreSQL connector](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)). Its outbox event router is the packaged form of the outbox-plus-CDC combination: "An outbox pattern implementation avoids inconsistencies between a service's internal state (as typically persisted in its database) and state in events consumed by services that need the same data" ([Debezium, Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html)).
+
+## Watch drives indexes, but it is not a queue
+
+The patterns above move changes *into* the authorization service. Watch (§2.4.3) moves them *out*: "Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API." A response carries changes "in ascending timestamp order" up to a *heartbeat zookie*, which "the client can use … to resume watching where the previous watch response left off" (§2.4.3). Leopard's incremental indexer is the paper's own consumer (§3.2.4).
+
+The client owns the resume position, and the server keeps history only for a while. SpiceDB's docs: "Historical changes can only be requested until the configured garbage collection window on the underlying datastore. This is typically 24 hours, but may differ based on the datastore used" ([SpiceDB, Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)). A SpiceDB issue states the consequence: "the Watch API is non-durable; if you want to write to a durable queue, you have to take the messages coming from the Watch API and put them somewhere" ([spicedb#2015](https://github.com/authzed/spicedb/issues/2015), closed as not planned on 2026-10-29). The open issue [spicedb#2285](https://github.com/authzed/spicedb/issues/2285) adds that the default behaviour "starts watching from the HEAD revision which leaves gaps of updates that may have not been seen".
+
+What happens to an index whose consumer is down for longer than that window?
+
+<Swimlane
+  lanes={["authz service", "indexer", "index"]}
+  laneWidth={150}
+  rowHeight={64}
+  timeLabel="time"
+  title="Resuming Watch, and losing the position"
+  desc="The indexer applies a batch of changes and saves the stream token t50 together with the index rows. It disconnects, reconnects with t50 and receives the following changes. Later it is down for longer than the datastore's garbage-collection window; t50 has expired, so it cannot resume and must rebuild the index from a full read."
+  events={[
+    { lane: 0, t: 0, label: "changes up to\ntoken t50", kind: "write", mono: true },
+    { lane: 1, t: 0, label: "apply batch", kind: "read" },
+    { lane: 2, t: 0, label: "rows + t50,\none txn", kind: "write", mono: true },
+    { lane: 1, t: 1, label: "disconnected", kind: "note" },
+    { lane: 1, t: 2, label: "Watch from t50", kind: "read", mono: true },
+    { lane: 0, t: 2, label: "changes after\nt50", kind: "good" },
+    { lane: 1, t: 3, label: "down longer\nthan GC window", kind: "bad" },
+    { lane: 0, t: 4, label: "t50 expired", kind: "bad", mono: true },
+    { lane: 2, t: 5, label: "rebuild from\nfull read", kind: "write" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 0], label: "save" },
+    { from: [1, 2], to: [0, 2], label: "resume" },
+    { from: [0, 4], to: [1, 3], label: "cannot resume", dashed: true },
+  ]}
+  caption="Save the token in the same transaction as the rows it covers, and keep a rebuild path for when the history is gone."
+/>
+
+Notice the second row of the index lane: the token is stored with the rows it produced. If the indexer saved the token first and then crashed, it would skip changes; if it applied rows and crashed before saving, it would re-apply them, which is harmless only when the index writes are idempotent. To survive a long outage, copy the stream into a durable queue you control, as the issue says, or be ready to rebuild. SpiceDB's resume field is `ChangesThrough`: the docs recommend calling Watch "in a loop, sending in the last received ZedToken from `ChangesThrough` if the call disconnects" ([Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)).
+
+## Zookies and each option
+
+The zookie protocol needs two things from the client: request a zookie when content is saved, and store it with the content (§2.2, §2.4.4). SpiceDB's docs carry the same advice for ZedTokens: store them "alongside the newly updated content in the application database", and update them when the resource is created or deleted, when its contents change, and when access to it is added or removed ([SpiceDB, Consistency](https://authzed.com/docs/spicedb/concepts/consistency)). The content-change check has no dual-write problem of its own: it is a read, and the token goes into the application database in the same transaction as the content.
+
+The options differ in what that token can promise.
+
+| Option | When the ACL change is in the authorization service | What a stored token covers |
+| --- | --- | --- |
+| Authorization service as source of truth | When the write returns, before the user is told | Everything, as in the paper: the write's token, or a later content-change check, is at least as fresh as the ACL change |
+| Outbox and relay | When the relay succeeds, after the database commit | Only changes the relay has already applied. A content-change check made before that sees the old ACL |
+| Change data capture | After the log is read, published and consumed | Same as the outbox, with more hops of lag |
+| Index fed by Watch | Already there; the lag is in the index | Nothing directly: zookies are opaque, so the index cannot tell whether it is as fresh as a given token. Re-check with the token, or compare the index's own saved position |
+
+For the outbox and CDC rows, the paper's guarantee is weaker than it looks. Example B in §2.2 relies on the ACL change (B1) being in Zanzibar before the content change (B2) is checked. With a relay in between, Anne can remove Beto, save new content a second later, and get a zookie from a content-change check that ran before the relay applied the removal. The zookie is correct for the data Zanzibar had; that data was behind. Two mitigations, neither from the sources above and both untested here: send revocations through the authorization service directly and record them in the database second (accepting the left-hand failure mode as a visible "still listed but denied" state), or have the relay write the token it receives back to the affected rows so later checks carry it.
+
+The paper's opacity rule is deliberate: zookies are opaque "to discourage our clients from choosing arbitrary timestamps and to allow future extensions" (§2.4). The cost is in the last row: a client cannot compare two zookies to decide which is newer.
+
+## Rewriting an object's tuples safely: the lock tuple
+
+A sync job often wants to replace all tuples of one object to match the database, for example to set the readme's viewers to exactly what the sharing table says. Two such jobs, or a job and a user's edit, can race. The paper's answer is optimistic concurrency with a *lock tuple* (§2.4.2):
+
+<Callout kind="paper" title="§2.4.2, read-modify-write">
+
+1. Read all relation tuples of an object, including a per-object "lock" tuple.
+2. Generate the tuples to write or delete. Send the writes, along with a touch on the lock tuple, to Zanzibar, with the condition that the writes will be committed only if the lock tuple has not been modified since the read.
+3. If the write condition is not met, go back to step 1.
+
+</Callout>
+
+"The lock tuple is just a regular relation tuple used by clients to detect write races" (§2.4.2). What happens when two sync jobs rewrite the readme's tuples at the same time?
+
+<Swimlane
+  lanes={["sync job 1", "sync job 2", "Zanzibar"]}
+  laneWidth={150}
+  rowHeight={64}
+  timeLabel="time"
+  title="Optimistic concurrency with a lock tuple"
+  desc="Both sync jobs read all tuples of doc:readme, including the lock tuple, at the same version. Job 1 sends its writes with a touch on the lock tuple, conditional on the lock being unchanged; Zanzibar commits and the lock changes. Job 2 sends its writes with the same condition; the lock has changed, so Zanzibar rejects them, and job 2 goes back to step 1 and reads again."
+  events={[
+    { lane: 0, t: 0, label: "read readme\ntuples + lock", kind: "read" },
+    { lane: 2, t: 0, label: "lock at\nversion 7", kind: "note" },
+    { lane: 1, t: 1, label: "read readme\ntuples + lock", kind: "read" },
+    { lane: 0, t: 2, label: "write + touch,\nif lock unchanged", kind: "write" },
+    { lane: 2, t: 2, label: "commit;\nlock changed", kind: "good" },
+    { lane: 1, t: 3, label: "write + touch,\nif lock unchanged", kind: "write" },
+    { lane: 2, t: 3, label: "lock changed:\nrejected", kind: "bad" },
+    { lane: 1, t: 4, label: "back to step 1:\nread again", kind: "read" },
+  ]}
+  arrows={[
+    { from: [0, 2], to: [2, 2] },
+    { from: [1, 3], to: [2, 3] },
+    { from: [2, 3], to: [1, 4], label: "retry" },
+  ]}
+  caption="Neither job holds a lock while it computes; the conditional write detects the race at commit time."
+/>
+
+Notice that job 2 is not blocked while job 1 works; it learns about the conflict only when it tries to commit, and then recomputes from fresh data. That suits sync jobs, which can always recompute from the database.
+
+<Callout kind="note" title="An adaptation, not documented">
+
+SpiceDB's `WriteRelationships` accepts `optional_preconditions`, and "if any preconditions fail, the entire transaction will be reverted"; a precondition is `MUST_MATCH` or `MUST_NOT_MATCH` on a relationship filter ([SpiceDB `permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). One way to imitate the paper's lock tuple is a relationship such as `doc:readme#lock@version:7`, with a `MUST_MATCH` precondition on it and, in the same write, a delete of version 7 and a create of version 8. This construction is ours; it is not in SpiceDB's documentation and was not run.
+
+</Callout>
+
+<Callout kind="paper" title="In the paper">
+
+Zanzibar as the store of permissions: §1, §5. The zookie protocol and the atomic client write: §2.2. Write and the lock tuple: §2.4.2. Watch and heartbeat zookies: §2.4.3. Content-change check: §2.4.4. Tuple and changelog in one transaction: §3.1.2. Terms: [lock tuple](../glossary/#lock-tuple), [Watch](../glossary/#watch), [heartbeat zookie](../glossary/#heartbeat-zookie), [content-change check](../glossary/#content-change-check), [zookie](../glossary/#zookie).
+
+</Callout>
+
+## Sources
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §1, §2.2, §2.4, §2.4.2, §2.4.3, §2.4.4, §3.1.2, §3.2.4, §5.
+- AuthZed (vendor), [The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem), 2025-01-02.
+- AuthZed (vendor), [Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch) and [Consistency](https://authzed.com/docs/spicedb/concepts/consistency), SpiceDB docs.
+- AuthZed, [Add external support for streaming relationships into and out of SpiceDB](https://github.com/authzed/spicedb/issues/2015), spicedb issue #2015, opened 2024-08-07, closed as not planned 2026-10-29.
+- AuthZed, [Watching Relationship Changes More Ergonomically](https://github.com/authzed/spicedb/issues/2285), spicedb issue #2285, opened 2025-03-19, open on 2026-11-13.
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto), authzed/api.
+- Chris Richardson, [Pattern: Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html), microservices.io.
+- Debezium, [Debezium connector for PostgreSQL](https://debezium.io/documentation/reference/stable/connectors/postgresql.html) and [Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html).
+- Oso (vendor), [Launching Local Authorization](https://www.osohq.com/post/local-authorization), 2024-04-16.

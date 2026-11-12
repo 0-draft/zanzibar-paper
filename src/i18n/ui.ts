@@ -42,6 +42,30 @@ export interface UiStrings {
   fixLink: string;
   sourceCode: string;
   backToTop: string;
+  navPaper: string;
+  navGuides: string;
+  navEcosystem: string;
+  guidesLead: string;
+  ecosystemLead: string;
+  onThisPage: string;
+  sourceLabel: string;
+  checkedOn: string;
+  paperSections: string;
+  maintainer: string;
+  license: string;
+  languageLabel: string;
+  repository: string;
+  documentation: string;
+  status: string;
+  latestRelease: string;
+  allGuides: string;
+  allProducts: string;
+  readThePaper: string;
+  guideNote: string;
+  partBackground: string;
+  partMechanisms: string;
+  partPractice: string;
+  partReference: string;
 }
 
 const en: UiStrings = {
@@ -87,6 +111,33 @@ const en: UiStrings = {
   fixLink: "Report a translation error",
   sourceCode: "Source on GitHub",
   backToTop: "Back to top",
+  navPaper: "Paper",
+  navGuides: "Guides",
+  navEcosystem: "Ecosystem",
+  guidesLead:
+    "Background for reading the paper: the access-control models it builds on, the history behind it, and its mechanisms drawn step by step.",
+  ecosystemLead:
+    "Systems built on the paper's ideas: how each maps Zanzibar's concepts, with its schema, architecture and differences.",
+  onThisPage: "On this page",
+  sourceLabel: "Source",
+  checkedOn: "Facts checked on",
+  paperSections: "Paper sections",
+  maintainer: "Maintainer",
+  license: "License",
+  languageLabel: "Language",
+  repository: "Repository",
+  documentation: "Documentation",
+  status: "Status",
+  latestRelease: "Latest release",
+  allGuides: "All guides",
+  allProducts: "All systems",
+  readThePaper: "Read the paper",
+  guideNote:
+    "Written for this site with AI assistance from the sources linked on the page; not part of the paper. Not affiliated with Google, USENIX, the paper's authors or the projects described.",
+  partBackground: "Background",
+  partMechanisms: "How the paper works",
+  partPractice: "Applying it",
+  partReference: "Reference",
 };
 
 export const UI: Record<string, UiStrings> = {
@@ -133,6 +184,31 @@ export const UI: Record<string, UiStrings> = {
     fixLink: "誤訳を報告する",
     sourceCode: "GitHub のソース",
     backToTop: "ページの先頭へ",
+    navPaper: "論文",
+    navGuides: "ガイド",
+    navEcosystem: "エコシステム",
+    guidesLead: "論文を読むための下地。前提となるアクセス制御のモデル、歴史、そして仕組みを図で順に追う。",
+    ecosystemLead: "論文の考え方を実装したシステム。Zanzibar の概念との対応、スキーマ、構成、違いを並べる。",
+    onThisPage: "このページの内容",
+    sourceLabel: "出典",
+    checkedOn: "事実確認日",
+    paperSections: "論文の該当節",
+    maintainer: "開発元",
+    license: "ライセンス",
+    languageLabel: "言語",
+    repository: "リポジトリ",
+    documentation: "ドキュメント",
+    status: "状況",
+    latestRelease: "最新リリース",
+    allGuides: "ガイド一覧",
+    allProducts: "システム一覧",
+    readThePaper: "論文を読む",
+    guideNote:
+      "このサイトのために、ページ内でリンクした出典をもとに AI の支援を受けて書いた解説で、論文の一部ではありません。Google、USENIX、論文の著者、紹介しているプロジェクトとは関係ありません。",
+    partBackground: "背景",
+    partMechanisms: "論文の仕組み",
+    partPractice: "実務への応用",
+    partReference: "参照",
   },
   "zh-Hans": {
     translation: "中文译文",
@@ -175,6 +251,31 @@ export const UI: Record<string, UiStrings> = {
     fixLink: "报告翻译错误",
     sourceCode: "GitHub 源代码",
     backToTop: "返回顶部",
+    navPaper: "论文",
+    navGuides: "指南",
+    navEcosystem: "生态",
+    guidesLead: "阅读论文的背景知识：论文所依托的访问控制模型、相关历史，以及逐步图解的机制。",
+    ecosystemLead: "基于论文思想构建的系统：各自如何对应 Zanzibar 的概念，以及其模式、架构和差异。",
+    onThisPage: "本页内容",
+    sourceLabel: "来源",
+    checkedOn: "事实核对日期",
+    paperSections: "论文相关章节",
+    maintainer: "维护方",
+    license: "许可证",
+    languageLabel: "语言",
+    repository: "代码仓库",
+    documentation: "文档",
+    status: "状态",
+    latestRelease: "最新版本",
+    allGuides: "全部指南",
+    allProducts: "全部系统",
+    readThePaper: "阅读论文",
+    guideNote:
+      "本页是为本站撰写的解说，在 AI 辅助下依据页面中链接的来源写成，并非论文的一部分。与 Google、USENIX、论文作者及文中介绍的项目均无关联。",
+    partBackground: "背景",
+    partMechanisms: "论文的机制",
+    partPractice: "实际应用",
+    partReference: "参考",
   },
   "zh-Hant": {
     translation: "中文譯文",
@@ -217,6 +318,31 @@ export const UI: Record<string, UiStrings> = {
     fixLink: "回報翻譯錯誤",
     sourceCode: "GitHub 原始碼",
     backToTop: "回到頂端",
+    navPaper: "論文",
+    navGuides: "指南",
+    navEcosystem: "生態系",
+    guidesLead: "閱讀論文的背景知識：論文所依據的存取控制模型、相關歷史，以及逐步圖解的機制。",
+    ecosystemLead: "以論文概念打造的系統：各自如何對應 Zanzibar 的概念，以及其結構描述、架構與差異。",
+    onThisPage: "本頁內容",
+    sourceLabel: "來源",
+    checkedOn: "事實查核日期",
+    paperSections: "論文相關章節",
+    maintainer: "維護者",
+    license: "授權條款",
+    languageLabel: "語言",
+    repository: "程式碼儲存庫",
+    documentation: "文件",
+    status: "狀態",
+    latestRelease: "最新版本",
+    allGuides: "所有指南",
+    allProducts: "所有系統",
+    readThePaper: "閱讀論文",
+    guideNote:
+      "本頁是為本站撰寫的解說，在 AI 輔助下依據頁面中連結的來源寫成，並非論文的一部分。與 Google、USENIX、論文作者及文中介紹的專案均無關聯。",
+    partBackground: "背景",
+    partMechanisms: "論文的機制",
+    partPractice: "實務應用",
+    partReference: "參考",
   },
   ko: {
     translation: "한국어 번역",
@@ -260,6 +386,33 @@ export const UI: Record<string, UiStrings> = {
     fixLink: "번역 오류 신고",
     sourceCode: "GitHub 소스",
     backToTop: "맨 위로",
+    navPaper: "논문",
+    navGuides: "가이드",
+    navEcosystem: "생태계",
+    guidesLead:
+      "논문을 읽기 위한 배경지식입니다. 논문의 바탕이 되는 접근 제어 모델과 역사, 그리고 동작 원리를 그림으로 차례차례 살펴봅니다.",
+    ecosystemLead:
+      "논문의 아이디어로 만든 시스템입니다. 각 시스템이 Zanzibar의 개념에 어떻게 대응하는지, 스키마와 구조, 차이점을 정리했습니다.",
+    onThisPage: "이 페이지의 내용",
+    sourceLabel: "출처",
+    checkedOn: "사실 확인일",
+    paperSections: "논문 관련 절",
+    maintainer: "관리 주체",
+    license: "라이선스",
+    languageLabel: "언어",
+    repository: "저장소",
+    documentation: "문서",
+    status: "상태",
+    latestRelease: "최신 릴리스",
+    allGuides: "모든 가이드",
+    allProducts: "모든 시스템",
+    readThePaper: "논문 읽기",
+    guideNote:
+      "이 페이지는 이 사이트를 위해 페이지에 링크한 출처를 바탕으로 AI의 도움을 받아 쓴 해설이며, 논문의 일부가 아닙니다. Google, USENIX, 논문 저자, 소개한 프로젝트와는 관련이 없습니다.",
+    partBackground: "배경",
+    partMechanisms: "논문의 작동 방식",
+    partPractice: "실무 적용",
+    partReference: "참고",
   },
   es: {
     translation: "Traducción",
@@ -303,6 +456,33 @@ export const UI: Record<string, UiStrings> = {
     fixLink: "Informar de un error de traducción",
     sourceCode: "Código en GitHub",
     backToTop: "Volver arriba",
+    navPaper: "Artículo",
+    navGuides: "Guías",
+    navEcosystem: "Ecosistema",
+    guidesLead:
+      "Contexto para leer el artículo: los modelos de control de acceso en los que se apoya, su historia y sus mecanismos explicados paso a paso con diagramas.",
+    ecosystemLead:
+      "Sistemas construidos sobre las ideas del artículo: cómo cada uno traduce los conceptos de Zanzibar, con su esquema, su arquitectura y sus diferencias.",
+    onThisPage: "En esta página",
+    sourceLabel: "Fuente",
+    checkedOn: "Datos verificados el",
+    paperSections: "Secciones del artículo",
+    maintainer: "Mantenedor",
+    license: "Licencia",
+    languageLabel: "Lenguaje",
+    repository: "Repositorio",
+    documentation: "Documentación",
+    status: "Estado",
+    latestRelease: "Última versión",
+    allGuides: "Todas las guías",
+    allProducts: "Todos los sistemas",
+    readThePaper: "Leer el artículo",
+    guideNote:
+      "Escrito para este sitio con ayuda de IA a partir de las fuentes enlazadas en la página; no forma parte del artículo. Sin relación con Google, USENIX, los autores del artículo ni los proyectos descritos.",
+    partBackground: "Contexto",
+    partMechanisms: "Cómo funciona el artículo",
+    partPractice: "Llevarlo a la práctica",
+    partReference: "Referencia",
   },
   fr: {
     translation: "Traduction",
@@ -347,6 +527,33 @@ export const UI: Record<string, UiStrings> = {
     fixLink: "Signaler une erreur de traduction",
     sourceCode: "Code source sur GitHub",
     backToTop: "Haut de page",
+    navPaper: "Article",
+    navGuides: "Guides",
+    navEcosystem: "Écosystème",
+    guidesLead:
+      "Les bases pour lire l’article : les modèles de contrôle d’accès sur lesquels il s’appuie, son histoire et ses mécanismes, dessinés pas à pas.",
+    ecosystemLead:
+      "Les systèmes construits sur les idées de l’article : comment chacun reprend les concepts de Zanzibar, avec son schéma, son architecture et ses différences.",
+    onThisPage: "Sur cette page",
+    sourceLabel: "Source",
+    checkedOn: "Faits vérifiés le",
+    paperSections: "Sections de l’article",
+    maintainer: "Mainteneur",
+    license: "Licence",
+    languageLabel: "Langage",
+    repository: "Dépôt",
+    documentation: "Documentation",
+    status: "État",
+    latestRelease: "Dernière version",
+    allGuides: "Tous les guides",
+    allProducts: "Tous les systèmes",
+    readThePaper: "Lire l’article",
+    guideNote:
+      "Rédigé pour ce site avec l’aide de l’IA à partir des sources citées sur la page ; ne fait pas partie de l’article. Sans lien avec Google, USENIX, les auteurs de l’article ni les projets présentés.",
+    partBackground: "Contexte",
+    partMechanisms: "Comment fonctionne l’article",
+    partPractice: "Mise en pratique",
+    partReference: "Référence",
   },
   de: {
     translation: "Übersetzung",
@@ -391,6 +598,33 @@ export const UI: Record<string, UiStrings> = {
     fixLink: "Übersetzungsfehler melden",
     sourceCode: "Quellcode auf GitHub",
     backToTop: "Nach oben",
+    navPaper: "Paper",
+    navGuides: "Leitfäden",
+    navEcosystem: "Ökosystem",
+    guidesLead:
+      "Hintergrund zum Lesen des Papers: die Zugriffskontrollmodelle, auf denen es aufbaut, seine Vorgeschichte und seine Mechanismen, Schritt für Schritt gezeichnet.",
+    ecosystemLead:
+      "Systeme, die auf den Ideen des Papers aufbauen: wie jedes die Konzepte von Zanzibar abbildet, mit Schema, Architektur und Unterschieden.",
+    onThisPage: "Auf dieser Seite",
+    sourceLabel: "Quelle",
+    checkedOn: "Fakten geprüft am",
+    paperSections: "Abschnitte im Paper",
+    maintainer: "Betreuer",
+    license: "Lizenz",
+    languageLabel: "Sprache",
+    repository: "Repository",
+    documentation: "Dokumentation",
+    status: "Status",
+    latestRelease: "Neueste Version",
+    allGuides: "Alle Leitfäden",
+    allProducts: "Alle Systeme",
+    readThePaper: "Paper lesen",
+    guideNote:
+      "Für diese Website mit KI-Unterstützung aus den auf der Seite verlinkten Quellen geschrieben; nicht Teil des Papers. Keine Verbindung zu Google, USENIX, den Autoren des Papers oder den beschriebenen Projekten.",
+    partBackground: "Hintergrund",
+    partMechanisms: "Wie das Paper funktioniert",
+    partPractice: "In der Praxis",
+    partReference: "Nachschlagen",
   },
   "pt-BR": {
     translation: "Tradução",
@@ -434,6 +668,33 @@ export const UI: Record<string, UiStrings> = {
     fixLink: "Relatar um erro de tradução",
     sourceCode: "Código no GitHub",
     backToTop: "Voltar ao topo",
+    navPaper: "Artigo",
+    navGuides: "Guias",
+    navEcosystem: "Ecossistema",
+    guidesLead:
+      "Contexto para ler o artigo: os modelos de controle de acesso em que ele se apoia, sua história e seus mecanismos desenhados passo a passo.",
+    ecosystemLead:
+      "Sistemas construídos sobre as ideias do artigo: como cada um traduz os conceitos do Zanzibar, com seu esquema, sua arquitetura e suas diferenças.",
+    onThisPage: "Nesta página",
+    sourceLabel: "Fonte",
+    checkedOn: "Fatos verificados em",
+    paperSections: "Seções do artigo",
+    maintainer: "Mantenedor",
+    license: "Licença",
+    languageLabel: "Linguagem",
+    repository: "Repositório",
+    documentation: "Documentação",
+    status: "Status",
+    latestRelease: "Versão mais recente",
+    allGuides: "Todos os guias",
+    allProducts: "Todos os sistemas",
+    readThePaper: "Ler o artigo",
+    guideNote:
+      "Escrito para este site com auxílio de IA a partir das fontes citadas na página; não faz parte do artigo. Sem vínculo com o Google, a USENIX, os autores do artigo nem os projetos descritos.",
+    partBackground: "Contexto",
+    partMechanisms: "Como o artigo funciona",
+    partPractice: "Na prática",
+    partReference: "Referência",
   },
 };
 

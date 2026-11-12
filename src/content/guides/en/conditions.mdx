@@ -1,0 +1,290 @@
+---
+title: When relationships are not enough
+description: What the paper's tuples cannot express (time, network, amounts, expiry), and how SpiceDB caveats, OpenFGA conditions and contextual tuples, and Permify attributes add it back.
+section: guide
+part: practice
+order: 11
+checked: "2026-11-13"
+paper: ["2.1", "2.4.4", "2.4.5", "3.1.1"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Some rules are not about who is related to what. "Only from the office network", "only during business hours", "only for transfers under 1,000", "only until Friday": each depends on a fact about the request or the clock. The paper has no way to write them. Products built on its ideas add one, each in a different way. This page explains why the gap exists, what three products add, and when the rule is better kept in the application.
+
+The running example: Anne, Beto and Chen (`user:anne`, `user:beto`, `user:chen`); the document `doc:readme` in `folder:A`; the group `group:eng`. Anne owns the readme, Beto is in eng, eng members view the readme, and Chen views folder A. The [modeling page](../modeling/) has the relationship patterns this page builds on.
+
+## What a tuple cannot say
+
+The paper's tuple is four things and nothing else. Its grammar is ⟨*object*⟩ ‘#’ ⟨*relation*⟩ ‘@’ ⟨*user*⟩, and "the primary keys required to identify a relation tuple are ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, and ⟨*user*⟩" (§2.1). In storage, "each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*" (§3.1.1). The paper describes no other column: no expiry, no condition, no attribute of the user or the object.
+
+The request side is just as narrow. "A check request specifies a userset, represented by ⟨*object#relation*⟩, a putative user, often represented by an authentication token, and a zookie corresponding to the desired object version" (§2.4.4). There is no field for the caller's IP address, the time of day or the amount of a transaction.
+
+What does a Check carry, and what is missing?
+
+<Graph
+  width={620}
+  height={250}
+  minWidth={520}
+  title="What the paper's Check request carries"
+  desc="A client box sends a Check request to a Zanzibar server box. The request carries three things, drawn as boxes on the left: the userset doc:readme#view, the user user:chen, and a zookie. To the right, a dashed group labelled not in the paper's request holds three notes: the caller's IP address, the current time, and the transaction amount. The server reads only relation tuples from storage."
+  groups={[{ x: 400, y: 10, w: 210, h: 140, label: "not in the paper's request" }]}
+  nodes={[
+    { id: "client", x: 90, y: 200, label: "Client", kind: "client" },
+    { id: "srv", x: 310, y: 200, label: "Zanzibar server", kind: "server" },
+    { id: "store", x: 520, y: 200, label: "relation tuples", kind: "store" },
+    { id: "us", x: 90, y: 40, label: "userset\ndoc:readme#view", kind: "object", mono: true, on: true },
+    { id: "u", x: 90, y: 120, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "z", x: 250, y: 40, label: "zookie", kind: "object", on: true },
+    { id: "ip", x: 505, y: 55, label: "caller's IP address", kind: "note" },
+    { id: "time", x: 505, y: 85, label: "current time", kind: "note" },
+    { id: "amt", x: 505, y: 115, label: "transaction amount", kind: "note" },
+  ]}
+  edges={[
+    { from: "client", to: "srv", label: "Check", on: true },
+    { from: "srv", to: "store", label: "read" },
+  ]}
+  caption="The three highlighted inputs are the whole request (§2.4.4). Facts in the dashed frame have nowhere to go in it, and no tuple can hold them (§2.1)."
+/>
+
+Notice that the answer can depend only on stored tuples and the snapshot the zookie selects. That is what makes it cacheable and consistent, and also what rules out a condition on the request.
+
+Some requirements can be bent into relations. Expiry can be done by a job that deletes the tuple when time is up, at the cost of access lasting until the job runs. A set of allowed networks can be an object that the application relates the caller to. A transfer limit cannot: the amount is not an object anyone relates to. The paper discusses none of these workarounds.
+
+## SpiceDB caveats
+
+SpiceDB attaches a condition to a relationship. "Caveats are expressions that can return true or false, and they can be attached (by name) to relationships"; "a caveat definition includes a name, one or more well-typed parameters, and a CEL expression returning a boolean value" ([caveats docs](https://authzed.com/docs/spicedb/concepts/caveats)). CEL is Google's [Common Expression Language](https://github.com/google/cel-spec). Parameter types include `int`, `string`, `duration`, `timestamp`, `list<T>`, `map<T>` and a SpiceDB-specific `ipaddress`.
+
+Suppose Chen may view folder A, and through it the readme, only from the office network. The caveat and the relation that may carry it, after the example on the caveats page:
+
+```text
+definition user {}
+
+caveat has_valid_ip(user_ip ipaddress, allowed_range string) {
+  user_ip.in_cidr(allowed_range)
+}
+
+definition folder {
+    relation viewer: user | group#member | user with has_valid_ip
+    permission view = viewer
+}
+```
+
+*SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+`user | user with has_valid_ip` lets the same relation hold plain and caveated relationships; "to make the caveat **required**, the `user |` can be removed" (caveats docs). The relationship `folder:A#viewer@user:chen` is written with the caveat name `has_valid_ip` and part of its context, here `allowed_range` = `10.20.30.0/24`. The rest, `user_ip`, arrives with each `CheckPermission` call in its `context` field. When both supply a value, "the values in the Relationship take precedence over those in the CheckPermissionRequest" (caveats docs).
+
+Which edge carries the condition?
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="A caveated relationship in the running example"
+  desc="user:chen has a highlighted viewer edge to folder:A, labelled with has_valid_ip and allowed_range 10.20.30.0/24. folder:A has a parent edge to doc:readme. user:anne has a plain owner edge to doc:readme."
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 155, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "folder", x: 330, y: 155, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 520, y: 100, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "chen", to: "folder", label: "viewer\nwith has_valid_ip\n10.20.30.0/24", on: true },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="Only one edge is conditional. Anne's path has no caveat, so her checks never need context."
+/>
+
+### Three answers instead of two
+
+A caveated check can end without a yes or a no. The API defines three results: `PERMISSIONSHIP_NO_PERMISSION`, `PERMISSIONSHIP_HAS_PERMISSION`, and `PERMISSIONSHIP_CONDITIONAL_PERMISSION`, which "indicates that the subject has the requested permission on the resource, but only if a caveat condition is met. The `partial_caveat_info` field in the response should contain the missing context fields that must be provided to fully evaluate the caveat" ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). The caveats page puts it as "required context is missing to determine permissionship". Inside SpiceDB, the sub-problems dispatched between nodes carry the same third state, `CAVEATED_MEMBER`, next to `MEMBER` and `NOT_MEMBER` ([`dispatch.proto`](https://github.com/authzed/spicedb/blob/main/proto/internal/dispatch/v1/dispatch.proto)).
+
+What happens when the application forgets the IP address?
+
+<Swimlane
+  lanes={["Application", "SpiceDB", "Stored relationship"]}
+  title="A caveated Check that needs context"
+  desc="Row 1: the application sends CheckPermission for user:chen, view, doc:readme, with no context. Row 2: SpiceDB follows parent->view to folder:A and finds the relationship folder:A#viewer@user:chen with caveat has_valid_ip and allowed_range 10.20.30.0/24. Row 3: user_ip is missing, so SpiceDB answers PERMISSIONSHIP_CONDITIONAL_PERMISSION and names user_ip as missing. Row 4: the application checks again with context user_ip 10.20.30.7. Row 5: in_cidr is true and SpiceDB answers PERMISSIONSHIP_HAS_PERMISSION."
+  timeLabel="time"
+  laneWidth={190}
+  rowHeight={84}
+  events={[
+    { lane: 0, t: 0, label: "CheckPermission\nchen · view · readme\ncontext: none", kind: "read" },
+    { lane: 1, t: 1, label: "parent->view\nreaches folder:A", kind: "read" },
+    { lane: 2, t: 1, label: "folder:A#viewer\n@user:chen\nhas_valid_ip", kind: "note", mono: true },
+    { lane: 1, t: 2, label: "user_ip missing\nCONDITIONAL_PERMISSION\nmissing: user_ip", kind: "bad" },
+    { lane: 0, t: 3, label: "CheckPermission\nagain, context:\nuser_ip 10.20.30.7", kind: "read" },
+    { lane: 1, t: 4, label: "in_cidr → true\nHAS_PERMISSION", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "check" },
+    { from: [1, 1], to: [2, 1], label: "read" },
+    { from: [1, 2], to: [0, 3], label: "conditional", dashed: true },
+    { from: [0, 3], to: [1, 4], label: "re-check" },
+  ]}
+  caption="CONDITIONAL_PERMISSION is neither a grant nor a denial. The response names what was missing so the caller can retry with it; an application that treats it as yes has a hole."
+/>
+
+Notice that the stored relationship already holds half of the context. The application supplies only what it knows at request time.
+
+### Expiring relationships
+
+Expiry was a common use of caveats. AuthZed's post on it says that many users wanted expiration and nothing else, and introduces a built-in form: relationships take an optional expiration time, and the schema opts in with `use expiration` and `with expiration`. The post says it shipped in SpiceDB v1.40 as an experimental feature behind `--enable-experimental-relationship-expiration` ([AuthZed blog, 2025-02-13](https://authzed.com/blog/the-evolution-of-expiration)).
+
+```text
+use expiration
+
+definition folder {
+    relation viewer: user | user with expiration
+    permission view = viewer
+}
+```
+
+*SpiceDB schema; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+The [expiring relationships docs](https://authzed.com/docs/spicedb/concepts/expiring-relationships) set the time with `OptionalExpiresAt` (RFC 3339) on `WriteRelationships`, and give two reasons to prefer it over a caveat: a caveat "requires clients to provide the `now` timestamp", and "expired caveats are not automatically garbage collected". An expired relationship stops counting immediately; its row is removed later by garbage collection (after 24 hours by default, per the same page). The page gives the version once as "v1.40" and once as "v1.4.0"; the blog post says v1.40. Whether the feature is still marked experimental in the current release was not checked.
+
+## OpenFGA conditions
+
+OpenFGA attaches a condition to a tuple through the type restriction. The model from the [conditions guide](https://openfga.dev/docs/modeling/conditions), with the running example's types:
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type doc
+  relations
+    define viewer: [user, group#member, user with non_expired_grant]
+
+condition non_expired_grant(current_time: timestamp, grant_time: timestamp, grant_duration: duration) {
+  current_time < grant_time + grant_duration
+}
+```
+
+*OpenFGA DSL; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+The tuple `user:chen`, `viewer`, `doc:readme` is written with the condition name `non_expired_grant` and a context of `grant_time` and `grant_duration` (the guide's example uses `2023-01-01T00:00:00Z` and `10m`). Each Check passes `current_time`. The guide's two checks show the result: at `00:09:50` allowed is `true`, at `00:10:01` it is `false`. As in SpiceDB, stored context and request context are "merged together into a single evaluation context", and "persisted context has higher precedence than request context" (conditions guide).
+
+Two differences from SpiceDB. Missing context is an error, not a third answer: "If you don't provide the current_time in the context, the Check and ListObjects operations will fail", with the message "failed to evaluate relationship condition 'non_expired_grant': context is missing parameters '[current_time]'" ([OpenFGA blog, 2023-11-06](https://openfga.dev/blog/conditional-tuples-announcement)). And there are documented limits: stored context "is limited to 32KB in size", and the server enforces "a maximum Google CEL expression evaluation cost of 100 (by default)" (conditions guide). The same blog post dates the feature to OpenFGA 1.4.0-rc1.
+
+### Contextual tuples
+
+OpenFGA also lets a request bring its own tuples. A contextual tuple is "a tuple that can be added to a Check request, and only exists within the context of that particular request"; contextual tuples "are not persisted in the store" ([contextual and time-based authorization guide](https://openfga.dev/docs/modeling/contextual-time-based-authorization)). The guide models allowed IP ranges and time slots as objects (`ip-address-range`, `timeslot`) and sends `user:anne` `user` `timeslot:12_13` with the check; a slot the branch does not allow returns `{"allowed":false}`.
+
+Applied to the running example: folder A may be viewed only from the office network. The application decides, from the caller's address, that Chen is on `network:office`, and says so in a contextual tuple.
+
+```text
+type network
+  relations
+    define user: [user]
+
+type folder
+  relations
+    define allowed_network: [network]
+    define viewer: [user, group#member]
+    define can_view: viewer and user from allowed_network
+```
+
+*OpenFGA DSL; follows the documented syntax as of 2026-11-13; no validator was run.*
+
+Which edges are stored and which exist only for this request?
+
+<Graph
+  width={600}
+  height={220}
+  minWidth={480}
+  title="A contextual tuple completes an intersection"
+  desc="user:chen has a stored viewer edge to folder:A. network:office has a stored allowed_network edge to folder:A. A dashed, highlighted edge labelled user, contextual, goes from user:chen to network:office: it exists only in this Check request. With it, both children of the intersection hold."
+  nodes={[
+    { id: "chen", x: 80, y: 110, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "net", x: 300, y: 185, label: "network:office", kind: "object", mono: true, on: true },
+    { id: "folder", x: 520, y: 110, label: "folder:A", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "folder", label: "viewer (stored)", on: true },
+    { from: "chen", to: "net", label: "user\n(contextual,\nthis request only)", dashed: true, on: true },
+    { from: "net", to: "folder", label: "allowed_network\n(stored)", on: true },
+  ]}
+  caption="can_view = viewer ∩ (allowed_network → user). The dashed edge comes from the application, not from storage; without it the intersection fails."
+/>
+
+Notice where the IP matching happened: in the application, before the call. Contextual tuples move the fact into the request, not the logic into the service. The guide also lists their reach: they are supported on Check and ListObjects and "are not supported on read, expand and other endpoints", and a search index built from tuple changes "will not be trivial" to combine with them. That statement is from the guide as fetched on 2026-11-13; later releases may have widened support.
+
+## Permify attributes and rules
+
+Permify, which FusionAuth acquired in November 2025 ([Permify, 2025-11-20](https://permify.co/post/fusionauth-acquires-permify/)), stores attributes on entities, not conditions on relationships. Its schema has `attribute` and `rule`, and the docs say "we design our schema language based on" CEL ([Permify ABAC docs](https://fusionauth.io/permify-docs/use-cases/abac)). The example from Permify's [modeling guide](https://fusionauth.io/permify-docs/getting-started/modeling):
+
+```text
+entity organization {
+    relation admin @user
+    attribute ip_range string[]
+    permission view = check_ip_range(ip_range) or admin
+}
+
+rule check_ip_range(ip_range string[]) {
+    context.data.ip in ip_range
+}
+```
+
+*Permify schema; copied from the documented example as of 2026-11-13; no validator was run.*
+
+`ip_range` is a stored attribute of the organization; `context.data.ip` comes with the check request. Amounts fit the same shape; the ABAC page's banking example has `permission withdraw = check_balance(balance) and owner`. What a Permify check returns when `context.data` lacks a value was not found in the pages cited and is not stated here.
+
+## Side by side
+
+| | Paper | SpiceDB | OpenFGA | Permify |
+| --- | --- | --- | --- | --- |
+| Where the condition lives | Nowhere: tuples have four parts (§2.1) | On a relationship: a named caveat allowed by `with` in the schema | On a tuple: a named condition allowed by `with` in the type restriction | In a `rule` that a permission calls, over entity `attribute`s and request context |
+| Expression language | None | CEL | CEL | "Based on" CEL |
+| Request-time facts | None; Check carries userset, user and zookie (§2.4.4) | `context` on `CheckPermission` | `context` on Check; contextual tuples | `context` (`context.data`) |
+| Stored value vs request value | Not applicable | Relationship wins | Persisted context wins | Not verified |
+| Context missing | Not applicable | `PERMISSIONSHIP_CONDITIONAL_PERMISSION` with the missing fields | The request fails with an error | Not verified |
+| Expiry | Delete the tuple (client's job) | `with expiration` (v1.40), or a caveat | A condition on `current_time` | Not verified |
+
+Sources for each cell are in the sections above.
+
+## How Cedar classifies Zanzibar
+
+Cedar is a policy language whose paper describes it as supporting RBAC and ABAC natively. The paper (Cutler et al., "Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)", [arXiv:2403.04651v2](https://arxiv.org/abs/2403.04651), 2024-03-08) places Zanzibar in its related work (§6). It calls Zanzibar "a highly scalable, relationship-based access control (ReBAC) system" and says "Zanzibar supports RBAC and ReBAC with a natural syntax, and with policy validation", that "forbid-style policies are supported by expressing one relationship in terms of non-membership in some other relation", and that "it does not support ABAC, string matching, or search." It describes Cedar as the reverse: "Cedar natively supports RBAC and ABAC, can encode ReBAC, and supports forbid policies."
+
+The Cedar paper is describing the 2019 Zanzibar paper; its experiments use OpenFGA, which it introduces as "a recently developed language for specifying relationship-based access control (ReBAC) (Pang et al., 2019) policies" (§1). The caveats and conditions above are product extensions that the paper's classification does not cover. Its "forbid-style" sentence is the exclusion pattern on the [modeling page](../modeling/#blocklists-exclusion).
+
+## When to keep the rule in the application
+
+Conditions in the authorization service are not free. This section is this page's guidance, not a claim from the paper or the vendors.
+
+- **The fact exists only in the request.** A transfer amount or the caller's IP is known to the application first. Passing it as context works, but the service only evaluates it; it cannot store, list or audit it. A rule like "amount at most 1,000" checked by the application after the relationship check is often simpler, and it keeps the authorization service's answers cacheable.
+- **Listing and indexing need stored facts.** The paper's Expand exists so clients can "build efficient search indices for access-controlled content" (§2.4.5). A grant that depends on the request cannot be indexed ahead of time; OpenFGA's guide says as much about contextual tuples, and a SpiceDB check can come back `CONDITIONAL_PERMISSION` until the caller supplies the context.
+- **Time limits belong in storage.** Expiry is a property of the grant, not of the request. Built-in expiry (SpiceDB) or a condition on the stored tuple (OpenFGA) keeps it next to the grant, where an audit of "who could view the readme last Tuesday" can see it.
+- **Attributes that change often are cheaper as context than as tuples.** Writing a tuple each time a user's location or a document's status changes turns every change into a dual write. A condition evaluated against request context avoids that, at the cost of trusting the caller to send the right values.
+
+<Callout kind="paper" title="In the paper">
+
+The tuple grammar and its primary key: §2.1. The storage row key: §3.1.1. The Check request's three inputs: §2.4.4. Expand and search indices: §2.4.5. The paper has no section on conditions or attributes; everything after the first section of this page describes products.
+
+</Callout>
+
+## Sources
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- AuthZed, [caveats docs](https://authzed.com/docs/spicedb/concepts/caveats)
+- AuthZed, [expiring relationships docs](https://authzed.com/docs/spicedb/concepts/expiring-relationships)
+- AuthZed, [The Evolution of Expiration](https://authzed.com/blog/the-evolution-of-expiration), 2025-02-13
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- AuthZed, [`dispatch.proto`](https://github.com/authzed/spicedb/blob/main/proto/internal/dispatch/v1/dispatch.proto)
+- Google, [CEL specification](https://github.com/google/cel-spec)
+- OpenFGA, [conditions](https://openfga.dev/docs/modeling/conditions)
+- OpenFGA, [contextual and time-based authorization](https://openfga.dev/docs/modeling/contextual-time-based-authorization)
+- Andres Aguiar, [Conditional Relationship Tuples for OpenFGA](https://openfga.dev/blog/conditional-tuples-announcement), OpenFGA blog, 2023-11-06
+- Permify, [ABAC use case](https://fusionauth.io/permify-docs/use-cases/abac) and [modeling guide](https://fusionauth.io/permify-docs/getting-started/modeling)
+- Permify, [An Exciting New Chapter: Permify Joins FusionAuth](https://permify.co/post/fusionauth-acquires-permify/), 2025-11-20
+- Joseph W. Cutler et al., [Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)](https://arxiv.org/abs/2403.04651), arXiv:2403.04651v2, 2024-03-08

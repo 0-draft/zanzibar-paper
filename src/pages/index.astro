@@ -3,12 +3,16 @@ import { TRANSLATIONS } from "../i18n/langs.ts";
 import { UI } from "../i18n/ui.ts";
 import Base from "../layouts/Base.astro";
 import { loadSource, loadTranslation } from "../lib/content.ts";
+import { allEntries, inSection, pathOf, splitId } from "../lib/guides.ts";
 import { REPO_URL, withBase } from "../lib/paths.ts";
 
 const src = loadSource();
 const titles = Object.fromEntries(TRANSLATIONS.map((l) => [l.code, loadTranslation(l.code).meta.title]));
 const codes = TRANSLATIONS.map((l) => l.code);
 const en = UI.en!;
+const entries = await allEntries();
+const guides = inSection(entries, "en", "guides");
+const systems = inSection(entries, "en", "ecosystem");
 ---
 
 <Base lang="en" title={`${src.meta.title} | read side by side`} description={en.description} path="" alternates>
@@ -40,6 +44,35 @@ const en = UI.en!;
         ))
       }
     </ul>
+
+    <div class="landing-more">
+      <section>
+        <h2><a href={withBase(pathOf("en", "guides"))}>{en.navGuides}</a></h2>
+        <p>{en.guidesLead}</p>
+        <ul>
+          {
+            guides.map((g) => (
+              <li>
+                <a href={withBase(pathOf("en", "guides", splitId(g.id).slug))}>{g.data.title}</a>
+              </li>
+            ))
+          }
+        </ul>
+      </section>
+      <section>
+        <h2><a href={withBase(pathOf("en", "ecosystem"))}>{en.navEcosystem}</a></h2>
+        <p>{en.ecosystemLead}</p>
+        <ul>
+          {
+            systems.map((g) => (
+              <li>
+                <a href={withBase(pathOf("en", "ecosystem", splitId(g.id).slug))}>{g.data.title}</a>
+              </li>
+            ))
+          }
+        </ul>
+      </section>
+    </div>
 
     <p class="landing-links">
       <a href={src.meta.source.usenix} rel="noopener" target="_blank">The original paper at USENIX</a>
@@ -126,6 +159,28 @@ const en = UI.en!;
   }
   .landing-langs .suggested .hint {
     display: inline;
+  }
+  .landing-more {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    gap: 2rem 3rem;
+    margin-top: 3rem;
+  }
+  .landing-more h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1.25rem;
+  }
+  .landing-more p {
+    margin: 0 0 0.75rem;
+    color: var(--ink-2);
+    font-size: var(--fs-s);
+  }
+  .landing-more ul {
+    margin: 0;
+    padding-left: 1.2em;
+  }
+  .landing-more li + li {
+    margin-top: 0.35rem;
   }
   .landing-links {
     display: flex;

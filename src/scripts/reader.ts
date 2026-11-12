@@ -442,3 +442,6 @@ if (location.hash.length > 1) {
     flash(target);
   });
 }
+
+// a module, so its top-level names stay local to this file
+export {};
