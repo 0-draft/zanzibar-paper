@@ -182,6 +182,9 @@ function markCurrent() {
     else break;
   }
   if (id === current) return;
+  // the references are one list, not a pair: drop the column heads there
+  if (id === "refs") root.dataset.inRefs = "";
+  else delete root.dataset.inRefs;
   if (current) for (const a of tocLinks.get(current) ?? []) a.removeAttribute("aria-current");
   if (id) for (const a of tocLinks.get(id) ?? []) a.setAttribute("aria-current", "location");
   current = id;
@@ -196,7 +199,7 @@ function markCurrent() {
 // ── Reading progress: from the first paragraph to the references ────────
 const paper = document.querySelector<HTMLElement>(".paper");
 const refsStart = document.getElementById("refs");
-const progressNum = document.querySelector<HTMLElement>(".progress-num");
+const progressNums = [...document.querySelectorAll<HTMLElement>(".progress-num")];
 let shown = -1;
 function markProgress() {
   if (!paper) return;
@@ -210,8 +213,8 @@ function markProgress() {
   const ratio = end > start ? Math.min(1, Math.max(0, (window.scrollY - start) / (end - start))) : 0;
   root.style.setProperty("--read", ratio.toFixed(4));
   const pct = Math.round(ratio * 100);
-  if (progressNum && pct !== shown) {
-    progressNum.textContent = `${pct}%`;
+  if (pct !== shown) {
+    for (const el of progressNums) el.textContent = `${pct}%`;
     shown = pct;
   }
 }
@@ -264,10 +267,21 @@ if (tip) {
     window.clearTimeout(hideTimer);
     owner?.removeAttribute("aria-describedby");
     owner = a;
+    // [15] Title. Authors (first author et al.) and the rest of the entry
     const n = document.createElement("span");
     n.className = "n";
-    n.textContent = a.textContent ?? "";
-    const parts: Node[] = [n, document.createTextNode(" "), ...[...ref.childNodes].map((c) => c.cloneNode(true))];
+    n.textContent = `[${a.textContent ?? ""}]`;
+    const title = document.createElement("strong");
+    title.className = "ti";
+    title.append(...[...(ref.querySelector(".ti")?.childNodes ?? [])].map((c) => c.cloneNode(true)));
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    const au = ref.querySelector(".au")?.textContent ?? "";
+    const names = au.split(/\.,\s(?:and\s)?/);
+    const shortAu = names.length > 3 ? `${names[0]}., et al.` : au;
+    const rest = [...ref.childNodes].filter((c) => !(c instanceof Element && c.matches(".au, .ti, .back")));
+    meta.append(...(shortAu ? [document.createTextNode(`${shortAu} `)] : []), ...rest.map((c) => c.cloneNode(true)));
+    const parts: Node[] = [n, document.createTextNode(" "), title, document.createElement("br"), meta];
     if (withLink) {
       const go = document.createElement("a");
       go.className = "go";
@@ -339,18 +353,54 @@ for (const a of document.querySelectorAll<HTMLAnchorElement>("a.pl-report")) {
   });
 }
 
-// ── Deep links survive web-font loading ────────────────────────────────
-// The browser scrolls to #id before the fonts arrive; once they do, the text
-// above reflows and the target drifts. Put it back, unless the reader has
-// already started scrolling on their own.
-if (location.hash.length > 1) {
-  let id = location.hash.slice(1);
+// ── Arriving at a paragraph ────────────────────────────────────────────
+// The target gets a lasting marker (CSS :target) and a brief highlight that
+// starts only once the page has settled, so the reader actually sees it.
+function targetOf(hash: string): HTMLElement | null {
+  let id = hash.slice(1);
   try {
     id = decodeURIComponent(id);
   } catch {
     // malformed escape in the URL: use the raw fragment
   }
-  const target = document.getElementById(id);
+  return id ? document.getElementById(id) : null;
+}
+function flash(el: HTMLElement | null) {
+  for (const old of document.querySelectorAll(".arrived")) old.classList.remove("arrived");
+  if (!el) return;
+  void el.offsetWidth; // restart the animation
+  el.classList.add("arrived");
+}
+
+// Back from a reference to the sentence that cited it.
+let citedFrom: string | undefined;
+for (const a of document.querySelectorAll<HTMLAnchorElement>("a.cite")) {
+  a.addEventListener("click", () => {
+    citedFrom = a.closest<HTMLElement>(".row")?.id;
+  });
+}
+function offerWayBack(el: HTMLElement | null) {
+  for (const b of document.querySelectorAll(".refs .back")) b.remove();
+  if (!el?.matches(".refs li") || !citedFrom) return;
+  const back = document.createElement("a");
+  back.className = "back";
+  back.href = `#${citedFrom}`;
+  back.textContent = "↩";
+  back.setAttribute("aria-label", tip?.dataset.back ?? "Back");
+  el.append(" ", back);
+}
+
+window.addEventListener("hashchange", () => {
+  const el = targetOf(location.hash);
+  offerWayBack(el);
+  flash(el);
+});
+
+// Deep links survive web-font loading: the browser scrolls to #id before the
+// fonts arrive; once they do, the text above reflows and the target drifts.
+// Put it back, unless the reader has already started scrolling.
+if (location.hash.length > 1) {
+  const target = targetOf(location.hash);
   let moved = false;
   const stop = () => {
     moved = true;
@@ -361,5 +411,7 @@ if (location.hash.length > 1) {
   document.fonts?.ready.then(() => {
     if (!moved && target) target.scrollIntoView({ block: "start" });
     markCurrent();
+    markProgress();
+    flash(target);
   });
 }

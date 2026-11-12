@@ -73,6 +73,17 @@ describe("content/en.yaml", () => {
     expect(src.meta.authors).toHaveLength(14);
   });
 
+  it("splits each reference without changing its text", () => {
+    const refs = src.blocks.find((b) => b.type === "refs");
+    if (refs?.type !== "refs") throw new Error("no refs");
+    for (const r of refs.items) {
+      const joined = (r.authors ? `${r.authors} ` : "") + r.title + r.rest;
+      expect(joined, `ref ${r.n}`).toMatch(/\S/);
+      expect(r.title.trim(), `ref ${r.n} title`).toBe(r.title);
+    }
+    expect(refs.items.find((r) => r.n === 15)?.authors).toMatch(/^Corbett, J\. C\., Dean, J\./);
+  });
+
   it("cites every reference at least once", () => {
     const text = JSON.stringify(src.blocks.filter((b) => b.type !== "refs"));
     for (let n = 1; n <= 24; n++) expect(text, `ref-${n}`).toContain(`(#ref-${n})`);

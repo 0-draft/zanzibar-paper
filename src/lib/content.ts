@@ -24,7 +24,15 @@ export type Block =
       rows: string[][];
       caption: string;
     }
-  | { id: string; type: "refs"; items: { n: number; text: string }[] };
+  | { id: string; type: "refs"; items: Reference[] };
+
+/** A reference, split so a preview can lead with its title. authors + " " + title + rest is the published text. */
+export interface Reference {
+  n: number;
+  authors?: string;
+  title: string;
+  rest: string;
+}
 
 export type BlockType = Block["type"];
 

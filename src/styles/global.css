@@ -3,16 +3,21 @@
  *
  * Colour comes from the paper's own Figure 2: client blue, server yellow and
  * Spanner green are the only tints, and each keeps one meaning everywhere.
- *   blue   — where you are (current language, linked paragraph, current section)
+ *   blue   — where you are (current language, linked paragraph, current section, progress)
  *   yellow — what is under the pointer (a paragraph pair, a menu item)
  *   green  — stored notation (code, tuples, grammar)
  * The original is set in a serif and every translation in a sans, so either
  * column is recognisable at a glance.
  *
+ * Scales: radii 4 / 8 px; spacing .25 .5 .75 1 1.5 2 3 rem; small text
+ * .8 / .875 rem.
+ *
  * Layout state lives on <html>:
  *   data-view   both | original | translation
  *   data-layout side | stacked          (narrow screens are always stacked)
  *   data-first  original | translation  (unset: original left, translation on top when stacked)
+ *   data-size   s | l                   (unset: medium)
+ *   data-in-refs                        (reading the reference list)
  */
 
 :root {
@@ -42,9 +47,14 @@
   --sans-tc: "IBM Plex Sans", "PingFang TC", "Noto Sans TC", "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
+  --r1: 4px;
+  --r2: 8px;
+  --fs-xs: 0.8rem;
+  --fs-s: 0.875rem;
   --gutter: clamp(1rem, 3vw, 2.5rem);
-  --gap: clamp(1.75rem, 3vw, 3rem);
-  --single: 42rem;
+  --gap: clamp(1.5rem, 3vw, 3rem);
+  --pl-w: 1.75rem;
+  --single: 42em;
   --bar-h: 3.25rem;
   --target-offset: calc(var(--bar-h) + env(safe-area-inset-top, 0px) + 2.75rem);
 
@@ -63,8 +73,8 @@
     --server: rgb(241 194 50 / 0.13);
     --store: rgb(147 196 125 / 0.16);
     --link: #8fbcf2;
-    --plate: #eef0f2;
-    --plate-filter: brightness(0.92);
+    --plate: #d9dde2;
+    --plate-filter: brightness(0.86) contrast(0.95);
     --shadow: 0 12px 32px -14px rgb(0 0 0 / 0.8);
     color-scheme: dark;
   }
@@ -80,8 +90,8 @@
   --server: rgb(241 194 50 / 0.13);
   --store: rgb(147 196 125 / 0.16);
   --link: #8fbcf2;
-  --plate: #eef0f2;
-  --plate-filter: brightness(0.92);
+  --plate: #d9dde2;
+  --plate-filter: brightness(0.86) contrast(0.95);
   --shadow: 0 12px 32px -14px rgb(0 0 0 / 0.8);
   color-scheme: dark;
 }
@@ -129,10 +139,16 @@ body {
   font-family: var(--sans);
 }
 .cell-en[lang="en"],
-.shared[lang="en"] .refs,
 .title-en,
-.byline {
+.byline,
+.refs,
+.cite-tip {
   font-family: var(--serif);
+}
+
+::selection {
+  background: var(--client);
+  color: var(--ink);
 }
 
 a {
@@ -176,6 +192,23 @@ img {
   white-space: nowrap;
 }
 
+.nobr {
+  white-space: nowrap;
+}
+
+.only-narrow,
+.for-touch {
+  display: none;
+}
+@media (hover: none) {
+  .for-pointer {
+    display: none;
+  }
+  .for-touch {
+    display: inline;
+  }
+}
+
 .skip {
   position: absolute;
   left: 1rem;
@@ -210,32 +243,27 @@ img {
   min-height: var(--bar-h);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
   background: var(--paper);
   border-bottom: 1px solid var(--rule);
-  font-size: 0.875rem;
+  font-size: var(--fs-s);
 }
 
 /* The page's address as a Zanzibar relation tuple doubles as the brand. */
 .brand {
   font-family: var(--mono);
-  font-size: 0.85rem;
+  font-size: var(--fs-s);
   color: var(--ink);
   text-decoration: none;
   white-space: nowrap;
-  padding: 0.15rem 0.35rem;
-  border-radius: 4px;
-  background: var(--store);
 }
 .brand .b-p {
   color: var(--ink-3);
 }
 .brand .b-user {
   background: var(--client);
-  border-radius: 3px;
-  padding-inline: 0.15em;
-  margin-left: 0.05em;
+  border-radius: var(--r1);
+  padding: 0.05em 0.25em;
 }
 .brand:hover {
   text-decoration: underline;
@@ -260,20 +288,23 @@ img {
   transform-origin: 0 50%;
   transform: scaleX(var(--read, 0));
 }
+.progress-num.in-toc {
+  display: none;
+}
 .progress-num {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: 0.78rem;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
-  min-width: 3.5ch;
+  min-width: 4ch;
   text-align: right;
 }
 
 .bar-tools {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
   padding-block: 0.375rem;
 }
 
@@ -293,10 +324,10 @@ details > summary::-webkit-details-marker {
   display: inline-flex;
   align-items: center;
   gap: 0.4em;
-  min-height: 2.125rem;
-  padding: 0.3rem 0.65rem;
+  min-height: 2.25rem;
+  padding: 0.25rem 0.75rem;
   border: 1px solid var(--rule);
-  border-radius: 6px;
+  border-radius: var(--r1);
   color: var(--ink);
   cursor: pointer;
   white-space: nowrap;
@@ -318,16 +349,16 @@ details > summary::-webkit-details-marker {
 .pop-panel {
   position: absolute;
   right: 0;
-  top: calc(100% + 0.4rem);
+  top: calc(100% + 0.5rem);
   z-index: 35;
   margin: 0;
-  padding: 0.4rem;
+  padding: 0.5rem;
   background: var(--paper);
   border: 1px solid var(--rule-strong);
-  border-radius: 8px;
+  border-radius: var(--r2);
   box-shadow: var(--shadow);
   font-family: var(--sans);
-  font-size: 0.9rem;
+  font-size: var(--fs-s);
   line-height: 1.4;
 }
 
@@ -340,8 +371,8 @@ details > summary::-webkit-details-marker {
   justify-content: space-between;
   align-items: baseline;
   gap: 1rem;
-  padding: 0.5rem 0.65rem;
-  border-radius: 5px;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--r1);
   color: var(--ink);
   text-decoration: none;
   white-space: nowrap;
@@ -354,7 +385,7 @@ details > summary::-webkit-details-marker {
 }
 .langmenu-list .code {
   font-family: var(--mono);
-  font-size: 0.8em;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
 }
 
@@ -362,17 +393,15 @@ details > summary::-webkit-details-marker {
   width: min(24rem, calc(100vw - 2rem));
   max-height: min(70vh, 36rem);
   overflow: auto;
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 1.5rem), transparent);
-  padding-bottom: 1.5rem;
 }
 
 .viewmenu-panel {
   width: min(19rem, calc(100vw - 2rem));
-  padding: 0.6rem 0.8rem 0.7rem;
+  padding: 0.5rem 0.75rem 0.75rem;
 }
 .viewmenu-panel fieldset {
   margin: 0;
-  padding: 0.35rem 0 0.5rem;
+  padding: 0.25rem 0 0.5rem;
   border: 0;
   border-bottom: 1px solid var(--rule);
 }
@@ -381,17 +410,17 @@ details > summary::-webkit-details-marker {
   padding-bottom: 0;
 }
 .viewmenu-panel legend {
-  padding: 0.3rem 0 0.2rem;
-  font-size: 0.78rem;
+  padding: 0.25rem 0;
+  font-size: var(--fs-xs);
   color: var(--ink-2);
 }
 .viewmenu-panel label {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
   min-height: 2rem;
-  padding: 0 0.3rem;
-  border-radius: 4px;
+  padding: 0 0.25rem;
+  border-radius: var(--r1);
   cursor: pointer;
 }
 .viewmenu-panel label:hover {
@@ -426,7 +455,7 @@ details > summary::-webkit-details-marker {
 /* ── masthead ─────────────────────────────────────────────────────────── */
 
 .masthead {
-  padding-block: clamp(2.5rem, 6vw, 4.5rem) 2.25rem;
+  padding-block: clamp(2.5rem, 6vw, 4.5rem) 2rem;
   max-width: 52rem;
 }
 
@@ -438,19 +467,22 @@ details > summary::-webkit-details-marker {
   letter-spacing: -0.01em;
   text-wrap: balance;
 }
-.title-tr:lang(ja),
-.title-tr:lang(zh-Hans),
-.title-tr:lang(zh-Hant),
-.title-tr:lang(ko) {
+.title-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) {
   letter-spacing: 0;
   line-height: 1.3;
+  line-break: strict;
 }
-.title-tr:lang(ko) {
+.title-tr[lang="ja"] {
+  word-break: auto-phrase;
+}
+.title-tr[lang="ko"] {
   word-break: keep-all;
+}
+.title-tr:is([lang="zh-Hans"], [lang="zh-Hant"]) {
+  font-feature-settings: "halt";
 }
 .title-en {
   margin: 0.75rem 0 0;
-  font-family: var(--serif);
   font-size: clamp(1.15rem, 2vw, 1.45rem);
   font-variation-settings: "opsz" 36;
   line-height: 1.3;
@@ -459,16 +491,15 @@ details > summary::-webkit-details-marker {
 }
 
 .byline {
-  margin-top: 1.75rem;
-  padding-top: 1.25rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
   border-top: 2px solid var(--rule-strong);
-  font-family: var(--serif);
   color: var(--ink-2);
   font-size: 0.95rem;
   line-height: 1.55;
 }
 .byline p {
-  margin: 0.2rem 0;
+  margin: 0.25rem 0;
 }
 .authors {
   color: var(--ink);
@@ -480,34 +511,32 @@ details > summary::-webkit-details-marker {
 .affs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 1.1rem;
+  gap: 0 1rem;
 }
 .venue {
   font-style: italic;
 }
 .author-note {
-  font-size: 0.85rem;
+  font-size: var(--fs-s);
 }
 
 .howto {
   margin: 1.5rem 0 0;
-  font-size: 0.95rem;
   color: var(--ink);
 }
 
 .provenance {
-  margin-top: 0.9rem;
-  font-size: 0.85rem;
+  margin-top: 0.75rem;
+  font-size: var(--fs-s);
   color: var(--ink-2);
 }
 .provenance p {
-  margin: 0.4rem 0;
+  margin: 0.5rem 0;
 }
 .provenance .links {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem 1.25rem;
-  font-size: 0.92rem;
+  gap: 0.25rem 1.5rem;
 }
 
 /* ── column heads (side by side, both texts) ──────────────────────────── */
@@ -519,10 +548,10 @@ details > summary::-webkit-details-marker {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--gap);
-  padding: 0.5rem 0 0.4rem;
+  padding: 0.5rem var(--pl-w) 0.5rem 0;
   background: var(--paper);
   border-bottom: 1px solid var(--rule);
-  font-size: 0.78rem;
+  font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--ink-2);
 }
@@ -543,14 +572,15 @@ html[data-first="translation"] .ch-tr {
   grid-column: 1;
 }
 html:not([data-layout="side"]) .colheads,
-html:not([data-view="both"]) .colheads {
+html:not([data-view="both"]) .colheads,
+html[data-in-refs] .colheads {
   display: none;
 }
 
 /* ── rows ─────────────────────────────────────────────────────────────── */
 
 .paper {
-  padding-block: 1.25rem 4rem;
+  padding-block: 1rem 4rem;
   font-size: var(--size, 1rem);
 }
 html[data-size="s"] {
@@ -559,55 +589,68 @@ html[data-size="s"] {
 html[data-size="l"] {
   --size: 1.12rem;
 }
-.paper > .row:first-child {
-  margin-top: 0;
-}
 
+/* One grid row per block. The right edge keeps room for the permalink, so
+   it never sits on text. Hover and arrival tint spill past the box with a
+   box-shadow, which keeps the columns aligned with the column heads. */
 .row {
   position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: var(--gap);
   align-items: start;
-  border-radius: 6px;
-  padding: 0.1rem 0.6rem;
-  margin-inline: -0.6rem;
-  transition: background-color 0.12s;
+  padding-right: var(--pl-w);
+  border-radius: var(--r1);
+  transition:
+    background-color 0.12s,
+    box-shadow 0.12s;
 }
 @media (hover: hover) {
   .row:not(.row-refs):hover {
-    background: color-mix(in srgb, var(--server) 60%, transparent);
+    --tint: color-mix(in srgb, var(--server) 60%, transparent);
+    background: var(--tint);
+    box-shadow: 0 0 0 0.5rem var(--tint);
   }
 }
-/* the paragraph you arrived at: marked, then the mark fades */
-.row:target {
-  animation: arrived 2.4s ease-out both;
+/* the paragraph you arrived at: a lasting marker, and a brief tint once the
+   page has settled (reader.ts adds .arrived) */
+.row:target::before,
+.refs li:target::before {
+  content: "";
+  position: absolute;
+  left: -0.75rem;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--link);
+}
+.arrived {
+  animation: arrived 2.4s ease-out;
 }
 @keyframes arrived {
   0%,
-  45% {
+  40% {
     background: var(--client);
+    box-shadow: 0 0 0 0.5rem var(--client);
   }
   100% {
     background: transparent;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .row:target {
-    animation: none;
-    background: var(--client);
+    box-shadow: 0 0 0 0.5rem transparent;
   }
 }
 
 .cell {
   min-width: 0;
   grid-column: 1;
+  grid-row: 1;
 }
 .cell-tr {
   grid-column: 2;
 }
 .shared {
   grid-column: 1 / -1;
+  grid-row: 1;
   min-width: 0;
 }
 .has-shared > .cell {
@@ -623,7 +666,6 @@ html[data-first="translation"] .cell-tr {
 /* Original: serif. Translation: sans. Sizes are tuned so the two columns
    carry a similar visual weight (Literata runs large). */
 .cell-en {
-  font-family: var(--serif);
   font-size: 1em;
   line-height: 1.62;
   font-variation-settings: "opsz" 14;
@@ -634,86 +676,81 @@ html[data-first="translation"] .cell-tr {
   line-height: 1.66;
   hyphens: auto;
 }
-.cell-tr:lang(ja),
-.cell-tr:lang(zh-Hans),
-.cell-tr:lang(zh-Hant),
-.cell-tr:lang(ko) {
+.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) {
   font-size: 1.0625em;
   line-height: 1.85;
   line-break: strict;
   overflow-wrap: anywhere;
   hyphens: none;
 }
-.cell-tr:lang(ko),
-.toc :lang(ko) {
+.cell-tr[lang="ko"],
+.toc[lang="ko"],
+.toc [lang="ko"] {
   word-break: keep-all;
 }
-/* CJK has no italic: slanted kana and hanzi are synthetic and hard to read.
-   Emphasis becomes weight instead. */
-.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) em,
+/* CJK has no italic. Emphasis on CJK words becomes emphasis dots (傍点 /
+   着重号); Latin words inside CJK text keep their italic. */
+.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) em:not(.latin) {
+  font-style: normal;
+  text-emphasis: filled dot;
+  text-emphasis-color: var(--ink-3);
+}
+.cell-tr:is([lang="zh-Hans"], [lang="zh-Hant"]) em:not(.latin) {
+  text-emphasis-position: under right;
+}
 .cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) .caption {
   font-style: normal;
-}
-.cell-tr:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) em {
-  font-weight: 600;
 }
 
 .cell > :first-child,
 .shared > :first-child {
-  margin-top: 0.6rem;
+  margin-top: 0.5rem;
 }
 .cell > :last-child,
 .shared > :last-child {
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.5rem;
 }
 .cell p,
 .cell ul,
 .cell ol {
-  margin-block: 0.6rem;
+  margin-block: 0.5rem;
 }
 
-/* permalink and "report this paragraph", in the gutter between the columns */
+/* permalink and report link: top right of every row, shown on hover/focus */
 .pl {
   position: absolute;
-  left: calc(50% - 0.75rem);
-  top: 0.45rem;
+  right: 0;
+  top: 0.5rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.1rem;
-  width: 1.5rem;
+  width: var(--pl-w);
   font-family: var(--serif);
   font-size: 0.9rem;
   line-height: 1.2;
-  opacity: 0.22;
+  opacity: 0;
+  transition: opacity 0.12s;
 }
 .pl a {
   display: grid;
   place-items: center;
-  min-width: 1.5rem;
-  min-height: 1.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
   color: var(--ink-3);
   text-decoration: none;
-  border-radius: 3px;
+  border-radius: var(--r1);
 }
 .pl a:hover {
   color: var(--ink);
   background: var(--paper);
-}
-.pl-report {
-  font-family: var(--sans);
-  font-weight: 600;
-  font-size: 0.75rem;
-  visibility: hidden;
 }
 .row:hover .pl,
 .row:focus-within .pl,
 .row:target .pl {
   opacity: 1;
 }
-.row:hover .pl-report,
-.row:focus-within .pl-report {
-  visibility: visible;
+.row-heading .pl {
+  top: 0;
 }
 
 /* headings */
@@ -730,7 +767,7 @@ html[data-first="translation"] .cell-tr {
   margin-top: 0;
 }
 .row-heading {
-  padding-top: 0.6rem;
+  padding-top: 0.5rem;
   padding-bottom: 0.25rem;
 }
 .cell h2 {
@@ -752,12 +789,16 @@ html[data-first="translation"] .cell-tr {
 }
 .row-heading:has(h2) {
   margin-top: 3rem;
-  padding-top: 1.1rem;
+  padding-top: 1rem;
   border-top: 1px solid var(--rule-strong);
   border-radius: 0;
 }
+.paper > .row:first-child {
+  margin-top: 0;
+  border-top: 0;
+}
 .row-heading:has(h3) {
-  margin-top: 1.75rem;
+  margin-top: 2rem;
 }
 .row-heading:has(h4) {
   margin-top: 1rem;
@@ -784,13 +825,13 @@ html[data-first="translation"] .cell-tr {
 
 /* the "new enemy" examples */
 .example {
-  margin-block: 0.8rem;
+  margin-block: 0.75rem;
   padding: 0.25rem 0 0.25rem 1rem;
   border-left: 3px solid var(--rule-strong);
 }
 .cell .example .example-title {
   font-weight: 600;
-  margin-block: 0.4rem 0.2rem;
+  margin-block: 0.5rem 0.25rem;
 }
 .cell-en .example .example-title {
   font-weight: 560;
@@ -799,7 +840,7 @@ html[data-first="translation"] .cell-tr {
 /* inline notation */
 .cell code {
   padding: 0.05em 0.3em;
-  border-radius: 3px;
+  border-radius: var(--r1);
   background: var(--store);
   color: var(--ink);
   font-size: 0.86em;
@@ -820,20 +861,20 @@ html[data-first="translation"] .cell-tr {
   font-size: 1em;
 }
 
-/* shared blocks: grammar, display math, code, figures, the latency table, references */
+/* shared blocks: grammar, display math, code, figures, tables, references */
 .grammar {
   display: grid;
   grid-template-columns: max-content max-content 1fr;
-  gap: 0.25rem 0.9rem;
-  margin: 0.8rem auto;
-  padding: 0.9rem 1.2rem;
+  gap: 0.25rem 1rem;
+  margin: 0.75rem auto;
+  padding: 1rem 1.25rem;
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
   font-family: var(--mono);
   font-size: 0.92rem;
   background: var(--store);
-  border-radius: 6px;
+  border-radius: var(--r2);
 }
 .grammar > div {
   display: contents;
@@ -847,26 +888,26 @@ html[data-first="translation"] .cell-tr {
 }
 
 .math {
-  margin: 0.6rem 0;
+  margin: 0.5rem 0;
   overflow-x: auto;
   overflow-y: hidden;
   padding-block: 0.25rem;
 }
 .math .katex-display {
-  margin: 0.6rem 0;
+  margin: 0.5rem 0;
 }
 
 .codeblock {
-  margin: 0.8rem auto 0.2rem;
+  margin: 0.75rem auto 0.25rem;
   width: fit-content;
   max-width: 100%;
   overflow-x: auto;
   padding: 1rem 1.25rem;
-  font-size: 0.86rem;
+  font-size: var(--fs-s);
   line-height: 1.5;
   background: var(--store);
   color: var(--ink);
-  border-radius: 6px;
+  border-radius: var(--r2);
 }
 
 .plate {
@@ -875,7 +916,7 @@ html[data-first="translation"] .cell-tr {
   padding: clamp(0.5rem, 2vw, 1.25rem);
   background: var(--plate);
   border: 1px solid var(--rule);
-  border-radius: 8px;
+  border-radius: var(--r2);
   width: fit-content;
   max-width: 100%;
   cursor: zoom-in;
@@ -898,13 +939,13 @@ html[data-first="translation"] .cell-tr {
 }
 
 .has-shared .cell {
-  font-size: 0.9rem;
+  font-size: var(--fs-s);
   color: var(--ink-2);
 }
 .cell > .caption,
 .cell > .caption:first-child,
 .cell > .caption:last-child {
-  margin-block: 0.4rem 1rem;
+  margin-block: 0.5rem 1rem;
 }
 .cell-en > .caption {
   font-style: italic;
@@ -915,19 +956,19 @@ html[data-first="translation"] .cell-tr {
 }
 .refs {
   margin: 0;
-  padding-left: 2.6rem;
+  padding-left: 2.5rem;
   columns: 2 24rem;
   column-gap: var(--gap);
-  font-family: var(--serif);
   font-size: 0.9rem;
   line-height: 1.5;
   color: var(--ink-2);
 }
 .refs li {
+  position: relative;
   break-inside: avoid;
-  margin-bottom: 0.55rem;
-  padding: 0.1rem 0.25rem;
-  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  padding: 0.125rem 0.25rem;
+  border-radius: var(--r1);
   overflow-wrap: anywhere;
 }
 .refs li::marker {
@@ -936,32 +977,35 @@ html[data-first="translation"] .cell-tr {
   font-size: 0.85em;
   color: var(--ink-3);
 }
+.refs .ti {
+  color: var(--ink);
+}
+.refs .back {
+  text-decoration: none;
+  font-family: var(--sans);
+}
 @media (hover: hover) {
   .refs li:hover {
     background: var(--server);
   }
 }
-.refs li:target {
-  animation: arrived 2.4s ease-out both;
-  color: var(--ink);
-}
 
 /* tables */
 .table {
-  margin: 0.8rem 0;
+  margin: 0.75rem 0;
 }
 .table .scroll {
   overflow-x: auto;
 }
 .table table {
   border-collapse: collapse;
-  font-size: 0.86rem;
+  font-size: var(--fs-s);
   line-height: 1.45;
   width: 100%;
 }
 .table th,
 .table td {
-  padding: 0.4rem 0.6rem 0.4rem 0;
+  padding: 0.5rem 0.75rem 0.5rem 0;
   text-align: left;
   vertical-align: top;
   border-bottom: 1px solid var(--rule);
@@ -976,21 +1020,32 @@ html[data-first="translation"] .cell-tr {
 .table tbody tr:last-child > * {
   border-bottom: 1.5px solid var(--rule-strong);
 }
-.table-tuples td:first-child {
-  white-space: nowrap;
-}
-.shared .table-latency {
+.shared .table {
   width: fit-content;
   max-width: 100%;
   margin-inline: auto;
 }
+.table-tuples td.c-tuple {
+  white-space: nowrap;
+}
+.table-tuples .c-en {
+  font-family: var(--serif);
+}
+html[data-view="original"] .table-tuples .c-tr,
+html[data-view="translation"] .table-tuples .c-en,
+.table-tuples .h-en,
+html[data-view="original"] .table-tuples .h-tr {
+  display: none;
+}
+html[data-view="original"] .table-tuples .h-en {
+  display: inline;
+}
 .table-latency table {
   width: auto;
-  font-size: 0.9rem;
 }
 .table-latency td.n {
   font-family: var(--mono);
-  font-size: 0.84rem;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   text-align: right;
@@ -1012,16 +1067,23 @@ html[data-first="translation"] .cell-tr {
   font-weight: 500;
   color: var(--ink-2);
 }
-.table-latency tr.group-start > * {
+.table-latency tbody + tbody tr:first-child > * {
   border-top: 1.5px solid var(--rule-strong);
 }
 .table figcaption {
   margin-top: 0.5rem;
-  font-size: 0.86rem;
+  font-size: var(--fs-s);
   color: var(--ink-2);
 }
-.cell-en .table figcaption {
-  font-style: italic;
+
+/* blocks set once in both languages (the latency table): the original only
+   in the original-only view, the translation otherwise */
+.shared .v-en,
+html[data-view="original"] .shared .v-tr {
+  display: none;
+}
+html[data-view="original"] .shared .v-en {
+  display: block;
 }
 
 /* ── citation preview ─────────────────────────────────────────────────── */
@@ -1029,26 +1091,29 @@ html[data-first="translation"] .cell-tr {
 .cite-tip {
   position: absolute;
   z-index: 40;
-  padding: 0.6rem 0.8rem;
+  padding: 0.75rem 1rem;
   background: var(--paper);
   border: 1px solid var(--rule-strong);
-  border-radius: 6px;
+  border-radius: var(--r2);
   box-shadow: var(--shadow);
-  font-family: var(--serif);
-  font-size: 0.85rem;
+  font-size: var(--fs-s);
   line-height: 1.5;
-  color: var(--ink);
+  color: var(--ink-2);
   overflow-wrap: anywhere;
 }
 .cite-tip .n {
   font-family: var(--mono);
+  font-size: var(--fs-xs);
   color: var(--ink-3);
+}
+.cite-tip .ti {
+  color: var(--ink);
+  font-weight: 600;
 }
 .cite-tip .go {
   display: block;
   margin-top: 0.5rem;
   font-family: var(--sans);
-  font-size: 0.85rem;
 }
 
 /* ── contents ─────────────────────────────────────────────────────────── */
@@ -1061,9 +1126,9 @@ html[data-first="translation"] .cell-tr {
 .toc a {
   display: flex;
   align-items: baseline;
-  gap: 0.55rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 5px;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--r1);
   color: var(--ink);
   text-decoration: none;
   line-height: 1.35;
@@ -1079,11 +1144,11 @@ html[data-first="translation"] .cell-tr {
   min-width: 1.6rem;
 }
 .toc .lv2 {
-  margin-top: 0.3rem;
+  margin-top: 0.25rem;
   font-weight: 600;
 }
 .toc .lv3 a {
-  padding-left: 1.4rem;
+  padding-left: 1.5rem;
   font-size: 0.92em;
   color: var(--ink-2);
 }
@@ -1094,15 +1159,15 @@ html[data-first="translation"] .cell-tr {
 /* ── footer ───────────────────────────────────────────────────────────── */
 
 .foot {
-  padding: 1.75rem 0 calc(3rem + env(safe-area-inset-bottom, 0px));
+  padding: 1.5rem 0 calc(3rem + env(safe-area-inset-bottom, 0px));
   border-top: 2px solid var(--rule-strong);
-  font-size: 0.875rem;
+  font-size: var(--fs-s);
   color: var(--ink-2);
 }
 .foot p {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3rem 1.25rem;
+  gap: 0.25rem 1.5rem;
   margin: 0.5rem 0;
 }
 
@@ -1112,18 +1177,12 @@ html[data-view="original"] .cell-tr,
 html[data-view="translation"] .cell-en {
   display: none;
 }
-/* blocks set once in both languages (the latency table): the original only
-   in the original-only view, the translation otherwise */
-.shared .v-en,
-html[data-view="original"] .shared .v-tr {
-  display: none;
-}
-html[data-view="original"] .shared .v-en {
-  display: block;
-}
 html:not([data-view="both"]) .row {
   grid-template-columns: minmax(0, var(--single));
   justify-content: center;
+}
+html:not([data-view="both"]) .row > :not(.pl) {
+  grid-column: 1;
 }
 /* one column of the original alone: about 66 characters a line */
 html[data-view="original"] {
@@ -1132,9 +1191,6 @@ html[data-view="original"] {
 /* CJK alone: about 38 characters a line (JLReq: at most 40) */
 html[data-view="translation"]:is([lang="ja"], [lang="zh-Hans"], [lang="zh-Hant"], [lang="ko"]) {
   --single: 40.5em;
-}
-html:not([data-view="both"]) .row > :not(.pl) {
-  grid-column: 1;
 }
 
 /* ── stacked: one column, the pair one above the other ────────────────── */
@@ -1154,11 +1210,11 @@ html[data-layout="stacked"]:not([data-first="original"]) .cell-tr,
 html[data-layout="stacked"][data-first="original"] .cell-en {
   order: 1;
 }
-/* the second text of the pair reads as a quiet companion */
+/* the second text of the pair reads as a quiet companion: colour only */
 html[data-layout="stacked"][data-view="both"]:not([data-first="original"]) .cell-en,
 html[data-layout="stacked"][data-view="both"][data-first="original"] .cell-tr {
   order: 2;
-  margin-top: -0.2rem;
+  margin-top: -0.25rem;
   margin-bottom: 0.5rem;
   font-size: 0.92em;
   color: var(--ink-2);
@@ -1173,26 +1229,25 @@ html[data-layout="stacked"][data-view="both"]:not([data-first="original"]) .row-
 html[data-layout="stacked"][data-view="both"][data-first="original"] .row-heading .cell-tr .num {
   display: none;
 }
-/* rows whose middle is a figure or table, and single-column views: the
-   permalink moves to the left margin */
-.has-shared .pl,
+/* single-column views: the arrival marker sits at the column's left edge */
+html[data-layout="stacked"] .row:target::before,
+html:not([data-view="both"]) .row:target::before {
+  left: max(-0.75rem, calc(50% - var(--pl-w) / 2 - var(--single) / 2 - 0.75rem));
+}
+/* single-column views: the permalink sits at the column's right edge */
 html[data-layout="stacked"] .pl,
 html:not([data-view="both"]) .pl {
-  left: -1.9rem;
-}
-html[data-layout="stacked"] .row:not(.has-shared) .pl,
-html:not([data-view="both"]) .row:not(.has-shared) .pl {
-  left: calc(50% - var(--single) / 2 - 1.9rem);
+  right: max(0px, calc(50% - var(--single) / 2 - var(--pl-w) / 2 - 1rem));
 }
 
 /* ── wide: contents rail beside the paper ─────────────────────────────── */
 
-@media (min-width: 88rem) {
+@media (min-width: 80rem) {
   .shell {
     max-width: 92rem;
     display: grid;
-    grid-template-columns: 14rem minmax(0, 1fr);
-    column-gap: 3.5rem;
+    grid-template-columns: 12rem minmax(0, 1fr);
+    column-gap: clamp(2rem, 3vw, 3.5rem);
   }
   .rail {
     display: block;
@@ -1204,7 +1259,7 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
     max-height: calc(100vh - var(--bar-h) - 2.5rem);
     overflow: auto;
     padding: 2.5rem 0.25rem 2rem 0;
-    font-size: 0.84rem;
+    font-size: var(--fs-s);
   }
   #paper,
   .foot {
@@ -1220,6 +1275,7 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
 @media (max-width: 56rem) {
   :root {
     --gap: 1rem;
+    --pl-w: 1.5rem;
     --target-offset: calc(var(--bar-h) + env(safe-area-inset-top, 0px) + 1rem);
   }
   /* without JS the layout attribute is not set from the viewport */
@@ -1238,19 +1294,29 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
     max-width: var(--single);
     margin-inline: auto;
   }
-  .brand {
+  .brand .b-long {
     display: none;
   }
-  .progress-num {
-    margin-left: 0;
-    margin-right: auto;
-    text-align: left;
+  /* on phones the number rides in the contents button */
+  .progress-num.in-bar {
+    display: none;
   }
-  .pop > summary {
-    min-height: 2.75rem;
+  .progress-num.in-toc {
+    display: inline;
+    margin: 0;
+    min-width: 0;
+  }
+  .bar-tools {
+    margin-left: auto;
   }
   .only-wide {
     display: none;
+  }
+  .only-narrow {
+    display: inline;
+  }
+  .pop > summary {
+    min-height: 2.75rem;
   }
   .toc a {
     padding-block: 0.6rem;
@@ -1271,37 +1337,33 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
   .viewmenu-panel label {
     min-height: 2.75rem;
   }
-  .row {
-    padding-inline: 0.25rem;
-    margin-inline: -0.25rem;
-  }
-  /* permalink and report link: small, at the end of each row */
-  html[data-layout] .row .pl {
-    position: static;
-    grid-column: 1;
-    order: 3;
-    justify-self: end;
-    flex-direction: row;
-    width: auto;
-    margin-top: -0.6rem;
-    opacity: 0.45;
-  }
-  html[data-layout] .row .pl-report {
-    visibility: visible;
+  /* the permalink stays at the right edge, faint, so touch readers can use it */
+  html[data-layout] .pl {
+    right: 0;
+    opacity: 0.4;
   }
   html[data-layout] .row-heading .pl {
     display: none;
   }
-  /* figure 2 is a wide diagram: keep it legible and let it scroll */
+  /* figure 2 is a wide diagram: keep it legible and let it scroll, with a
+     fade on the right edge that shows there is more */
   #fig-2 .shared {
     overflow-x: auto;
+    mask-image: linear-gradient(to right, #000 85%, transparent);
   }
   #fig-2 .plate {
     width: 40rem;
     max-width: none;
   }
   .refs {
-    padding-left: 2.2rem;
+    padding-left: 2.25rem;
+  }
+}
+
+/* the smallest phones: the bar keeps only its three controls */
+@media (max-width: 34rem) {
+  .brand {
+    display: none;
   }
 }
 
@@ -1310,6 +1372,7 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
   *::before,
   *::after {
     transition: none !important;
+    animation: none !important;
     scroll-behavior: auto !important;
   }
 }
@@ -1333,7 +1396,7 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
 .tuple-hero {
   margin: 0;
   font-family: var(--mono);
-  font-size: clamp(1.4rem, 5vw, 3.1rem);
+  font-size: clamp(1.15rem, 5vw, 3.1rem);
   line-height: 1.25;
   letter-spacing: -0.02em;
   color: var(--ink);
@@ -1341,7 +1404,7 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
 }
 .tuple-hero .t {
   background: var(--store);
-  border-radius: 0.12em;
+  border-radius: var(--r1);
   padding: 0 0.12em;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
@@ -1349,9 +1412,11 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
 .tuple-hero .p {
   color: var(--ink-3);
 }
+.tuple-hero .at {
+  white-space: nowrap;
+}
 .tuple-hero .u {
   background: var(--client);
-  border-radius: 0.1em;
+  border-radius: var(--r1);
   padding-inline: 0.08em;
-  white-space: nowrap;
 }

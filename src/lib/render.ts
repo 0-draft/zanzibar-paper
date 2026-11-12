@@ -124,11 +124,30 @@ export function renderShared(b: Block, base: string, labels: SharedLabels = DEFA
     }
     case "refs":
       return `<ol class="refs">${b.items
-        .map((r) => `<li id="ref-${r.n}" value="${r.n}">${renderInline(r.text)}</li>`)
+        .map(
+          (r) =>
+            `<li id="ref-${r.n}" value="${r.n}">${r.authors ? `<span class="au">${renderInline(r.authors)}</span> ` : ""}<span class="ti">${renderInline(r.title)}</span>${renderInline(r.rest)}</li>`,
+        )
         .join("")}</ol>`;
     default:
       return undefined;
   }
+}
+
+function tuplesTable(b: Extract<Block, { type: "table" }>, tb: Extract<Block, { type: "table" }>): string {
+  const head =
+    `<th scope="col"><span class="h-tr">${renderInline(tb.header[0]!)}</span><span class="h-en" lang="en">${renderInline(b.header[0]!)}</span></th>` +
+    `<th scope="col" class="c-en" lang="en">${renderInline(b.header[1]!)}</th>` +
+    `<th scope="col" class="c-tr">${renderInline(tb.header[1]!)}</th>`;
+  const body = b.rows
+    .map(
+      (row, r) =>
+        `<tr><td class="c-tuple">${renderInline(row[0]!)}</td>` +
+        `<td class="c-en" lang="en">${renderInline(row[1]!)}</td>` +
+        `<td class="c-tr">${renderInline(tb.rows[r]![1]!)}</td></tr>`,
+    )
+    .join("");
+  return `<figure class="table table-tuples"><div class="scroll" tabindex="0"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></figure>`;
 }
 
 const caption = (c: string) => `<p class="caption">${renderInline(c)}</p>`;
@@ -147,6 +166,14 @@ export function buildRows(src: Source, tr: Translation, base: string, labels?: S
     .map((b) => {
       const tb = localize(b, tr.blocks[b.id]);
       const row: Row = { id: b.id, type: b.type };
+      if (b.type === "table" && tb.type === "table" && b.variant === "tuples") {
+        // the tuple column is notation and identical in every language: set it
+        // once, with the meaning in both languages beside it
+        row.shared = tuplesTable(b, tb);
+        row.en = caption(b.caption);
+        row.tr = caption(tb.caption);
+        return row;
+      }
       if (b.type === "table" && tb.type === "table" && b.variant === "latency") {
         // both versions: the reader's view decides which one shows
         row.shared = `<div class="v-tr">${table(tb, false)}</div><div class="v-en" lang="en">${table(b, false)}</div>`;

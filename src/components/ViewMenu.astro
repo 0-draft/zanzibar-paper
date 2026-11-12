@@ -32,7 +32,10 @@ const { t } = Astro.props;
         <label><input type="radio" name="layout" value="side" checked /> {t.layoutSide}</label>
         <label><input type="radio" name="layout" value="stacked" /> {t.layoutStacked}</label>
       </div>
-      <label class="check"><input type="checkbox" name="first" value="translation" /> {t.translationFirst}</label>
+      <label class="check"
+        ><input type="checkbox" name="first" value="translation" />
+        <span class="only-wide">{t.translationFirst}</span><span class="only-narrow">{t.translationOnTop}</span></label
+      >
     </fieldset>
     <fieldset class="sizes">
       <legend>{t.textSize}</legend>

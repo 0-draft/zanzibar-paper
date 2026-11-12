@@ -14,9 +14,7 @@ const en = UI.en!;
 <Base lang="en" title={`${src.meta.title} | read side by side`} description={en.description} path="" alternates>
   <main class="landing">
     <p class="tuple-hero" lang="en">
-      <span class="t">paper<span class="p">:</span>zanzibar<span class="p">#</span>translation<span class="p">@</span><span
-          class="u">you</span
-        ></span>
+      <span class="t">paper<span class="p">:</span>zanzibar<span class="p">#</span>translation<span class="at"><span class="p">@</span><span class="u">you</span></span></span>
     </p>
 
     <h1 class="landing-title">{src.meta.title}</h1>
@@ -124,7 +122,7 @@ const en = UI.en!;
     white-space: nowrap;
   }
   .landing-langs .suggested a {
-    box-shadow: inset 3px 0 0 var(--rule-strong);
+    box-shadow: inset 3px 0 0 var(--link);
   }
   .landing-langs .suggested .hint {
     display: inline;

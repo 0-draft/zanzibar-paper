@@ -164,32 +164,58 @@ export function renderMath(tex: string, displayMode = false): string {
   return katex.renderToString(tex, { displayMode, throwOnError: true, output: "htmlAndMathml", strict: "error" });
 }
 
+/** Closing punctuation that must not start a line after an inline formula. */
+const CLOSING = /^[。、，．：；！？」』）】〉》,.;:!?)]/u;
+
 export function renderNodes(nodes: Inline[]): string {
-  return nodes
-    .map((n) => {
-      switch (n.kind) {
-        case "text":
-          return escapeHtml(n.value);
-        case "code":
-          return `<code>${escapeHtml(n.value)}</code>`;
-        case "math":
-          return renderMath(n.value);
-        case "em":
-          return `<em>${renderNodes(n.children)}</em>`;
-        case "strong":
-          return `<strong>${renderNodes(n.children)}</strong>`;
-        case "link": {
-          const inner = renderNodes(n.children);
-          if (n.href.startsWith("#")) {
-            const cls = n.href.startsWith("#ref-") ? ' class="cite"' : "";
-            return `<a href="${escapeHtml(n.href)}"${cls}>${inner}</a>`;
-          }
-          return `<a href="${escapeHtml(n.href)}" rel="noopener" target="_blank">${inner}</a>`;
-        }
-        default:
-          return assertNever(n);
+  let html = "";
+  for (let k = 0; k < nodes.length; k++) {
+    const n = nodes[k]!;
+    const next = nodes[k + 1];
+    // keep "$T$。" together: a formula followed by closing punctuation
+    if (n.kind === "math" && next?.kind === "text" && CLOSING.test(next.value)) {
+      const p = next.value.match(CLOSING)![0];
+      html += `<span class="nobr">${renderMath(n.value)}${escapeHtml(p)}</span>`;
+      nodes = [...nodes.slice(0, k + 1), { kind: "text", value: next.value.slice(p.length) }, ...nodes.slice(k + 2)];
+      continue;
+    }
+    html += renderNode(n);
+  }
+  return html;
+}
+
+function renderNode(n: Inline): string {
+  switch (n.kind) {
+    case "text":
+      return escapeHtml(n.value);
+    case "code":
+      return `<code>${escapeHtml(n.value)}</code>`;
+    case "math":
+      return renderMath(n.value);
+    case "em": {
+      // Latin-only emphasis keeps its italic even inside CJK text; CJK
+      // emphasis is styled differently (CJK has no italic)
+      const latin = /^[\x20-\x7E⟨⟩’“”–—]*$/u.test(textOf(n.children));
+      return `<em${latin ? ' class="latin"' : ""}>${renderNodes(n.children)}</em>`;
+    }
+    case "strong":
+      return `<strong>${renderNodes(n.children)}</strong>`;
+    case "link": {
+      const inner = renderNodes(n.children);
+      if (n.href.startsWith("#")) {
+        const cls = n.href.startsWith("#ref-") ? ' class="cite"' : "";
+        return `<a href="${escapeHtml(n.href)}"${cls}>${inner}</a>`;
       }
-    })
+      return `<a href="${escapeHtml(n.href)}" rel="noopener" target="_blank">${inner}</a>`;
+    }
+    default:
+      return assertNever(n);
+  }
+}
+
+function textOf(nodes: Inline[]): string {
+  return nodes
+    .map((n) => (n.kind === "text" || n.kind === "code" || n.kind === "math" ? n.value : textOf(n.children)))
     .join("");
 }
 

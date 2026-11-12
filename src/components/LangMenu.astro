@@ -16,7 +16,7 @@ const cur = TRANSLATIONS.find((l) => l.code === current)!;
 <details class:list={["langmenu", cls]}>
   <summary>
     <span class="vh">{label}: </span>
-    <span lang={cur.code}>{cur.native}</span>
+    <span lang={cur.code} class="only-wide">{cur.native}</span><span lang="en" class="only-narrow">{cur.code}</span>
     <svg class="chev" viewBox="0 0 10 6" aria-hidden="true" width="10" height="6"
       ><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5"></path></svg
     >

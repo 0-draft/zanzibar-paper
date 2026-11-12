@@ -42,7 +42,7 @@ describe("parseInline", () => {
   });
 
   it("parses emphasis wrapping angle-bracket notation", () => {
-    expect(renderInline("⟨*object#relation*⟩")).toBe("⟨<em>object#relation</em>⟩");
+    expect(renderInline("⟨*object#relation*⟩")).toBe('⟨<em class="latin">object#relation</em>⟩');
   });
 });
 
@@ -110,5 +110,16 @@ describe("hardening", () => {
   it("treats a changed citation number as a changed token", () => {
     expect(invariantTokens("[15](#ref-15)")).not.toEqual(invariantTokens("[99](#ref-15)"));
     expect(invariantTokens("[15](#ref-15)")).toEqual(["link:#ref-15=15"]);
+  });
+});
+
+describe("CJK-aware rendering", () => {
+  it("marks Latin-only emphasis so it can keep its italic in CJK text", () => {
+    expect(renderInline("*zookie* と*強調*")).toBe('<em class="latin">zookie</em> と<em>強調</em>');
+  });
+
+  it("keeps a formula and the closing punctuation after it on one line", () => {
+    const html = renderInline("時刻 $T$。次");
+    expect(html).toMatch(/^時刻 <span class="nobr"><span class="katex">.*<\/span>。<\/span>次$/s);
   });
 });

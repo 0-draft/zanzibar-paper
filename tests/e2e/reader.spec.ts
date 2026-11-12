@@ -199,7 +199,7 @@ test.describe("accessibility (axe, WCAG 2.2 AA)", () => {
 
 test("reading progress runs from the first paragraph to the references", async ({ page }) => {
   await page.goto(`${BASE}ja/`);
-  const num = page.locator(".progress-num");
+  const num = page.locator(".progress-num:visible");
   await expect(num).toHaveText("0%");
   await page.locator("#s3-2-4").scrollIntoViewIfNeeded();
   await page.evaluate(() => document.getElementById("s3-2-4")!.scrollIntoView({ block: "start" }));
@@ -241,4 +241,40 @@ test("the latency table follows the view: original labels in the original-only v
   await expect(page.locator("#tab-2 .v-en")).toBeVisible();
   await expect(page.locator("#tab-2 .v-tr")).toBeHidden();
   await expect(page.locator("#tab-2 .v-en")).toContainText("Latency in milliseconds");
+});
+
+test("translation first keeps both columns on the same line", async ({ page, isMobile }) => {
+  test.skip(isMobile, "side by side only");
+  await page.goto(`${BASE}zh-Hans/#s2-1-p1`);
+  await openView(page);
+  await page.locator('input[name="first"]').check();
+  for (const id of ["s2-1", "s2-1-p1", "s2-2-p3"]) {
+    const en = (await page.locator(`#${id} .cell-en`).boundingBox())!;
+    const tr = (await page.locator(`#${id} .cell-tr`).boundingBox())!;
+    expect(Math.abs(en.y - tr.y), id).toBeLessThan(2);
+    expect(tr.x).toBeLessThan(en.x);
+  }
+});
+
+test("the column heads step aside for the reference list", async ({ page, isMobile }) => {
+  test.skip(isMobile, "column heads are desktop only");
+  await page.goto(`${BASE}ja/#refs`);
+  await page.evaluate(() => document.fonts.ready.then(() => new Promise((r) => setTimeout(r, 200))));
+  await expect(page.locator(".colheads")).toBeHidden();
+  await page.evaluate(() => document.getElementById("s2-2")!.scrollIntoView());
+  await expect(page.locator(".colheads")).toBeVisible();
+});
+
+test("citation cards lead with the title, and the reference links back", async ({ page, isMobile }) => {
+  test.skip(isMobile, "hover card");
+  await page.goto(`${BASE}de/#s1-p10`);
+  await page.locator("#s1-p10 .cell-tr a.cite").first().hover();
+  const tip = page.locator("#cite-tip");
+  await expect(tip.locator(".ti")).toHaveText(/^Spanner: Google’s globally-distributed database\./);
+  await expect(tip).toContainText("[15]");
+  await expect(tip).toContainText("Corbett, J. C., et al.");
+  await page.locator("#s1-p10 .cell-tr a.cite").first().click();
+  await expect(page).toHaveURL(/#ref-15$/);
+  await page.locator("#ref-15 a.back").click();
+  await expect(page).toHaveURL(/#s1-p10$/);
 });

@@ -18,12 +18,15 @@ export interface UiStrings {
   layoutSide: string;
   layoutStacked: string;
   translationFirst: string;
+  translationOnTop: string;
   howto: string;
+  howtoTouch: string;
   textSize: string;
   sizeSmall: string;
   sizeMedium: string;
   sizeLarge: string;
   goToReference: string;
+  backToText: string;
   reportParagraph: string;
   openFigure: string;
   theme: string;
@@ -57,13 +60,17 @@ const en: UiStrings = {
   layoutSide: "Side by side",
   layoutStacked: "Stacked",
   translationFirst: "Translation first (left or top)",
+  translationOnTop: "Translation on top",
   howto:
     "The original and the translation, one paragraph per row. Point at a paragraph to see its pair; ¶ links to it.",
+  howtoTouch:
+    "The original and the translation, one paragraph after the other. Tap ¶ at the end of a paragraph to link to it.",
   textSize: "Text size",
   sizeSmall: "Small",
   sizeMedium: "Medium",
   sizeLarge: "Large",
   goToReference: "Go to the reference",
+  backToText: "Back to the text",
   reportParagraph: "Report an error in this paragraph",
   openFigure: "Open full size",
   theme: "Theme",
@@ -100,13 +107,16 @@ export const UI: Record<string, UiStrings> = {
     layoutSide: "左右",
     layoutStacked: "上下",
     translationFirst: "訳文を先に (左・上)",
+    translationOnTop: "訳文を上に",
     howto:
       "原文と訳文を 1 段落ずつ並べている。段落にポインタを合わせると対応する段落が色づき、¶ でその段落へのリンクが取れる。",
+    howtoTouch: "原文と訳文を 1 段落ずつ並べている。段落の末尾の ¶ をタップすると、その段落へのリンクが取れる。",
     textSize: "文字サイズ",
     sizeSmall: "小",
     sizeMedium: "中",
     sizeLarge: "大",
     goToReference: "参考文献へ移動",
+    backToText: "本文に戻る",
     reportParagraph: "この段落の誤訳を報告",
     openFigure: "原寸で開く",
     theme: "テーマ",
@@ -140,12 +150,15 @@ export const UI: Record<string, UiStrings> = {
     layoutSide: "左右并排",
     layoutStacked: "上下排列",
     translationFirst: "译文在前（左侧或上方）",
+    translationOnTop: "译文在上",
     howto: "原文与译文逐段并列。将指针移到段落上会突出显示对应段落，¶ 可链接到该段。",
+    howtoTouch: "原文与译文逐段排列。轻点段落末尾的 ¶ 可获取该段的链接。",
     textSize: "字号",
     sizeSmall: "小",
     sizeMedium: "中",
     sizeLarge: "大",
     goToReference: "跳到参考文献",
+    backToText: "返回正文",
     reportParagraph: "报告本段翻译错误",
     openFigure: "查看原图",
     theme: "主题",
@@ -179,12 +192,15 @@ export const UI: Record<string, UiStrings> = {
     layoutSide: "左右並排",
     layoutStacked: "上下排列",
     translationFirst: "譯文在前（左側或上方）",
+    translationOnTop: "譯文在上",
     howto: "原文與譯文逐段並列。將游標移到段落上會標示對應段落，¶ 可連結到該段。",
+    howtoTouch: "原文與譯文逐段排列。點選段落末尾的 ¶ 可取得該段的連結。",
     textSize: "字級",
     sizeSmall: "小",
     sizeMedium: "中",
     sizeLarge: "大",
     goToReference: "跳至參考文獻",
+    backToText: "返回正文",
     reportParagraph: "回報本段翻譯錯誤",
     openFigure: "檢視原圖",
     theme: "主題",
@@ -218,13 +234,16 @@ export const UI: Record<string, UiStrings> = {
     layoutSide: "좌우",
     layoutStacked: "위아래",
     translationFirst: "번역문 먼저 (왼쪽 또는 위)",
+    translationOnTop: "번역문을 위에",
     howto:
       "원문과 번역문을 문단 단위로 나란히 놓았습니다. 문단에 포인터를 올리면 짝이 되는 문단이 표시되고, ¶로 그 문단에 링크할 수 있습니다.",
+    howtoTouch: "원문과 번역문을 문단 단위로 이어 놓았습니다. 문단 끝의 ¶를 누르면 그 문단의 링크를 얻을 수 있습니다.",
     textSize: "글자 크기",
     sizeSmall: "작게",
     sizeMedium: "보통",
     sizeLarge: "크게",
     goToReference: "참고문헌으로 이동",
+    backToText: "본문으로 돌아가기",
     reportParagraph: "이 문단의 번역 오류 신고",
     openFigure: "원본 크기로 열기",
     theme: "테마",
@@ -258,13 +277,16 @@ export const UI: Record<string, UiStrings> = {
     layoutSide: "Lado a lado",
     layoutStacked: "Uno debajo del otro",
     translationFirst: "Traducción primero (izquierda o arriba)",
+    translationOnTop: "Traducción arriba",
     howto:
       "Original y traducción, párrafo a párrafo. Al pasar el puntero por un párrafo se resalta su pareja; ¶ enlaza a ese párrafo.",
+    howtoTouch: "Original y traducción, un párrafo tras otro. Toca ¶ al final de un párrafo para enlazarlo.",
     textSize: "Tamaño del texto",
     sizeSmall: "Pequeño",
     sizeMedium: "Mediano",
     sizeLarge: "Grande",
     goToReference: "Ir a la referencia",
+    backToText: "Volver al texto",
     reportParagraph: "Informar de un error en este párrafo",
     openFigure: "Abrir a tamaño completo",
     theme: "Tema",
@@ -298,13 +320,17 @@ export const UI: Record<string, UiStrings> = {
     layoutSide: "Côte à côte",
     layoutStacked: "L’un sous l’autre",
     translationFirst: "Traduction d’abord (à gauche ou en haut)",
+    translationOnTop: "Traduction en haut",
     howto:
       "L’original et la traduction, paragraphe par paragraphe. Survolez un paragraphe pour voir son pendant ; ¶ donne un lien vers ce paragraphe.",
+    howtoTouch:
+      "L’original et la traduction, un paragraphe après l’autre. Touchez ¶ à la fin d’un paragraphe pour obtenir son lien.",
     textSize: "Taille du texte",
     sizeSmall: "Petite",
     sizeMedium: "Moyenne",
     sizeLarge: "Grande",
     goToReference: "Aller à la référence",
+    backToText: "Retour au texte",
     reportParagraph: "Signaler une erreur dans ce paragraphe",
     openFigure: "Ouvrir en taille réelle",
     theme: "Thème",
@@ -338,13 +364,17 @@ export const UI: Record<string, UiStrings> = {
     layoutSide: "Nebeneinander",
     layoutStacked: "Untereinander",
     translationFirst: "Übersetzung zuerst (links oder oben)",
+    translationOnTop: "Übersetzung oben",
     howto:
       "Original und Übersetzung, Absatz für Absatz. Zeigen Sie auf einen Absatz, um sein Gegenstück hervorzuheben; ¶ verlinkt auf den Absatz.",
+    howtoTouch:
+      "Original und Übersetzung, Absatz für Absatz. Tippen Sie auf ¶ am Ende eines Absatzes, um ihn zu verlinken.",
     textSize: "Schriftgröße",
     sizeSmall: "Klein",
     sizeMedium: "Mittel",
     sizeLarge: "Groß",
     goToReference: "Zur Quelle springen",
+    backToText: "Zurück zum Text",
     reportParagraph: "Fehler in diesem Absatz melden",
     openFigure: "In voller Größe öffnen",
     theme: "Design",
@@ -378,13 +408,16 @@ export const UI: Record<string, UiStrings> = {
     layoutSide: "Lado a lado",
     layoutStacked: "Um abaixo do outro",
     translationFirst: "Tradução primeiro (à esquerda ou acima)",
+    translationOnTop: "Tradução em cima",
     howto:
       "Original e tradução, parágrafo por parágrafo. Passe o ponteiro sobre um parágrafo para destacar seu par; ¶ cria um link para ele.",
+    howtoTouch: "Original e tradução, um parágrafo após o outro. Toque em ¶ no fim de um parágrafo para obter o link.",
     textSize: "Tamanho do texto",
     sizeSmall: "Pequeno",
     sizeMedium: "Médio",
     sizeLarge: "Grande",
     goToReference: "Ir para a referência",
+    backToText: "Voltar ao texto",
     reportParagraph: "Relatar um erro neste parágrafo",
     openFigure: "Abrir em tamanho original",
     theme: "Tema",

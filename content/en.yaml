@@ -1640,102 +1640,99 @@ blocks:
     type: heading
     level: 2
     text: References
+  # Each reference is split into authors / title / rest only so the page can
+  # lead a citation preview with the title; joined back ("authors title rest")
+  # they are the published text, verbatim.
+  # Each reference is split into authors / title / rest only so the page can
+  # lead a citation preview with the title. Joined back ("authors title rest")
+  # they are the published text, verbatim.
   - id: refs-list
     type: refs
     items:
-      - {
-          n: 1,
-          text: "Amazon Web Services Identity and Access Management. [https://aws.amazon.com/iam/](https://aws.amazon.com/iam/). Accessed: 2019-04-16.",
-        }
-      - {
-          n: 2,
-          text: "Azure Identity and Access Management. [https://www.microsoft.com/en-us/cloud-platform/identity-management](https://www.microsoft.com/en-us/cloud-platform/identity-management). Accessed: 2019-04-16.",
-        }
-      - {
-          n: 3,
-          text: "Cache stampede. [https://en.wikipedia.org/wiki/Cache_stampede](https://en.wikipedia.org/wiki/Cache_stampede). Accessed: 2019-04-16.",
-        }
-      - {
-          n: 4,
-          text: "DCE 1.1: Authentication and Security Services. [http://pubs.opengroup.org/onlinepubs/9668899](http://pubs.opengroup.org/onlinepubs/9668899). Accessed: 2019-04-16.",
-        }
-      - {
-          n: 5,
-          text: "Google Cloud Identity and Access Management. [https://cloud.google.com/iam/](https://cloud.google.com/iam/). Accessed: 2019-04-16.",
-        }
-      - {
-          n: 6,
-          text: "Google Cloud Spanner. [https://cloud.google.com/spanner/](https://cloud.google.com/spanner/). Accessed: 2019-04-16.",
-        }
-      - {
-          n: 7,
-          text: "HP OpenVMS System Management Utilities Reference Manual. [https://support.hpe.com/hpsc/doc/public/display?docId=emr_na-c04622366](https://support.hpe.com/hpsc/doc/public/display?docId=emr_na-c04622366). Accessed: 2019-04-16.",
-        }
-      - {
-          n: 8,
-          text: "OpenVMS Guide to System Security. [http://www.itec.suny.edu/scsys/vms/ovmsdoc073/V73/6346/6346pro_006.html#acl_details](http://www.itec.suny.edu/scsys/vms/ovmsdoc073/V73/6346/6346pro_006.html#acl_details). Accessed: 2019-04-16.",
-        }
-      - {
-          n: 9,
-          text: "Unix Manual. [https://www.bell-labs.com/usr/dmr/www/pdfs/man22.pdf](https://www.bell-labs.com/usr/dmr/www/pdfs/man22.pdf). Accessed: 2019-04-16.",
-        }
-      - {
-          n: 10,
-          text: "Abadi, M., Burrows, M., Lampson, B., and Plotkin, G. A calculus for access control in distributed systems. *ACM Trans. Program. Lang. Syst. 15*, 4 (Sept. 1993), 706–734.",
-        }
-      - {
-          n: 11,
-          text: "Abadi, M., Burrows, M., Pucha, H., Sadovsky, A., Shankar, A., and Taly, A. Distributed authorization with distributed grammars. In *Essays Dedicated to Pierpaolo Degano on Programming Languages with Applications to Biology and Security - Volume 9465* (New York, NY, USA, 2015), Springer-Verlag New York, Inc., pp. 10–26.",
-        }
-      - {
-          n: 12,
-          text: "Adya, A., Myers, D., Howell, J., Elson, J., Meek, C., Khemani, V., Fulger, S., Gu, P., Bhuvanagiri, L., Hunter, J., Peon, R., Kai, L., Shraer, A., Merchant, A., and Lev-Ari, K. Slicer: Auto-sharding for datacenter applications. In *12th USENIX Symposium on Operating Systems Design and Implementation (OSDI 16)* (Savannah, GA, 2016), USENIX Association, pp. 739–753.",
-        }
-      - {
-          n: 13,
-          text: "Bronson, N., Amsden, Z., Cabrera, G., Chakka, P., Dimov, P., Ding, H., Ferris, J., Giardullo, A., Kulkarni, S., Li, H., Marchukov, M., Petrov, D., Puzar, L., Song, Y. J., and Venkataramani, V. TAO: Facebook’s distributed data store for the social graph. In *Proceedings of the 2013 USENIX Annual Technical Conference* (2013), USENIX ATC ’13, pp. 49–60.",
-        }
-      - {
-          n: 14,
-          text: "Burrows, M. The Chubby lock service for loosely-coupled distributed systems. In *Proceedings of the 7th Symposium on Operating Systems Design and Implementation* (Berkeley, CA, USA, 2006), OSDI ’06, USENIX Association, pp. 335–350.",
-        }
-      - {
-          n: 15,
-          text: "Corbett, J. C., Dean, J., Epstein, M., Fikes, A., Frost, C., Furman, J. J., Ghemawat, S., Gubarev, A., Heiser, C., Hochschild, P., Hsieh, W., Kanthak, S., Kogan, E., Li, H., Lloyd, A., Melnik, S., Mwaura, D., Nagle, D., Quinlan, S., Rao, R., Rolig, L., Saito, Y., Szymaniak, M., Taylor, C., Wang, R., and Woodford, D. Spanner: Google’s globally-distributed database. In *Proceedings of the 10th USENIX Conference on Operating Systems Design and Implementation* (2012), OSDI ’12, pp. 251–264.",
-        }
-      - {
-          n: 16,
-          text: "Dean, J., and Barroso, L. A. The tail at scale. *Communications of the ACM 56*, 2 (Feb. 2013), 74–80.",
-        }
-      - {
-          n: 17,
-          text: "Ferraiolo, D., and Kuhn, R. Role-based access control. In *In 15th NIST-NCSC National Computer Security Conference* (1992), pp. 554–563.",
-        }
-      - {
-          n: 18,
-          text: "Gifford, D. K. *Information Storage in a Decentralized Computer System*. PhD thesis, Stanford, CA, USA, 1981. AAI8124072.",
-        }
-      - {
-          n: 19,
-          text: "Hunt, P., Konar, M., Junqueira, F. P., and Reed, B. Zookeeper: Wait-free coordination for internet-scale systems. In *Proceedings of the 2010 USENIX Annual Technical Conference* (Berkeley, CA, USA, 2010), USENIX ATC ’10, USENIX Association.",
-        }
-      - {
-          n: 20,
-          text: "Karger, D., Lehman, E., Leighton, T., Panigrahy, R., Levine, M., and Lewin, D. Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the world wide web. In *Proceedings of the Twenty-ninth Annual ACM Symposium on Theory of Computing* (New York, NY, USA, 1997), STOC ’97, ACM, pp. 654–663.",
-        }
-      - {
-          n: 21,
-          text: "Kung, H. T., and Robinson, J. T. On optimistic methods for concurrency control. *ACM Trans. Database Syst. 6*, 2 (June 1981), 213–226.",
-        }
-      - {
-          n: 22,
-          text: "Lamport, L. Time, clocks, and the ordering of events in a distributed system. *Commun. ACM 21*, 7 (July 1978), 558–565.",
-        }
-      - {
-          n: 23,
-          text: "Saltzer, J. H. Protection and control of information sharing in Multics. In *Proceedings of the Fourth ACM Symposium on Operating System Principles* (New York, NY, USA, 1973), SOSP ’73, ACM.",
-        }
-      - {
-          n: 24,
-          text: "Wobber, E., Abadi, M., Burrows, M., and Lampson, B. Authentication in the Taos operating system. In *Proceedings of the Fourteenth ACM Symposium on Operating Systems Principles* (New York, NY, USA, 1993), SOSP ’93, ACM, pp. 256–269.",
-        }
+      - n: 1
+        title: "Amazon Web Services Identity and Access Management."
+        rest: " [https://aws.amazon.com/iam/](https://aws.amazon.com/iam/). Accessed: 2019-04-16."
+      - n: 2
+        title: "Azure Identity and Access Management."
+        rest: " [https://www.microsoft.com/en-us/cloud-platform/identity-management](https://www.microsoft.com/en-us/cloud-platform/identity-management). Accessed: 2019-04-16."
+      - n: 3
+        title: "Cache stampede."
+        rest: " [https://en.wikipedia.org/wiki/Cache_stampede](https://en.wikipedia.org/wiki/Cache_stampede). Accessed: 2019-04-16."
+      - n: 4
+        title: "DCE 1.1: Authentication and Security Services."
+        rest: " [http://pubs.opengroup.org/onlinepubs/9668899](http://pubs.opengroup.org/onlinepubs/9668899). Accessed: 2019-04-16."
+      - n: 5
+        title: "Google Cloud Identity and Access Management."
+        rest: " [https://cloud.google.com/iam/](https://cloud.google.com/iam/). Accessed: 2019-04-16."
+      - n: 6
+        title: "Google Cloud Spanner."
+        rest: " [https://cloud.google.com/spanner/](https://cloud.google.com/spanner/). Accessed: 2019-04-16."
+      - n: 7
+        title: "HP OpenVMS System Management Utilities Reference Manual."
+        rest: " [https://support.hpe.com/hpsc/doc/public/display?docId=emr_na-c04622366](https://support.hpe.com/hpsc/doc/public/display?docId=emr_na-c04622366). Accessed: 2019-04-16."
+      - n: 8
+        title: "OpenVMS Guide to System Security."
+        rest: " [http://www.itec.suny.edu/scsys/vms/ovmsdoc073/V73/6346/6346pro_006.html#acl_details](http://www.itec.suny.edu/scsys/vms/ovmsdoc073/V73/6346/6346pro_006.html#acl_details). Accessed: 2019-04-16."
+      - n: 9
+        title: "Unix Manual."
+        rest: " [https://www.bell-labs.com/usr/dmr/www/pdfs/man22.pdf](https://www.bell-labs.com/usr/dmr/www/pdfs/man22.pdf). Accessed: 2019-04-16."
+      - n: 10
+        authors: "Abadi, M., Burrows, M., Lampson, B., and Plotkin, G."
+        title: "A calculus for access control in distributed systems."
+        rest: " *ACM Trans. Program. Lang. Syst. 15*, 4 (Sept. 1993), 706–734."
+      - n: 11
+        authors: "Abadi, M., Burrows, M., Pucha, H., Sadovsky, A., Shankar, A., and Taly, A."
+        title: "Distributed authorization with distributed grammars."
+        rest: " In *Essays Dedicated to Pierpaolo Degano on Programming Languages with Applications to Biology and Security - Volume 9465* (New York, NY, USA, 2015), Springer-Verlag New York, Inc., pp. 10–26."
+      - n: 12
+        authors: "Adya, A., Myers, D., Howell, J., Elson, J., Meek, C., Khemani, V., Fulger, S., Gu, P., Bhuvanagiri, L., Hunter, J., Peon, R., Kai, L., Shraer, A., Merchant, A., and Lev-Ari, K."
+        title: "Slicer: Auto-sharding for datacenter applications."
+        rest: " In *12th USENIX Symposium on Operating Systems Design and Implementation (OSDI 16)* (Savannah, GA, 2016), USENIX Association, pp. 739–753."
+      - n: 13
+        authors: "Bronson, N., Amsden, Z., Cabrera, G., Chakka, P., Dimov, P., Ding, H., Ferris, J., Giardullo, A., Kulkarni, S., Li, H., Marchukov, M., Petrov, D., Puzar, L., Song, Y. J., and Venkataramani, V."
+        title: "TAO: Facebook’s distributed data store for the social graph."
+        rest: " In *Proceedings of the 2013 USENIX Annual Technical Conference* (2013), USENIX ATC ’13, pp. 49–60."
+      - n: 14
+        authors: "Burrows, M."
+        title: "The Chubby lock service for loosely-coupled distributed systems."
+        rest: " In *Proceedings of the 7th Symposium on Operating Systems Design and Implementation* (Berkeley, CA, USA, 2006), OSDI ’06, USENIX Association, pp. 335–350."
+      - n: 15
+        authors: "Corbett, J. C., Dean, J., Epstein, M., Fikes, A., Frost, C., Furman, J. J., Ghemawat, S., Gubarev, A., Heiser, C., Hochschild, P., Hsieh, W., Kanthak, S., Kogan, E., Li, H., Lloyd, A., Melnik, S., Mwaura, D., Nagle, D., Quinlan, S., Rao, R., Rolig, L., Saito, Y., Szymaniak, M., Taylor, C., Wang, R., and Woodford, D."
+        title: "Spanner: Google’s globally-distributed database."
+        rest: " In *Proceedings of the 10th USENIX Conference on Operating Systems Design and Implementation* (2012), OSDI ’12, pp. 251–264."
+      - n: 16
+        authors: "Dean, J., and Barroso, L. A."
+        title: "The tail at scale."
+        rest: " *Communications of the ACM 56*, 2 (Feb. 2013), 74–80."
+      - n: 17
+        authors: "Ferraiolo, D., and Kuhn, R."
+        title: "Role-based access control."
+        rest: " In *In 15th NIST-NCSC National Computer Security Conference* (1992), pp. 554–563."
+      - n: 18
+        authors: "Gifford, D. K."
+        title: "*Information Storage in a Decentralized Computer System*."
+        rest: " PhD thesis, Stanford, CA, USA, 1981. AAI8124072."
+      - n: 19
+        authors: "Hunt, P., Konar, M., Junqueira, F. P., and Reed, B."
+        title: "Zookeeper: Wait-free coordination for internet-scale systems."
+        rest: " In *Proceedings of the 2010 USENIX Annual Technical Conference* (Berkeley, CA, USA, 2010), USENIX ATC ’10, USENIX Association."
+      - n: 20
+        authors: "Karger, D., Lehman, E., Leighton, T., Panigrahy, R., Levine, M., and Lewin, D."
+        title: "Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the world wide web."
+        rest: " In *Proceedings of the Twenty-ninth Annual ACM Symposium on Theory of Computing* (New York, NY, USA, 1997), STOC ’97, ACM, pp. 654–663."
+      - n: 21
+        authors: "Kung, H. T., and Robinson, J. T."
+        title: "On optimistic methods for concurrency control."
+        rest: " *ACM Trans. Database Syst. 6*, 2 (June 1981), 213–226."
+      - n: 22
+        authors: "Lamport, L."
+        title: "Time, clocks, and the ordering of events in a distributed system."
+        rest: " *Commun. ACM 21*, 7 (July 1978), 558–565."
+      - n: 23
+        authors: "Saltzer, J. H."
+        title: "Protection and control of information sharing in Multics."
+        rest: " In *Proceedings of the Fourth ACM Symposium on Operating System Principles* (New York, NY, USA, 1973), SOSP ’73, ACM."
+      - n: 24
+        authors: "Wobber, E., Abadi, M., Burrows, M., and Lampson, B."
+        title: "Authentication in the Taos operating system."
+        rest: " In *Proceedings of the Fourteenth ACM Symposium on Operating Systems Principles* (New York, NY, USA, 1993), SOSP ’93, ACM, pp. 256–269."
