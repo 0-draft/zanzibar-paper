@@ -1,0 +1,452 @@
+# de translation of content/en.yaml. Translate the values; keep ids, keys and order.
+lang: de
+meta:
+  title: "Zanzibar: Googles konsistentes, globales Autorisierungssystem"
+blocks:
+  author-note:
+    text: "Arbeit entstanden während der Tätigkeit bei Google."
+  abstract:
+    text: "Zusammenfassung"
+  abstract-p1:
+    text: "Festzustellen, ob Online-Benutzer zum Zugriff auf digitale Objekte autorisiert sind, ist zentral für den Schutz der Privatsphäre. Dieses Paper stellt Entwurf, Implementierung und Einsatz von Zanzibar vor, einem globalen System zum Speichern und Auswerten von Zugriffskontrolllisten. Zanzibar bietet ein einheitliches Datenmodell und eine einheitliche Konfigurationssprache, um ein breites Spektrum von Zugriffskontrollrichtlinien von Hunderten von Client-Diensten bei Google auszudrücken, darunter Calendar, Cloud, Drive, Maps, Photos und YouTube. Seine Autorisierungsentscheidungen respektieren die kausale Reihenfolge von Benutzeraktionen und gewährleisten so externe Konsistenz trotz Änderungen an Zugriffskontrolllisten und Objektinhalten. Zanzibar skaliert auf Billionen von Zugriffskontrolllisten und Millionen von Autorisierungsanfragen pro Sekunde, um Dienste zu unterstützen, die von Milliarden von Menschen genutzt werden. Über 3 Jahre Produktiveinsatz hinweg hat es eine Latenz im 95. Perzentil von weniger als 10 Millisekunden und eine Verfügbarkeit von mehr als 99,999% aufrechterhalten."
+  s1:
+    text: "Einleitung"
+  s1-p1:
+    text: "Viele Online-Interaktionen erfordern Autorisierungsprüfungen, um zu bestätigen, dass ein Benutzer die Berechtigung hat, eine Operation auf einem digitalen Objekt auszuführen. Beispielsweise erlauben webbasierte Fotospeicherdienste es Fotobesitzern typischerweise, einige Fotos mit Freunden zu teilen, während andere Fotos privat bleiben. Ein solcher Dienst muss prüfen, ob ein Foto mit einem Benutzer geteilt wurde, bevor er diesem Benutzer erlaubt, das Foto anzusehen. Robuste Autorisierungsprüfungen sind zentral für den Schutz der Privatsphäre im Internet."
+  s1-p2:
+    text: "Dieses Paper stellt Zanzibar vor, ein System zum Speichern von Berechtigungen und zum Durchführen von Autorisierungsprüfungen auf Grundlage der gespeicherten Berechtigungen. Es wird von einer breiten Palette von Diensten genutzt, die Google anbietet, darunter Calendar, Cloud, Drive, Maps, Photos und YouTube. Mehrere dieser Dienste verwalten Milliarden von Objekten im Auftrag von mehr als einer Milliarde Benutzern."
+  s1-p3:
+    text: "Ein einheitliches Autorisierungssystem bietet wichtige Vorteile gegenüber dem Betrieb separater Zugriffskontrollmechanismen für einzelne Anwendungen. Erstens hilft es, über Anwendungen hinweg eine konsistente Semantik und Benutzererfahrung zu etablieren. Zweitens erleichtert es die Interoperabilität von Anwendungen, beispielsweise die Koordination der Zugriffskontrolle, wenn ein Objekt einer Anwendung ein Objekt einer anderen Anwendung einbettet. Drittens lässt sich auf einem einheitlichen Zugriffskontrollsystem nützliche gemeinsame Infrastruktur aufbauen, insbesondere ein Suchindex, der die Zugriffskontrolle respektiert und anwendungsübergreifend funktioniert. Schließlich bringt Autorisierung, wie wir weiter unten zeigen, besondere Herausforderungen in Bezug auf Datenkonsistenz und Skalierbarkeit mit sich. Es spart Engineering-Ressourcen, diese einmal für alle Anwendungen zu bewältigen."
+  s1-p4:
+    text: "Wir verfolgen mit dem Zanzibar-System die folgenden Ziele:"
+  s1-goals:
+    items:
+      - "*Korrektheit*: Es muss die Konsistenz von Zugriffskontrollentscheidungen sicherstellen, um die Absichten der Benutzer zu respektieren."
+      - "*Flexibilität*: Es muss eine reichhaltige Menge von Zugriffskontrollrichtlinien unterstützen, wie sie sowohl Verbraucher- als auch Unternehmensanwendungen benötigen."
+      - "*Niedrige Latenz*: Es muss schnell antworten, da Autorisierungsprüfungen oft im kritischen Pfad von Benutzerinteraktionen liegen. Niedrige Latenz im Tail ist besonders wichtig für die Auslieferung von Suchergebnissen, die oft Dutzende bis Hunderte von Prüfungen erfordern."
+      - "*Hohe Verfügbarkeit*: Es muss zuverlässig auf Anfragen antworten, da Client-Dienste ihren Benutzern ohne explizite Autorisierungen den Zugriff verweigern müssten."
+      - "*Großer Maßstab*: Es muss Milliarden von Objekten schützen, die von Milliarden von Benutzern geteilt werden. Es muss weltweit bereitgestellt werden, um nahe bei seinen Clients und deren Endbenutzern zu sein."
+  s1-p5:
+    text: "Zanzibar erreicht diese Ziele durch eine Kombination bemerkenswerter Eigenschaften. Um Flexibilität zu bieten, kombiniert Zanzibar ein einfaches Datenmodell mit einer mächtigen Konfigurationssprache. Die Sprache erlaubt es Clients, beliebige Relationen zwischen Benutzern und Objekten zu definieren, etwa `owner`, `editor`, `commenter` und `viewer`. Sie enthält mengenalgebraische Operatoren wie Schnittmenge und Vereinigung, um potenziell komplexe Zugriffskontrollrichtlinien anhand dieser Benutzer-Objekt-Relationen zu spezifizieren. Beispielsweise kann eine Anwendung festlegen, dass Benutzer, denen Bearbeitungsrechte für ein Dokument gewährt wurden, das Dokument auch kommentieren dürfen, aber nicht alle Kommentierenden Bearbeitungsrechte erhalten."
+  s1-p6:
+    text: "Zur Laufzeit erlaubt Zanzibar es Clients, Zugriffskontrolllisten (ACLs) über eine Remote-Procedure-Call-Schnittstelle (RPC) zu erstellen, zu ändern und auszuwerten. Eine einfache ACL hat die Form „Benutzer *U* hat Relation *R* zu Objekt *O*“. Komplexere ACLs haben die Form „Menge von Benutzern *S* hat Relation *R* zu Objekt *O*“, wobei *S* selbst über ein anderes Objekt-Relation-Paar spezifiziert wird. ACLs können somit auf andere ACLs verweisen, beispielsweise um festzulegen, dass die Menge der Benutzer, die ein Video kommentieren dürfen, aus den Benutzern besteht, denen Ansichtsrechte für genau dieses Video gewährt wurden, zusammen mit denjenigen, die Ansichtsberechtigungen für den Videokanal haben."
+  s1-p7:
+    text: "Gruppenmitgliedschaften sind eine wichtige Klasse von ACLs, bei denen das Objekt eine Gruppe ist und die Relation semantisch `member` entspricht. Gruppen können andere Gruppen enthalten, was eine der Herausforderungen für Zanzibar verdeutlicht: Die Auswertung, ob ein Benutzer zu einer Gruppe gehört, kann es erfordern, einer langen Kette verschachtelter Gruppenmitgliedschaften zu folgen."
+  s1-p8:
+    text: "Autorisierungsprüfungen haben die Form „hat Benutzer *U* die Relation *R* zu Objekt *O*?“ und werden von einer Menge verteilter Server ausgewertet. Wenn eine Check-Anfrage bei Zanzibar eintrifft, kann sich die Arbeit zur Auswertung der Prüfung auf mehrere Server auffächern, etwa wenn eine Gruppe sowohl einzelne Mitglieder als auch andere Gruppen enthält. Jeder dieser Server kann seinerseits andere Server kontaktieren, beispielsweise um eine Hierarchie von Gruppenmitgliedschaften rekursiv zu durchlaufen."
+  s1-p9:
+    text: "Zanzibar operiert in mehreren Dimensionen in globalem Maßstab. Es speichert mehr als zwei Billionen ACLs und führt Millionen von Autorisierungsprüfungen pro Sekunde durch. Die ACL-Daten eignen sich nicht für eine geografische Partitionierung, da Autorisierungsprüfungen für ein beliebiges Objekt von überall auf der Welt kommen können. Daher repliziert Zanzibar alle ACL-Daten in Dutzenden geografisch verteilter Rechenzentren und verteilt die Last auf Tausende von Servern weltweit."
+  s1-p10:
+    text: "Zanzibar unterstützt globale Konsistenz von Zugriffskontrollentscheidungen durch zwei miteinander verknüpfte Eigenschaften. Erstens respektiert es die Reihenfolge, in der ACL-Änderungen im zugrunde liegenden Datenspeicher committet werden. Zweitens kann es sicherstellen, dass Autorisierungsprüfungen auf ACL-Daten beruhen, die nicht älter sind als eine vom Client angegebene Änderung. So kann ein Client beispielsweise einen Benutzer aus einer Gruppe entfernen und sich darauf verlassen, dass nachfolgende Mitgliedschaftsprüfungen diese Entfernung widerspiegeln. Zanzibar stellt diese Ordnungseigenschaften bereit, indem es ACLs in einem global verteilten Datenbanksystem mit Garantien externer Konsistenz speichert [[15](#ref-15), [18](#ref-18)]."
+  s1-p11:
+    text: "Zanzibar setzt eine Reihe von Techniken ein, um in dieser global verteilten Umgebung niedrige Latenz und hohe Verfügbarkeit zu erreichen. Sein Konsistenzprotokoll erlaubt es, die überwiegende Mehrheit der Anfragen mit lokal replizierten Daten zu bedienen, ohne regionsübergreifende Round Trips zu erfordern. Zanzibar speichert seine Daten aus Konsistenzgründen in normalisierter Form. Hotspots auf normalisierten Daten behandelt es durch Caching von End- und Zwischenergebnissen sowie durch Deduplizierung gleichzeitiger Anfragen. Außerdem wendet es Techniken wie Request-Hedging und die Optimierung von Berechnungen auf tief verschachtelten Mengen mit begrenzter Denormalisierung an. Zanzibar beantwortet mehr als 95% der Autorisierungsprüfungen innerhalb von 10 Millisekunden und hat in den letzten 3 Jahren eine Verfügbarkeit von mehr als 99,999% aufrechterhalten."
+  s1-p12:
+    text: "Die wesentlichen Beiträge dieses Papers liegen darin, die technischen Herausforderungen beim Aufbau und Einsatz eines konsistenten Autorisierungssystems im Weltmaßstab zu vermitteln. Während die meisten Elemente des Designs von Zanzibar ihre Wurzeln in früherer Forschung haben, dokumentiert dieses Paper die Eigenschaften und Techniken, die Zanzibar zusammenführt, um seine strengen Anforderungen an Korrektheit, Flexibilität, Latenz, Verfügbarkeit und Skalierbarkeit zu erfüllen. Das Paper hebt außerdem Erkenntnisse aus dem Betrieb von Zanzibar im Dienst einer vielfältigen Menge anspruchsvoller Clients hervor."
+  s2:
+    text: "Modell, Sprache und API"
+  s2-p1:
+    text: "Dieser Abschnitt beschreibt das Datenmodell, die Konfigurationssprache und die Programmierschnittstelle (API) von Zanzibar."
+  s2-1:
+    text: "Relationstupel"
+  s2-1-p1:
+    text: "In Zanzibar sind ACLs Sammlungen von Objekt-Benutzer- oder Objekt-Objekt-Relationen, die als *Relationstupel* dargestellt werden. Gruppen sind einfach ACLs mit Mitgliedschaftssemantik. Relationstupel haben effiziente binäre Kodierungen, doch in diesem Paper stellen wir sie in einer handlichen Textnotation dar:"
+  s2-1-p2:
+    text: "wobei ⟨*namespace*⟩ und ⟨*relation*⟩ in Client-Konfigurationen vordefiniert sind ([§2.3](#s2-3)), ⟨*object_id*⟩ ein String und ⟨*user_id*⟩ eine ganze Zahl ist. Die zur Identifikation eines Relationstupels erforderlichen Primärschlüssel sind ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩ und ⟨*user*⟩. Eine bemerkenswerte Eigenschaft ist, dass ein ⟨*userset*⟩ es ACLs erlaubt, auf Gruppen zu verweisen, und damit die Darstellung verschachtelter Gruppenmitgliedschaften unterstützt."
+  s2-1-p3:
+    text: "[Tabelle 1](#tab-1) zeigt einige Beispieltupel und die zugehörige Semantik. Während einige Relationen (z. B. `viewer`) die Zugriffskontrolle direkt definieren, definieren andere (z. B. `parent`, das auf einen Ordner verweist) lediglich abstrakte Relationen zwischen Objekten. Diese abstrakten Relationen können die Zugriffskontrolle indirekt beeinflussen, sofern in Namespace-Konfigurationen Userset-Umschreibregeln spezifiziert sind ([§2.3.1](#s2-3-1))."
+  tab-1:
+    header:
+      - "Beispieltupel in Textnotation"
+      - "Semantik"
+    rows:
+      - - "`doc:readme#owner@10`"
+        - "Benutzer 10 ist ein Eigentümer von `doc:readme`"
+      - - "`group:eng#member@11`"
+        - "Benutzer 11 ist ein Mitglied von `group:eng`"
+      - - "`doc:readme#viewer@group:eng#member`"
+        - "Mitglieder von `group:eng` sind Betrachter von `doc:readme`"
+      - - "`doc:readme#parent@folder:A#...`"
+        - "`doc:readme` liegt in `folder:A`"
+    caption: "Tabelle 1: Beispiele für Relationstupel. „#...“ steht für eine Relation, die die Semantik des Tupels nicht beeinflusst."
+  s2-1-p4:
+    text: "Unser Datenmodell um Tupel statt um ACLs pro Objekt herum zu definieren, erlaubt es uns, die Konzepte von ACLs und Gruppen zu vereinheitlichen sowie effiziente Lesevorgänge und inkrementelle Aktualisierungen zu unterstützen, wie wir in [§2.4](#s2-4) sehen werden."
+  s2-2:
+    text: "Konsistenzmodell"
+  s2-2-p1:
+    text: "ACL-Prüfungen müssen die Reihenfolge respektieren, in der Benutzer ACLs und Objektinhalte ändern, um unerwartetes Freigabeverhalten zu vermeiden. Konkret liegt unseren Clients daran, das „New Enemy“-Problem zu verhindern, das entstehen kann, wenn wir die Reihenfolge zwischen ACL-Aktualisierungen nicht respektieren oder alte ACLs auf neue Inhalte anwenden. Betrachten Sie diese zwei Beispiele:"
+  s2-2-exa:
+    title: "Beispiel A: Missachtung der Reihenfolge von ACL-Aktualisierungen"
+    items:
+      - "Alice entfernt Bob aus der ACL eines Ordners;"
+      - "Alice bittet dann Charlie, neue Dokumente in den Ordner zu verschieben, wobei Dokument-ACLs von Ordner-ACLs erben;"
+      - "Bob sollte die neuen Dokumente nicht sehen können, kann dies aber, wenn die ACL-Prüfung die Reihenfolge zwischen den beiden ACL-Änderungen missachtet."
+  s2-2-exb:
+    title: "Beispiel B: Fehlanwendung einer alten ACL auf neue Inhalte"
+    items:
+      - "Alice entfernt Bob aus der ACL eines Dokuments;"
+      - "Alice bittet dann Charlie, dem Dokument neue Inhalte hinzuzufügen;"
+      - "Bob sollte die neuen Inhalte nicht sehen können, kann dies aber, wenn die ACL-Prüfung mit einer veralteten ACL von vor Bobs Entfernung ausgewertet wird."
+  s2-2-p2:
+    text: "Um das „New Enemy“-Problem zu verhindern, muss Zanzibar die kausale Reihenfolge zwischen ACL- oder Inhaltsaktualisierungen verstehen und respektieren, einschließlich Aktualisierungen an unterschiedlichen ACLs oder Objekten sowie solcher, die über für Zanzibar unsichtbare Kanäle koordiniert werden. Daher muss Zanzibar zwei zentrale Konsistenzeigenschaften bereitstellen: *externe Konsistenz* [[18](#ref-18)] und *Snapshot-Lesevorgänge mit begrenzter Veraltung*."
+  s2-2-p3:
+    text: "Externe Konsistenz erlaubt es Zanzibar, jeder ACL- oder Inhaltsaktualisierung einen Zeitstempel zuzuweisen, sodass zwei kausal zusammenhängenden Aktualisierungen $x \\prec y$ Zeitstempel zugewiesen werden, die die kausale Reihenfolge widerspiegeln: $T_x < T_y$. Mit kausal aussagekräftigen Zeitstempeln respektiert ein Snapshot-Lesevorgang der ACL-Datenbank zum Zeitstempel $T$, der alle Aktualisierungen mit Zeitstempeln $\\le T$ beobachtet, die Reihenfolge zwischen ACL-Aktualisierungen. Das heißt, wenn der Lesevorgang eine Aktualisierung $x$ beobachtet, beobachtet er auch alle Aktualisierungen, die kausal vor $x$ stattfinden."
+  s2-2-p4:
+    text: "Um außerdem zu vermeiden, dass alte ACLs auf neue Inhalte angewendet werden, darf der Snapshot für die Auswertung der ACL-Prüfung nicht älter sein als der kausale Zeitstempel, der der Inhaltsaktualisierung zugewiesen wurde. Bei einer Inhaltsaktualisierung zum Zeitstempel $T_c$ stellt ein Snapshot-Lesevorgang zu einem Zeitstempel $\\ge T_c$ sicher, dass alle ACL-Aktualisierungen, die kausal vor der Inhaltsaktualisierung stattfinden, von der ACL-Prüfung beobachtet werden."
+  s2-2-p5:
+    text: "Um externe Konsistenz und Snapshot-Lesevorgänge mit begrenzter Veraltung bereitzustellen, speichern wir ACLs im globalen Datenbanksystem Spanner [[15](#ref-15)]. Der TrueTime-Mechanismus von Spanner weist jedem ACL-Schreibvorgang einen Zeitstempel mit Mikrosekundenauflösung zu, sodass die Zeitstempel der Schreibvorgänge die kausale Reihenfolge zwischen Schreibvorgängen widerspiegeln und dadurch externe Konsistenz gewährleisten. Wir werten jede ACL-Prüfung über mehrere Datenbank-Lesevorgänge hinweg zu einem einzigen Snapshot-Zeitstempel aus, sodass alle Schreibvorgänge mit Zeitstempeln bis zum Snapshot der Prüfung, und nur diese, für die ACL-Prüfung sichtbar sind."
+  s2-2-p6:
+    text: "Um zu vermeiden, dass Prüfungen für neue Inhalte mit veralteten ACLs ausgewertet werden, könnte man versuchen, stets auf dem neuesten Snapshot auszuwerten, sodass das Prüfergebnis alle ACL-Schreibvorgänge bis zum Aufruf der Prüfung widerspiegelt. Eine solche Auswertung würde jedoch eine globale Datensynchronisation mit Round Trips hoher Latenz und eingeschränkter Verfügbarkeit erfordern. Stattdessen entwerfen wir das folgende Protokoll, das es erlaubt, die meisten Prüfungen unter Mitwirkung der Zanzibar-Clients auf bereits replizierten Daten auszuwerten:"
+  s2-2-protocol:
+    items:
+      - "Ein Zanzibar-Client fordert für jede Inhaltsversion ein opakes Konsistenztoken namens *zookie* an, und zwar über eine ACL-Prüfung vom Typ *Content-Change* ([§2.4.4](#s2-4-4)), wenn die Inhaltsänderung gerade gespeichert werden soll. Zanzibar kodiert einen aktuellen globalen Zeitstempel im zookie und stellt sicher, dass alle vorherigen ACL-Schreibvorgänge niedrigere Zeitstempel haben. Der Client speichert den zookie zusammen mit der Inhaltsänderung in einem atomaren Schreibvorgang in den Client-Speicher. Man beachte, dass die Content-Change-Prüfung nicht in derselben Transaktion wie die Änderung des Anwendungsinhalts ausgewertet werden muss, sondern lediglich ausgelöst werden muss, wenn der Benutzer die Inhalte ändert."
+      - "Der Client sendet diesen zookie in nachfolgenden ACL-Check-Anfragen mit, um sicherzustellen, dass der Snapshot der Prüfung mindestens so aktuell ist wie der Zeitstempel der Inhaltsversion."
+  s2-2-p7:
+    text: "Externe Konsistenz und Snapshot-Lesevorgänge mit durch den zookie begrenzter Veraltung verhindern das „New Enemy“-Problem. In Beispiel A werden den ACL-Aktualisierungen A1 und A2 jeweils die Zeitstempel $T_{A1} < T_{A2}$ zugewiesen. Bob wird die von Charlie hinzugefügten neuen Dokumente nicht sehen können: Wird eine Prüfung zu $T < T_{A2}$ ausgewertet, enthalten die Dokument-ACLs die Ordner-ACL nicht; wird eine Prüfung zu $T \\ge T_{A2} > T_{A1}$ ausgewertet, beobachtet die Prüfung die Aktualisierung A1, die Bob aus der Ordner-ACL entfernt hat. In Beispiel B wird Bob die dem Dokument hinzugefügten neuen Inhalte nicht sehen. Damit Bob die neuen Inhalte sieht, muss die Prüfung mit einem zookie $\\ge T_{B2}$ ausgewertet werden, dem der Inhaltsaktualisierung zugewiesenen Zeitstempel. Da $T_{B2} > T_{B1}$ gilt, beobachtet eine solche Prüfung auch die ACL-Aktualisierung B1, die Bob aus der ACL entfernt hat."
+  s2-2-p8:
+    text: "Das zookie-Protokoll ist ein zentrales Merkmal des Konsistenzmodells von Zanzibar. Es stellt sicher, dass Zanzibar die kausale Reihenfolge zwischen ACL- und Inhaltsaktualisierungen respektiert, gewährt Zanzibar aber ansonsten die Freiheit, Auswertungszeitstempel so zu wählen, dass seine Latenz- und Verfügbarkeitsziele erreicht werden. Diese Freiheit ergibt sich aus der „mindestens so aktuell“-Semantik des Protokolls, die es Zanzibar erlaubt, jeden Zeitstempel zu wählen, der aktueller ist als der in einem zookie kodierte. Diese Freiheit wiederum erlaubt es Zanzibar, die meisten Prüfungen mit einer Standard-Veraltung auf bereits replizierten Daten zu bedienen ([§3.2.1](#s3-2-1)) und Auswertungszeitstempel zu quantisieren, um Hotspots zu vermeiden ([§3.2.5](#s3-2-5))."
+  s2-3:
+    text: "Namespace-Konfiguration"
+  s2-3-p1:
+    text: "Bevor Clients Relationstupel in Zanzibar speichern können, müssen sie ihre Namespaces konfigurieren. Eine Namespace-Konfiguration spezifiziert ihre Relationen sowie ihre Speicherparameter. Jede Relation hat einen Namen, einen vom Client definierten String wie `viewer` oder `editor`, und eine Relationskonfiguration. Zu den Speicherparametern gehören Sharding-Einstellungen und eine Kodierung für Objekt-IDs, die Zanzibar hilft, die Speicherung von Integer-, String- und anderen Objekt-ID-Formaten zu optimieren."
+  s2-3-1:
+    text: "Relationskonfigurationen und Userset-Umschreibungen"
+  s2-3-1-p1:
+    text: "Obwohl Relationstupel Beziehungen zwischen Objekten und Benutzern widerspiegeln, definieren sie die effektiven ACLs nicht vollständig. Beispielsweise legen einige Clients fest, dass Benutzer mit `editor`-Berechtigungen für jedes Objekt die `viewer`-Berechtigung für dasselbe Objekt haben sollen. Zwar ließen sich solche Beziehungen zwischen Relationen durch ein Relationstupel pro Objekt darstellen, doch ein Tupel für jedes Objekt in einem Namespace zu speichern, wäre verschwenderisch und würde Änderungen über alle Objekte hinweg erschweren. Stattdessen lassen wir Clients objektunabhängige Beziehungen über *Userset-Umschreibregeln* in Relationskonfigurationen definieren. [Abbildung 1](#fig-1) zeigt eine einfache Namespace-Konfiguration mit konzentrischen Relationen, wobei `viewer` `editor` enthält und `editor` `owner` enthält."
+  fig-1:
+    caption: "Abbildung 1: Einfache Namespace-Konfiguration mit konzentrischen Relationen auf Dokumenten. Alle Eigentümer sind Bearbeiter, und alle Bearbeiter sind Betrachter. Darüber hinaus sind Betrachter des übergeordneten Ordners auch Betrachter des Dokuments."
+  s2-3-1-p2:
+    text: "Userset-Umschreibregeln werden pro Relation in einem Namespace definiert. Jede Regel spezifiziert eine Funktion, die eine Objekt-ID als Eingabe nimmt und einen Userset-Ausdrucksbaum ausgibt. Jeder Blattknoten des Baums kann eines der Folgenden sein:"
+  s2-3-1-leaves:
+    items:
+      - "`_this`: Gibt alle Benutzer aus gespeicherten Relationstupeln für das Paar ⟨*object#relation*⟩ zurück, einschließlich indirekter ACLs, auf die Usersets aus den Tupeln verweisen. Dies ist das Standardverhalten, wenn keine Umschreibregel angegeben ist."
+      - "`computed_userset`: Berechnet für das Eingabeobjekt ein neues Userset. Dies erlaubt es beispielsweise dem Userset-Ausdruck für eine `viewer`-Relation, auf das `editor`-Userset desselben Objekts zu verweisen, und bietet so eine ACL-Vererbung zwischen Relationen."
+      - "`tuple_to_userset`: Berechnet aus dem Eingabeobjekt eine Tupelmenge ([§2.4.1](#s2-4-1)), ruft die zur Tupelmenge passenden Relationstupel ab und berechnet aus jedem abgerufenen Relationstupel ein Userset. Dieses flexible Primitiv erlaubt es unseren Clients, komplexe Richtlinien auszudrücken, etwa „ermittle den übergeordneten Ordner des Dokuments und erbe dessen Betrachter“."
+  s2-3-1-p3:
+    text: "Ein Userset-Ausdruck kann auch aus mehreren Teilausdrücken zusammengesetzt sein, die durch Operationen wie Vereinigung, Schnittmenge und Ausschluss kombiniert werden."
+  s2-4:
+    text: "API"
+  s2-4-p1:
+    text: "Zusätzlich zur Unterstützung von ACL-Prüfungen stellt Zanzibar Clients auch APIs bereit, um Relationstupel zu lesen und zu schreiben, Tupelaktualisierungen zu beobachten und die effektiven ACLs zu inspizieren."
+  s2-4-p2:
+    text: "Ein Konzept, das in all diesen API-Methoden verwendet wird, ist das des *zookie*. Ein zookie ist eine opake Bytefolge, die einen global aussagekräftigen Zeitstempel kodiert, der einen ACL-Schreibvorgang, eine Inhaltsversion des Clients oder einen Lese-Snapshot widerspiegelt. Zookies in ACL-Lese- und Check-Anfragen spezifizieren Veraltungsgrenzen für Snapshot-Lesevorgänge und stellen damit eine der zentralen Konsistenzeigenschaften von Zanzibar bereit. Wir haben uns entschieden, ein opakes Cookie anstelle des tatsächlichen Zeitstempels zu verwenden, um unsere Clients davon abzuhalten, beliebige Zeitstempel zu wählen, und um zukünftige Erweiterungen zu ermöglichen."
+  s2-4-1:
+    text: "Read"
+  s2-4-1-p1:
+    text: "Unsere Clients lesen Relationstupel, um Benutzern ACLs oder Gruppenmitgliedschaften anzuzeigen oder um einen nachfolgenden Schreibvorgang vorzubereiten. Eine Read-Anfrage spezifiziert eine oder mehrere *Tupelmengen* und optional einen zookie."
+  s2-4-1-p2:
+    text: "Jede *Tupelmenge* spezifiziert Schlüssel einer Menge von Relationstupeln. Die Menge kann einen einzelnen Tupelschlüssel umfassen oder alle Tupel mit einer gegebenen Objekt-ID oder einem gegebenen Userset in einem Namespace, optional eingeschränkt durch einen Relationsnamen. Mit den Tupelmengen können Clients einen bestimmten Mitgliedschaftseintrag nachschlagen, alle Einträge einer ACL oder Gruppe lesen oder alle Gruppen nachschlagen, in denen ein gegebener Benutzer direktes Mitglied ist. Alle Tupelmengen einer Read-Anfrage werden auf einem einzigen Snapshot verarbeitet."
+  s2-4-1-p3:
+    text: "Mit dem zookie können Clients einen Lese-Snapshot anfordern, der nicht früher als ein vorheriger Schreibvorgang liegt, wenn der zookie aus der Schreibantwort in der Read-Anfrage angegeben wird, oder denselben Snapshot wie ein vorheriger Lesevorgang, wenn der zookie aus der früheren Leseantwort in der nachfolgenden Anfrage angegeben wird. Enthält die Anfrage keinen zookie, wählt Zanzibar einen hinreichend aktuellen Snapshot und bietet damit möglicherweise eine Antwort mit geringerer Latenz, als wenn ein zookie angegeben worden wäre."
+  s2-4-1-p4:
+    text: "Leseergebnisse hängen nur vom Inhalt der Relationstupel ab und spiegeln keine Userset-Umschreibregeln wider. Selbst wenn beispielsweise das `viewer`-Userset stets das `owner`-Userset einschließt, liefert das Lesen von Tupeln mit der `viewer`-Relation keine Tupel mit der `owner`-Relation. Clients, die das effektive Userset kennen müssen, können die Expand-API verwenden ([§2.4.5](#s2-4-5))."
+  s2-4-2:
+    text: "Write"
+  s2-4-2-p1:
+    text: "Clients können ein einzelnes Relationstupel ändern, um eine ACL hinzuzufügen oder zu entfernen. Sie können außerdem alle zu einem Objekt gehörenden Tupel über einen Read-Modify-Write-Prozess mit optimistischer Nebenläufigkeitskontrolle [[21](#ref-21)] ändern, der einen Lese-RPC gefolgt von einem Schreib-RPC verwendet:"
+  s2-4-2-steps:
+    items:
+      - "Alle Relationstupel eines Objekts lesen, einschließlich eines „Lock“-Tupels pro Objekt."
+      - "Die zu schreibenden oder zu löschenden Tupel erzeugen. Die Schreibvorgänge zusammen mit einem Touch auf das Lock-Tupel an Zanzibar senden, mit der Bedingung, dass die Schreibvorgänge nur committet werden, wenn das Lock-Tupel seit dem Lesen nicht verändert wurde."
+      - "Ist die Schreibbedingung nicht erfüllt, zurück zu Schritt 1."
+  s2-4-2-p2:
+    text: "Das Lock-Tupel ist lediglich ein reguläres Relationstupel, das Clients verwenden, um Schreib-Races zu erkennen."
+  s2-4-3:
+    text: "Watch"
+  s2-4-3-p1:
+    text: "Einige Clients pflegen Sekundärindizes der Relationstupel in Zanzibar. Dies können sie mit unserer Watch-API tun. Eine Watch-Anfrage spezifiziert einen oder mehrere Namespaces und einen zookie, der den Zeitpunkt angibt, ab dem beobachtet werden soll. Eine Watch-Antwort enthält alle Tupeländerungsereignisse in aufsteigender Zeitstempelreihenfolge, vom angeforderten Startzeitstempel bis zu einem Zeitstempel, der in einem *Heartbeat-zookie* kodiert ist, welcher in der Watch-Antwort enthalten ist. Der Client kann den Heartbeat-zookie verwenden, um die Beobachtung dort fortzusetzen, wo die vorherige Watch-Antwort aufgehört hat."
+  s2-4-4:
+    text: "Check"
+  s2-4-4-p1:
+    text: "Eine Check-Anfrage spezifiziert ein Userset, dargestellt durch ⟨*object#relation*⟩, einen mutmaßlichen Benutzer, der oft durch ein Authentifizierungstoken dargestellt wird, und einen zookie, der der gewünschten Objektversion entspricht. Wie Lesevorgänge wird ein Check stets auf einem konsistenten Snapshot ausgewertet, der nicht früher als der angegebene zookie liegt."
+  s2-4-4-p2:
+    text: "Um Änderungen an Anwendungsinhalten zu autorisieren, senden unsere Clients eine spezielle Art von Check-Anfrage, eine *Content-Change*-Prüfung. Eine Content-Change-Check-Anfrage trägt keinen zookie und wird auf dem neuesten Snapshot ausgewertet. Wird eine Inhaltsänderung autorisiert, enthält die Check-Antwort einen zookie, den Clients zusammen mit den Objektinhalten speichern und für nachfolgende Prüfungen der Inhaltsversion verwenden. Der zookie kodiert den Auswertungs-Snapshot und erfasst jede mögliche Kausalität von ACL-Änderungen zu Inhaltsänderungen, da der Zeitstempel des zookie größer ist als der der ACL-Aktualisierungen, die den neuen Inhalt schützen ([§2.2](#s2-2))."
+  s2-4-5:
+    text: "Expand"
+  s2-4-5-p1:
+    text: "Die Expand-API gibt zu einem Paar ⟨*object#relation*⟩ und einem optionalen zookie das effektive Userset zurück. Anders als die Read-API folgt Expand indirekten Verweisen, die über Userset-Umschreibregeln ausgedrückt sind. Das Ergebnis wird durch einen *Userset-Baum* dargestellt, dessen Blattknoten Benutzer-IDs oder Usersets sind, die auf andere Paare ⟨*object#relation*⟩ verweisen, und dessen Zwischenknoten Vereinigungs-, Schnittmengen- oder Ausschlussoperatoren darstellen. Expand ist für unsere Clients entscheidend, um die vollständige Menge der Benutzer und Gruppen nachzuvollziehen, die Zugriff auf ihre Objekte haben, was es ihnen ermöglicht, effiziente Suchindizes für zugriffskontrollierte Inhalte aufzubauen."
+  s3:
+    text: "Architektur und Implementierung"
+  s3-p1:
+    text: "[Abbildung 2](#fig-2) zeigt die Architektur des Zanzibar-Systems. `aclservers` sind der wichtigste Servertyp. Sie sind in Clustern organisiert und beantworten Check-, Read-, Expand- und Write-Anfragen. Anfragen treffen bei einem beliebigen Server eines Clusters ein, und dieser Server fächert die Arbeit bei Bedarf auf andere Server im Cluster auf. Diese Server können ihrerseits andere Server kontaktieren, um Zwischenergebnisse zu berechnen. Der ursprüngliche Server sammelt das Endergebnis und gibt es an den Client zurück."
+  s3-p2:
+    text: "Zanzibar speichert ACLs und ihre Metadaten in Spanner-Datenbanken. Es gibt eine Datenbank zur Speicherung der Relationstupel für jeden Client-Namespace, eine Datenbank für alle Namespace-Konfigurationen und eine über alle Namespaces hinweg gemeinsam genutzte Changelog-Datenbank. `aclservers` lesen und schreiben diese Datenbanken bei der Beantwortung von Client-Anfragen."
+  s3-p3:
+    text: "`watchservers` sind ein spezialisierter Servertyp, der Watch-Anfragen beantwortet. Sie verfolgen das Ende des Änderungsprotokolls (Changelog) und liefern Clients nahezu in Echtzeit einen Strom von Namespace-Änderungen."
+  s3-p4:
+    text: "Zanzibar führt periodisch eine Datenverarbeitungspipeline aus, um eine Vielzahl von Offline-Funktionen über alle Zanzibar-Daten in Spanner hinweg auszuführen. Eine solche Funktion ist das Erstellen von Dumps der Relationstupel in jedem Namespace zu einem bekannten Snapshot-Zeitstempel. Eine andere ist die Garbage Collection von Tupelversionen, die älter als ein pro Namespace konfigurierter Schwellenwert sind."
+  fig-2:
+    alt: "Architekturdiagramm. Clients senden Check, Read, Expand und Write an einen Zanzibar-Serving-Cluster aus miteinander verbundenen aclservers. Die aclservers lesen und schreiben Namespace-Konfigurationen und Relationstupel pro Namespace im globalen Datenbanksystem Spanner und hängen Einträge an ein Changelog an. Ein watchserver verfolgt das Ende des Changelogs und liefert Watch an Clients und an das Leopard-Indexierungssystem. Eine periodische Offline-Pipeline liest und schreibt Spanner und erstellt Dumps von Namespace-Snapshots, die Leopard liest. Leopard stellt den aclservers optimierte Mengenberechnungen bereit."
+    caption: "Abbildung 2: Architektur von Zanzibar. Pfeile geben die Richtung des Datenflusses an."
+  s3-p5:
+    text: "Leopard ist ein Indexierungssystem, das dazu dient, Operationen auf großen und tief verschachtelten Mengen zu optimieren. Es liest periodische Snapshots der ACL-Daten und beobachtet Änderungen zwischen den Snapshots. Es führt Transformationen auf diesen Daten durch, etwa Denormalisierung, und beantwortet Anfragen von `aclservers`."
+  s3-p6:
+    text: "Der Rest dieses Abschnitts stellt die Implementierung dieser Architekturelemente ausführlicher vor."
+  s3-1:
+    text: "Speicherung"
+  s3-1-1:
+    text: "Speicherung der Relationstupel"
+  s3-1-1-p1:
+    text: "Wir speichern die Relationstupel jedes Namespace in einer separaten Datenbank, in der jede Zeile durch den Primärschlüssel *(Shard-ID, Objekt-ID, Relation, Benutzer, Commit-Zeitstempel)* identifiziert wird. Mehrere Tupelversionen werden in verschiedenen Zeilen gespeichert, sodass wir Prüfungen und Lesevorgänge zu jedem Zeitstempel innerhalb des Garbage-Collection-Fensters auswerten können. Die Ordnung der Primärschlüssel erlaubt es uns, alle Relationstupel für eine gegebene Objekt-ID oder ein gegebenes Paar *(Objekt-ID, Relation)* nachzuschlagen."
+  s3-1-1-p2:
+    text: "Unsere Clients konfigurieren das Sharding eines Namespace entsprechend seinem Datenmuster. Üblicherweise wird die Shard-ID allein durch die Objekt-ID bestimmt. In einigen Fällen, beispielsweise wenn ein Namespace Gruppen mit sehr großen Mitgliederzahlen speichert, wird die Shard-ID sowohl aus der Objekt-ID als auch aus dem Benutzer berechnet."
+  s3-1-2:
+    text: "Änderungsprotokoll (Changelog)"
+  s3-1-2-p1:
+    text: "Zanzibar pflegt außerdem eine Changelog-Datenbank, die einen Verlauf der Tupelaktualisierungen für die Watch-API speichert. Die Primärschlüssel sind *(Changelog-Shard-ID, Zeitstempel, eindeutige Update-ID)*, wobei für jeden Schreibvorgang zufällig ein Changelog-Shard ausgewählt wird."
+  s3-1-2-p2:
+    text: "Jeder Zanzibar-Schreibvorgang wird in einer einzigen Transaktion sowohl in den Tupelspeicher als auch in den Changelog-Shard committet. Wir bestimmen den Spanner-Server, der den Changelog-Shard hostet, als Transaktionskoordinator, um das Blockieren von Changelog-Lesevorgängen durch ausstehende Transaktionen zu minimieren."
+  s3-1-3:
+    text: "Speicherung der Namespace-Konfigurationen"
+  s3-1-3-p1:
+    text: "Namespace-Konfigurationen werden in einer Datenbank mit zwei Tabellen gespeichert. Eine Tabelle enthält die Konfigurationen und ist nach Namespace-IDs indiziert. Die andere ist ein Changelog der Konfigurationsaktualisierungen und ist nach Commit-Zeitstempeln indiziert. Diese Struktur erlaubt es einem Zanzibar-Server, beim Start alle Konfigurationen zu laden und das Changelog zu überwachen, um die Konfigurationen kontinuierlich zu aktualisieren."
+  s3-1-4:
+    text: "Replikation"
+  s3-1-4-p1:
+    text: "Um die Latenz zu verringern, werden Zanzibar-Daten so repliziert, dass sie nahe bei unseren Clients liegen. Replikate existieren an Dutzenden von Standorten weltweit, mit mehreren Replikaten pro Region. Die 5 stimmberechtigten Replikate befinden sich im Osten und in der Mitte der Vereinigten Staaten, in 3 verschiedenen Ballungsräumen, um Ausfälle zu isolieren, aber innerhalb von 25 Millisekunden voneinander, damit Paxos-Transaktionen schnell committet werden."
+  s3-2:
+    text: "Bedienung von Anfragen"
+  s3-2-1:
+    text: "Auswertungszeitstempel"
+  s3-2-1-p1:
+    text: "Wie in [§2.4](#s2-4) erwähnt, können Clients zookies angeben, um einen minimalen Snapshot-Zeitstempel für die Auswertung einer Anfrage sicherzustellen. Wird kein zookie angegeben, verwendet der Server eine Standard-Veraltung, die so gewählt ist, dass alle Transaktionen zu einem Zeitstempel ausgewertet werden, der so aktuell wie möglich ist, ohne die Latenz zu beeinträchtigen."
+  s3-2-1-p2:
+    text: "Bei jeder Leseanfrage, die Zanzibar an Spanner stellt, erhält es einen Hinweis darauf, ob die Daten zu diesem Zeitstempel einen zonenübergreifenden Lesevorgang erforderten und somit zusätzliche Latenz verursachten. Jeder Server verfolgt die Häufigkeit solcher zonenübergreifenden Lesevorgänge für Daten mit Standard-Veraltung sowie für aktuellere und ältere Daten und verwendet diese Häufigkeiten, um ein Konfidenzintervall für einen Binomialanteil zu berechnen, das die Wahrscheinlichkeit angibt, dass ein beliebiges Datum bei der jeweiligen Veraltung lokal verfügbar ist."
+  s3-2-1-p3:
+    text: "Nachdem genügend Daten gesammelt wurden, prüft der Server, ob jeder Veraltungswert eine hinreichend geringe Wahrscheinlichkeit hat, einen zonenübergreifenden Lesevorgang zu verursachen, und somit eine niedrige Latenz aufweisen wird. Ist dies der Fall, setzt er die Standard-Veraltungsgrenze auf den niedrigsten „sicheren“ Wert. Ist keiner der bekannten Veraltungswerte sicher, verwenden wir einen Zwei-Stichproben-z-Test für Anteile, um festzustellen, ob eine Erhöhung des Standardwerts in statistisch signifikantem Maße sicherer wäre. In diesem Fall erhöhen wir den Standardwert in der Hoffnung, die Latenz zu verbessern. Dieser Mechanismus der Standard-Veraltung ist eine reine Leistungsoptimierung. Er verletzt die Konsistenzsemantik nicht, da Zanzibar zookies, sofern angegeben, stets respektiert."
+  s3-2-2:
+    text: "Konsistenz der Konfiguration"
+  s3-2-2-p1:
+    text: "Da Änderungen an Namespace-Konfigurationen die Ergebnisse von ACL-Auswertungen und damit deren Korrektheit verändern können, wählt Zanzibar bei der Auswertung jeder Client-Anfrage einen einzigen Snapshot-Zeitstempel für die Konfigurationsmetadaten. Alle `aclservers` in einem Cluster verwenden für dieselbe Anfrage denselben Zeitstempel, auch für alle Unteranfragen, die sich aus der ursprünglichen Client-Anfrage auffächern."
+  s3-2-2-p2:
+    text: "Jeder Server lädt Namespace-Konfigurationen unabhängig und kontinuierlich aus dem Speicher, sobald sie sich ändern ([§3.1.3](#s3-1-3)). Daher kann jeder Server in einem Cluster aufgrund von Neustarts oder Netzwerklatenz Zugriff auf einen anderen Bereich von Konfigurationszeitstempeln haben. Zanzibar muss einen Zeitstempel wählen, der auf allen verfügbar ist. Um dies zu erleichtern, verfolgt ein Überwachungsjob den für jeden Server verfügbaren Zeitstempelbereich, aggregiert diese Bereiche und meldet allen anderen Servern einen global verfügbaren Bereich. Bei jeder eingehenden Anfrage wählt der Server einen Zeitpunkt aus diesem Bereich, wodurch sichergestellt wird, dass alle Server weiterhin Anfragen bedienen können, selbst wenn sie nicht mehr aus dem Konfigurationsspeicher lesen können."
+  s3-2-3:
+    text: "Auswertung von Checks"
+  s3-2-3-p1:
+    text: "Zanzibar wertet ACL-Prüfungen aus, indem es Check-Anfragen in boolesche Ausdrücke umwandelt. Im einfachen Fall, wenn es keine Userset-Umschreibregeln gibt, lässt sich die Prüfung eines Benutzers $U$ gegen ein Userset ⟨*object#relation*⟩ ausdrücken als"
+  s3-2-3-p2:
+    text: "Ein gültiges $U' = \\langle \\mathit{object}'\\#\\mathit{relation}' \\rangle$ zu finden, erfordert die rekursive Auswertung der Mitgliedschaft in allen indirekten ACLs oder Gruppen. Diese Art von „Pointer-Chasing“ funktioniert für die meisten Arten von ACLs und Gruppen gut, kann aber teuer werden, wenn indirekte ACLs oder Gruppen tief oder breit sind. [§3.2.4](#s3-2-4) erläutert, wie wir dieses Problem behandeln. Auch Userset-Umschreibregeln werden im Rahmen der Check-Auswertung in boolesche Ausdrücke übersetzt."
+  s3-2-3-p3:
+    text: "Um die Latenz von Prüfungen zu minimieren, werten wir alle Blattknoten des booleschen Ausdrucksbaums nebenläufig aus. Wenn das Ergebnis eines Knotens das Ergebnis eines Teilbaums bestimmt, wird die Auswertung der anderen Knoten im Teilbaum abgebrochen."
+  s3-2-3-p4:
+    text: "Die Auswertung von Blattknoten erfordert in der Regel das Lesen von Relationstupeln aus Datenbanken. Wir setzen einen Pooling-Mechanismus ein, um Lesevorgänge für dieselbe ACL-Prüfung zu gruppieren und so die Anzahl der Lese-RPCs an Spanner zu minimieren."
+  s3-2-4:
+    text: "Leopard-Indexierungssystem"
+  s3-2-4-p1:
+    text: "Rekursives Pointer-Chasing während der Check-Auswertung hat Schwierigkeiten, bei Gruppen, die tief verschachtelt sind oder eine große Anzahl von Untergruppen haben, eine niedrige Latenz aufrechtzuerhalten. Für ausgewählte Namespaces, die eine solche Struktur aufweisen, behandelt Zanzibar Prüfungen mit Leopard, einem spezialisierten Index, der effiziente Mengenberechnungen unterstützt."
+  s3-2-4-p2:
+    text: "Ein Leopard-Index stellt eine Sammlung benannter Mengen mithilfe von $(T, s, e)$-Tupeln dar, wobei $T$ ein Enum ist, das den Mengentyp darstellt, und $s$ und $e$ 64-Bit-Ganzzahlen sind, die die Mengen-ID bzw. die Element-ID darstellen. Eine Abfrage wertet einen Ausdruck aus Vereinigung, Schnittmenge oder Ausschluss benannter Mengen aus und gibt die nach Element-ID geordnete Ergebnismenge bis zu einer angegebenen Anzahl von Ergebnissen zurück."
+  s3-2-4-p3:
+    text: "Um Gruppenmitgliedschaften zu indexieren und auszuwerten, stellt Zanzibar Gruppenmitgliedschaften mit zwei Mengentypen dar, $\\textsf{GROUP2GROUP}$ und $\\textsf{MEMBER2GROUP}$, die wir hier als Funktionen zeigen, die eine Mengen-ID auf Element-IDs abbilden:"
+  s3-2-4-sets:
+    items:
+      - "$\\textsf{GROUP2GROUP}(s) \\to \\{e\\}$, wobei $s$ eine Vorfahrengruppe darstellt und $e$ eine Nachfahrengruppe, die *direkt oder indirekt* eine Untergruppe der Vorfahrengruppe ist."
+      - "$\\textsf{MEMBER2GROUP}(s) \\to \\{e\\}$, wobei $s$ einen einzelnen Benutzer darstellt und $e$ eine übergeordnete Gruppe, in der der Benutzer *direktes* Mitglied ist."
+  s3-2-4-p4:
+    text: "Um auszuwerten, ob Benutzer $U$ Mitglied der Gruppe $G$ ist, prüfen wir, ob"
+  s3-2-4-p5:
+    text: "Gruppenmitgliedschaft lässt sich als Erreichbarkeitsproblem in einem Graphen auffassen, in dem Knoten Gruppen und Benutzer darstellen und Kanten direkte Mitgliedschaften. Das Abflachen von Gruppe-zu-Gruppe-Pfaden erlaubt es Leopard, die Erreichbarkeit effizient auszuwerten, wobei je nach Datenmuster auch andere Arten der Denormalisierung angewendet werden können."
+  s3-2-4-p6:
+    text: "Das Leopard-System besteht aus drei getrennten Teilen: einem Serving-System, das konsistente Operationen mit niedriger Latenz über Mengen hinweg ausführen kann; einem offline arbeitenden, periodischen System zum Aufbau des Index; und einer Online-Echtzeitschicht, die das Serving-System kontinuierlich aktualisieren kann, während Tupeländerungen auftreten."
+  s3-2-4-p7:
+    text: "Indextupel werden als geordnete Listen von Ganzzahlen in einer Struktur wie einer Skip-Liste gespeichert, was effiziente Vereinigungen und Schnittmengen zwischen Mengen ermöglicht. Beispielsweise erfordert die Auswertung der Schnittmenge zweier Mengen $A$ und $B$ nur $O(\\min(|A|, |B|))$ Skip-Listen-Suchschritte. Der Index ist nach Element-IDs geshardet und kann auf mehrere Server verteilt werden. Shards werden üblicherweise vollständig aus dem Arbeitsspeicher bedient, können aber auch aus einer Mischung heißer und kalter Daten bedient werden, die über Arbeitsspeicher und entfernte Solid-State-Speichergeräte verteilt sind."
+  s3-2-4-p8:
+    text: "Der Offline-Index-Builder erzeugt Index-Shards aus einem Snapshot der Zanzibar-Relationstupel und -Konfigurationen und repliziert die Shards global. Er respektiert Userset-Umschreibregeln und expandiert Kanten in einem ACL-Graphen rekursiv, um Leopard-Indextupel zu bilden. Die Leopard-Server beobachten kontinuierlich, ob neue Shards vorliegen, und tauschen alte Shards gegen neue aus, sobald diese verfügbar werden."
+  s3-2-4-p9:
+    text: "Das bisher beschriebene Leopard-System kann tief und breit verschachtelte Gruppenmitgliedschaften effizient auswerten, dies jedoch aufgrund der Offline-Indexerzeugung und des Austauschs von Shards nicht auf einem aktuellen und konsistenten Snapshot. Um eine konsistente ACL-Auswertung zu unterstützen, pflegen Leopard-Server eine inkrementelle Schicht, die alle Aktualisierungen seit dem Offline-Snapshot indexiert, wobei jede Aktualisierung durch ein $(T, s, e, t, d)$-Tupel dargestellt wird, in dem $t$ der Zeitstempel der Aktualisierung und $d$ eine Löschmarkierung ist. Aktualisierungen mit Zeitstempeln kleiner oder gleich dem Abfragezeitstempel werden während der Abfrageverarbeitung über den Offline-Index gelegt und mit ihm zusammengeführt."
+  s3-2-4-p10:
+    text: "Um die inkrementelle Schicht zu pflegen, ruft der inkrementelle Indexer von Leopard die Watch-API von Zanzibar auf, um einen zeitlich geordneten Strom von Zanzibar-Tupeländerungen zu empfangen, und transformiert die Aktualisierungen in einen zeitlich geordneten Strom von Hinzufügungen, Aktualisierungen und Löschungen von Leopard-Tupeln. Das Erzeugen von Aktualisierungen für die $\\textsf{GROUP2GROUP}$-Tupel erfordert, dass der inkrementelle Indexer die Gruppe-zu-Gruppe-Mitgliedschaften pflegt, um die Auswirkungen einer Relationstupel-Aktualisierung auf potenziell mehrere Indexaktualisierungen zu denormalisieren."
+  s3-2-4-p11:
+    text: "In der Praxis kann eine einzige Hinzufügung oder Löschung eines Zanzibar-Tupels potenziell Zehntausende einzelner Leopard-Tupelereignisse nach sich ziehen. Jede Leopard-Serving-Instanz erhält über die Watch-API den vollständigen Strom dieser Zanzibar-Tupeländerungen. Das Leopard-Serving-System ist darauf ausgelegt, diesen Strom kontinuierlich aufzunehmen und seine verschiedenen Posting-Listen mit minimalen Auswirkungen auf die Beantwortung von Abfragen zu aktualisieren."
+  s3-2-5:
+    text: "Umgang mit Hotspots"
+  s3-2-5-p1:
+    text: "Die Last aus ACL-Lesevorgängen und -Prüfungen tritt oft stoßweise auf und ist anfällig für Hotspots. Beispielsweise erfordert die Beantwortung einer Suchanfrage ACL-Prüfungen für alle Kandidatenergebnisse, deren ACLs häufig gemeinsame Gruppen oder indirekte ACLs teilen. Um Konsistenz zu erleichtern, vermeidet Zanzibar eine Denormalisierung im Speicher und stützt sich nur auf normalisierte Daten (mit Ausnahme der in [§3.2.4](#s3-2-4) beschriebenen Fälle). Bei normalisierten Daten können Hotspots auf gemeinsam genutzten ACLs (z. B. populären Gruppen) die zugrunde liegenden Datenbankserver überlasten. Wir haben festgestellt, dass der Umgang mit Hotspots die kritischste Front in unserem Streben nach niedriger Latenz und hoher Verfügbarkeit ist."
+  s3-2-5-p2:
+    text: "Die Zanzibar-Server in jedem Cluster bilden einen verteilten Cache sowohl für Lesevorgänge als auch für Check-Auswertungen, einschließlich Zwischenergebnissen von Prüfungen, die während des Pointer-Chasing ausgewertet werden. Cache-Einträge werden mittels Consistent Hashing [[20](#ref-20)] auf die Zanzibar-Server verteilt. Um Prüfungen oder Lesevorgänge zu verarbeiten, fächern wir Anfragen über eine interne RPC-Schnittstelle an die entsprechenden Zanzibar-Server auf. Um die Anzahl interner RPCs zu minimieren, berechnen wir für die meisten Namespaces den Weiterleitungsschlüssel aus der Objekt-ID, da die Verarbeitung einer Prüfung auf ⟨*object#relation*⟩ oft indirekte ACL-Prüfungen auf anderen Relationen desselben Objekts und das Lesen von Relationstupeln des Objekts umfasst. Diese Prüfungen und Lesevorgänge können vom selben Server verarbeitet werden, da sie denselben Weiterleitungsschlüssel wie die übergeordnete Check-Anfrage haben. Um heiße Weiterleitungsschlüssel zu behandeln, cachen wir Ergebnisse sowohl beim Aufrufer als auch beim Aufgerufenen interner RPCs und bilden so effektiv Cache-Bäume. Wir verwenden außerdem Slicer [[12](#ref-12)], um heiße Schlüssel auf mehrere Server zu verteilen."
+  s3-2-5-p3:
+    text: "Wir vermeiden die Wiederverwendung von Ergebnissen, die auf einem anderen Snapshot ausgewertet wurden, indem wir Snapshot-Zeitstempel in Cache-Schlüssel kodieren. Wir wählen Auswertungszeitstempel, die auf eine grobe Granularität aufgerundet sind, etwa eine oder zehn Sekunden, wobei wir die Veraltungsbeschränkungen aus den zookies der Anfragen respektieren. Diese Zeitstempelquantisierung erlaubt es, die überwiegende Mehrheit aktueller Prüfungen und Lesevorgänge zu denselben Zeitstempeln auszuwerten und Cache-Ergebnisse gemeinsam zu nutzen, obwohl die Cache-Schlüssel Zeitstempel mit Mikrosekundenauflösung enthalten. Es sei angemerkt, dass das Aufrunden von Zeitstempeln die Konsistenzeigenschaften von Zanzibar nicht beeinträchtigt, da Spanner sicherstellt, dass ein Snapshot-Lesevorgang zum Zeitstempel $T$ alle Schreibvorgänge bis $T$ beobachtet – dies gilt selbst dann, wenn $T$ in der Zukunft liegt; in diesem Fall wartet der Lesevorgang, bis TrueTime $T$ überschritten hat."
+  s3-2-5-p4:
+    text: "Um das „Cache-Stampede“-Problem [[3](#ref-3)] zu behandeln, bei dem nebenläufige Anfragen kurzzeitige Hotspots erzeugen, bevor der Cache mit Ergebnissen befüllt ist, pflegen wir auf jedem Server eine *Sperrtabelle*, um ausstehende Lesevorgänge und Prüfungen zu verfolgen. Unter Anfragen mit demselben Cache-Schlüssel beginnt nur eine Anfrage mit der Verarbeitung; die übrigen blockieren, bis der Cache befüllt ist."
+  s3-2-5-p5:
+    text: "Mit verteilten Caches und Sperrtabellen können wir die überwiegende Mehrheit der Hotspots wirksam behandeln. Im Laufe der Zeit haben wir die folgenden zwei Verbesserungen vorgenommen."
+  s3-2-5-p6:
+    text: "Erstens werden direkte Mitgliedschaftsprüfungen eines Benutzers für ein Objekt und eine Relation (d. h. ⟨*object#relation@user*⟩) üblicherweise durch ein einziges Nachschlagen eines Relationstupels behandelt. Gelegentlich zieht jedoch ein sehr populäres Objekt viele nebenläufige Prüfungen für verschiedene Benutzer auf sich und verursacht so einen Hotspot auf dem Speicherserver, der die Relationstupel für das Objekt hostet. Um diese Hotspots zu vermeiden, lesen und cachen wir *alle* Relationstupel von ⟨*object#relation*⟩ für das heiße Objekt und tauschen so Lesebandbreite gegen Cachebarkeit. Wir erkennen heiße Objekte, auf die diese Methode angewendet werden soll, dynamisch, indem wir die Anzahl ausstehender Lesevorgänge für jedes Objekt verfolgen."
+  s3-2-5-p7:
+    text: "Zweitens werden indirekte ACL-Prüfungen häufig abgebrochen, wenn das Ergebnis der übergeordneten ACL-Prüfung bereits feststeht. Dadurch bleibt der Cache-Schlüssel unbefüllt. Während ein frühzeitiger Abbruch den Ressourcenverbrauch erheblich senkt, wirkt er sich negativ auf die Latenz nebenläufiger Anfragen aus, die durch den Eintrag in der Sperrtabelle blockiert werden. Um diese Auswirkung auf die Latenz zu verhindern, verzögern wir den frühzeitigen Abbruch, wenn auf den entsprechenden Eintrag in der Sperrtabelle gewartet wird."
+  s3-2-6:
+    text: "Leistungsisolation"
+  s3-2-6-p1:
+    text: "Leistungsisolation ist für gemeinsam genutzte Dienste, die niedrige Latenz und hohe Verfügbarkeit anstreben, unverzichtbar. Wenn es Zanzibar oder einem seiner Clients gelegentlich nicht gelingt, genügend Ressourcen bereitzustellen, um ein unerwartetes Nutzungsmuster zu bewältigen, stellen die folgenden Isolationsmechanismen sicher, dass Leistungsprobleme auf den problematischen Anwendungsfall beschränkt bleiben und andere Clients nicht beeinträchtigen."
+  s3-2-6-p2:
+    text: "Erstens misst Zanzibar, um eine angemessene Zuteilung der CPU-Kapazität sicherzustellen, die Kosten jedes RPC in generischen *CPU-Sekunden*, einer hardwareunabhängigen Metrik. Jeder Client hat ein globales Limit für die maximale CPU-Nutzung pro Sekunde; seine RPCs werden gedrosselt, wenn er das Limit überschreitet *und* im Gesamtsystem keine freie Kapazität vorhanden ist."
+  s3-2-6-p3:
+    text: "Jeder Zanzibar-Server begrenzt außerdem die Gesamtzahl ausstehender RPCs, um seinen Speicherverbrauch zu kontrollieren. Ebenso begrenzt er die Anzahl ausstehender RPCs pro Client."
+  s3-2-6-p4:
+    text: "Zanzibar begrenzt ferner die maximale Anzahl nebenläufiger Lesevorgänge pro *(Objekt, Client)* und pro Client auf jedem Spanner-Server. Dies stellt sicher, dass kein einzelnes Objekt und kein einzelner Client einen Spanner-Server monopolisieren kann."
+  s3-2-6-p5:
+    text: "Schließlich verwenden wir für Anfragen verschiedener Clients unterschiedliche Sperrtabellenschlüssel, um zu verhindern, dass eine Drosselung, die Spanner auf einen Client anwendet, andere Clients beeinträchtigt."
+  s3-2-7:
+    text: "Abmilderung der Tail-Latenz"
+  s3-2-7-p1:
+    text: "Die verteilte Verarbeitung von Zanzibar erfordert Maßnahmen, um langsame Tasks abzufangen. Für Aufrufe an Spanner und an den Leopard-Index setzen wir auf Request-Hedging [[16](#ref-16)] (d. h. wir senden dieselbe Anfrage an mehrere Server, verwenden die Antwort, die zuerst zurückkommt, und brechen die anderen Anfragen ab). Um Round-Trip-Zeiten zu verringern, versuchen wir, in jeder geografischen Region, in der wir Zanzibar-Server haben, mindestens zwei Replikate dieser Backend-Dienste zu platzieren. Um die Last nicht unnötig zu vervielfachen, senden wir zunächst eine Anfrage und schieben das Senden von Hedging-Anfragen auf, bis bekannt ist, dass die ursprüngliche Anfrage langsam ist."
+  s3-2-7-p2:
+    text: "Um den geeigneten Verzögerungsschwellenwert für das Hedging zu bestimmen, pflegt jeder Server einen Verzögerungsschätzer, der auf Grundlage aktueller Messungen dynamisch eine Latenz im *N*-ten Perzentil berechnet. Dieser Mechanismus erlaubt es uns, den durch Hedging verursachten zusätzlichen Datenverkehr auf einen kleinen Bruchteil des gesamten Datenverkehrs zu begrenzen."
+  s3-2-7-p3:
+    text: "Wirksames Hedging setzt voraus, dass die Anfragen ähnliche Kosten haben. Im Fall der Autorisierungsprüfungen von Zanzibar sind manche Prüfungen von Natur aus zeitaufwendiger als andere, da sie mehr Arbeit erfordern. Hedging von Check-Anfragen würde dazu führen, die teuersten Arbeitslasten zu duplizieren und die Latenz ironischerweise zu verschlechtern. Daher setzen wir kein Hedging für Anfragen zwischen Zanzibar-Servern ein, sondern stützen uns auf das zuvor besprochene Sharding über mehrere Replikate sowie auf Überwachungsmechanismen, um langsame Server zu erkennen und zu meiden."
+  s4:
+    text: "Erfahrungen"
+  s4-p1:
+    text: "Zanzibar ist seit mehr als 5 Jahren im Produktiveinsatz. Während dieser gesamten Zeit sind die Anzahl der Clients, die Zanzibar nutzen, und die Last, die sie auf Zanzibar erzeugen, stetig gewachsen. Dieser Abschnitt erörtert unsere Erfahrungen mit dem Betrieb von Zanzibar als global verteiltes Autorisierungssystem."
+  s4-p2:
+    text: "Zanzibar verwaltet mehr als 1.500 Namespaces, die von Hunderten von Client-Anwendungen definiert werden. Die Größe einer Namespace-Konfigurationsdatei dient als grobes Maß für die Komplexität der von diesem Namespace implementierten Zugriffskontrollrichtlinie. Diese Konfigurationsdateien reichen von Dutzenden bis zu Tausenden von Zeilen, mit einem Median von etwa 500 Zeilen."
+  s4-p3:
+    text: "Diese Namespaces enthalten mehr als 2 Billionen Relationstupel, die fast 100 Terabyte belegen. Die Anzahl der Tupel pro Namespace erstreckt sich über viele Größenordnungen, von Dutzenden bis zu einer Billion, mit einem Median von etwa 15.000. Diese Daten werden vollständig an mehr als 30 Standorten weltweit repliziert, um sowohl Nähe zu den Benutzern als auch hohe Verfügbarkeit zu gewährleisten."
+  s4-p4:
+    text: "Zanzibar bedient mehr als 10 Millionen Client-Anfragen pro Sekunde (QPS). Über einen beispielhaften Zeitraum von 7 Tagen im Dezember 2018 erreichen Check-Anfragen Spitzenwerte von etwa 4,2M QPS, Read von 8,2M, Expand von 760K und Write von 25K. Anfragen, die Daten lesen, sind somit um zwei Größenordnungen häufiger als solche, die Daten schreiben."
+  s4-p5:
+    text: "Zanzibar verteilt diese Last auf mehr als 10.000 Server, die in mehreren Dutzend Clustern weltweit organisiert sind. Die Anzahl der Server pro Cluster reicht von weniger als 100 bis zu mehr als 1.000, mit einem Median von etwa 500. Cluster werden proportional zur Last in ihren geografischen Regionen dimensioniert."
+  s4-1:
+    text: "Anfragen"
+  s4-1-p1:
+    text: "Wir teilen Anfragen gemäß der erforderlichen Datenaktualität, die großen Einfluss auf Latenz und Verfügbarkeit der Anfragen haben kann, in zwei Kategorien ein. Konkret tragen Check-, Read- und Expand-Anfragen zookies, um untere Schranken für Auswertungszeitstempel festzulegen. Ist ein zookie-Zeitstempel höher als der der neuesten in die Region replizierten Daten, erfordern die Speicherlesevorgänge regionsübergreifende Round Trips zum Leader-Replikat, um aktuellere Daten abzurufen. Da unser Speicher mit Replikations-Heartbeats in 8-Sekunden-Intervallen konfiguriert ist, teilen wir unsere Anfragen in zwei Kategorien ein: *Safe*-Anfragen haben zookies, die älter als 10 Sekunden sind, und können meistens innerhalb der Region bedient werden, während *Recent*-Anfragen zookies haben, die jünger als 10 Sekunden sind, und oft Round Trips zwischen Regionen erfordern. Wir berichten für beide getrennte Statistiken."
+  fig-3:
+    alt: "Liniendiagramm mit logarithmischer Skala über eine Woche, Sonntag bis Samstag. Die Safe-QPS schwanken täglich zwischen etwa 2 Millionen und 4 Millionen; die Recent-QPS schwanken zwischen etwa 20 Tausend und 80 Tausend, rund zwei Größenordnungen niedriger."
+    caption: "Abbildung 3: Rate der Check-Safe- und Check-Recent-Anfragen über einen Zeitraum von 7 Tagen im Dezember 2018."
+  s4-1-p2:
+    text: "[Abbildung 3](#fig-3) zeigt die Rate der Check-Safe- und Check-Recent-Anfragen über 7 Tage. Beide weisen einen Tageszyklus auf. Die Rate der Safe-Anfragen ist etwa zwei Größenordnungen größer als die der Recent-Anfragen, was es Zanzibar erlaubt, die überwiegende Mehrheit der ACL-Prüfungen lokal zu bedienen."
+  s4-2:
+    text: "Latenz"
+  s4-2-p1:
+    text: "Das Latenzbudget von Zanzibar ist im Allgemeinen ein kleiner Bruchteil der wenigen hundert Millisekunden Gesamtantwortzeit, die seine Clients bieten müssen, um als interaktive Dienste tragfähig zu sein. Man denke beispielsweise an einen Client, der Autorisierungsprüfungen für mehrere Dokumente durchführt, bevor er die Ergebnisse einer Suche über diese Dokumente anzeigen kann."
+  s4-2-p2:
+    text: "Wir messen die Latenz serverseitig anhand des Live-Datenverkehrs, da (1) die Latenz stark von unseren Caching- und Deduplizierungsmechanismen beeinflusst wird, sodass sie nur durch Live-Datenverkehr realistisch abgebildet wird, und (2) eine genaue Latenzmessung auf Client-Seite sich korrekt verhaltende Clients voraussetzt. Die Ressourcenbereitstellung für Client-Jobs liegt außerhalb der Kontrolle von Zanzibar, und manchmal sind Client-Jobs überlastet."
+  fig-4:
+    alt: "Liniendiagramm mit logarithmischer Skala der Check-Safe-Latenz über eine Woche. Das 50. Perzentil bleibt bei etwa 3 ms, das 95. bei etwa 10 ms, das 99. zwischen etwa 13 und 20 ms und das 99,9. zwischen etwa 50 und 90 ms."
+    caption: "Abbildung 4: Latenz der Check-Safe-Antworten in verschiedenen Perzentilen über einen Zeitraum von 7 Tagen im Dezember 2018."
+  s4-2-p3:
+    text: "[Abbildung 4](#fig-4) zeigt die Latenz der Check-Safe-Antworten über 7 Tage. Im 50., 95., 99. und 99,9. Perzentil erreicht sie Spitzenwerte von etwa 3, 11, 20 bzw. 93 ms. Diese Leistung erfüllt unsere Latenzziele für eine Operation, die häufig im kritischen Pfad von Benutzerinteraktionen liegt."
+  s4-2-p4:
+    text: "[Tabelle 2](#tab-2) fasst die Latenzverteilungen der Check-, Read-, Expand- und Write-Antworten über dieselben 7 Tage zusammen. Wie beabsichtigt sind die häufiger verwendeten Safe-Varianten von Check, Read und Expand deutlich schneller als die seltener verwendeten Recent-Varianten. Writes sind von allen APIs am seltensten genutzt und am langsamsten, da sie stets eine verteilte Koordination zwischen Spanner-Servern erfordern."
+  tab-2:
+    title: "Latenz in Millisekunden, μ (σ)"
+    header:
+      - ""
+      - "API"
+      - "50%ile"
+      - "95%ile"
+      - "99%ile"
+    rows:
+      - - "Safe"
+        - "Check"
+        - "3.0 (0.091)"
+        - "9.46 (0.3)"
+        - "15.0 (1.19)"
+      - - "Safe"
+        - "Read"
+        - "2.18 (0.031)"
+        - "3.71 (0.094)"
+        - "8.03 (3.28)"
+      - - "Safe"
+        - "Expand"
+        - "4.27 (0.313)"
+        - "8.84 (0.586)"
+        - "34.1 (4.35)"
+      - - "Recent"
+        - "Check"
+        - "2.86 (0.087)"
+        - "60.0 (2.1)"
+        - "76.3 (2.59)"
+      - - "Recent"
+        - "Read"
+        - "2.21 (0.054)"
+        - "40.1 (2.03)"
+        - "86.2 (3.84)"
+      - - "Recent"
+        - "Expand"
+        - "5.79 (0.224)"
+        - "45.6 (3.44)"
+        - "121.0 (2.38)"
+      - - "Recent"
+        - "Write"
+        - "127.0 (3.65)"
+        - "233.0 (23.0)"
+        - "401.0 (133.0)"
+    caption: "Tabelle 2: Mittelwert und Standardabweichung der RPC-Antwortlatenz über einen Zeitraum von 7 Tagen im Dezember 2018."
+  s4-3:
+    text: "Verfügbarkeit"
+  s4-3-p1:
+    text: "Wir definieren Verfügbarkeit als den Anteil „qualifizierter“ RPCs, die der Dienst innerhalb der Latenzschwellen erfolgreich beantwortet: 5 Sekunden für eine Safe-Anfrage und 15 Sekunden für eine Recent-Anfrage, da eine Neuwahl des Leaders in Spanner bis zu 10 Sekunden dauern kann. Damit ein RPC qualifiziert ist, muss die Anfrage wohlgeformt sein und eine Deadline haben, die länger als die Latenzschwelle ist. Außerdem muss der Client innerhalb seines Ressourcenkontingents bleiben."
+  s4-3-p2:
+    text: "Aus diesen Gründen können wir die Verfügbarkeit nicht direkt anhand des Live-Datenverkehrs messen, da unsere Clients manchmal RPCs mit kurzen Deadlines senden oder laufende RPCs abbrechen. Stattdessen ziehen wir eine kleine Stichprobe gültiger Anfragen aus dem Live-Datenverkehr und spielen sie später mit unseren eigenen Probern erneut ab. Beim erneuten Abspielen der Anfragen setzen wir das Timeout länger als die Verfügbarkeitsschwelle. Außerdem passen wir den zookie der Anfrage, sofern einer angegeben ist, so an, dass das relative Alter des zookie dasselbe bleibt wie zu dem Zeitpunkt, als die Anfrage im Live-Datenverkehr empfangen wurde. Schließlich betreiben wir 3 Prober pro Cluster und schließen Ausreißer aus, um Fehlalarme durch seltene Prober-Ausfälle zu eliminieren."
+  s4-3-p3:
+    text: "Zur Berechnung der Verfügbarkeit aggregieren wir Erfolgsquoten über 90-Tage-Fenster, gemittelt über die Cluster. [Abbildung 5](#fig-5) zeigt die von diesen Probern gemessene Verfügbarkeit von Zanzibar. Die Verfügbarkeit lag in den vergangenen 3 Betriebsjahren bei Google durchgehend über 99,999%. Mit anderen Worten: In jedem Quartal hat Zanzibar weniger als 2 Minuten globale Ausfallzeit und weniger als 13 Minuten, in denen die globale Fehlerquote 10% übersteigt."
+  fig-5:
+    alt: "Liniendiagramm der Verfügbarkeit von Dezember 2015 bis Dezember 2018 für Safe- und Recent-Anfragen. Beide liegen fast durchgehend zwischen 99,9995% und 100%, deutlich über der gestrichelten Linie bei 99,999%."
+    caption: "Abbildung 5: Die Verfügbarkeit von Zanzibar lag in den vergangenen drei Jahren durchgehend über 99,999%."
+  s4-4:
+    text: "Interna"
+  s4-4-p1:
+    text: "Zanzibar-Server delegieren Prüfungen und Lesevorgänge auf Grundlage von Consistent Hashing aneinander, und sowohl die aufrufende als auch die aufgerufene Seite der delegierten Operationen cachen die Ergebnisse, um Hotspots zu verhindern ([§3.2.5](#s3-2-5)). In Spitzenzeiten verarbeitet Zanzibar 22 Millionen interne „delegierte“ RPCs pro Sekunde, die sich etwa gleichmäßig auf Lesevorgänge und Prüfungen verteilen. Das In-Memory-Caching verarbeitet in Spitzenzeiten etwa 200 Millionen Lookups pro Sekunde, 150 Millionen aus Prüfungen und 50 Millionen aus Lesevorgängen. Das Caching für Prüfungen hat auf der Seite des Delegierten eine Trefferquote von 10%, wobei zusätzlich 12% durch die Sperrtabelle eingespart werden. Das Caching auf der Seite des Delegierenden hat dagegen eine Trefferquote von 2%, mit zusätzlich 3% durch die Sperrtabelle. Auch wenn diese Trefferquoten niedrig erscheinen, verhindern sie, dass 500K interne RPCs pro Sekunde Hotspots erzeugen."
+  s4-4-p2:
+    text: "Delegierte Lesevorgänge erzielen auf der Seite des Delegierten höhere Trefferquoten – 24% im Cache und 9% in der Sperrtabelle –, doch der Cache des Delegierenden wird in weniger als 1% der Fälle getroffen. Für extrem heiße Gruppen optimiert Zanzibar zusätzlich, indem es die vollständige Mitgliedermenge im Voraus liest und cacht – dies geschieht bei 0,1% der Gruppen, verhindert aber zusätzlich Hotspots."
+  s4-4-p3:
+    text: "Dieses Caching erlaubt es Zanzibar zusammen mit aggressivem Pooling von Leseanfragen, nur 20 Millionen Lese-RPCs pro Sekunde an Spanner zu stellen. Im Median liest jede dieser Anfragen 1,5 Zeilen pro RPC, im 99. Perzentil liest jedoch jede nahezu tausend Zeilen."
+  s4-4-p4:
+    text: "Die Spanner-Lesevorgänge von Zanzibar dauern im Median 0,5 ms und im 95. Perzentil 2 ms. Wir stellen fest, dass 1% der Spanner-Lesevorgänge, also 200K Lesevorgänge pro Sekunde, von Hedging profitieren. Wir merken an, dass Zanzibar eine Spanner-Instanz verwendet, die intern bei Google läuft, und keine Instanz von Cloud Spanner [[6](#ref-6)]."
+  s4-4-p5:
+    text: "Der Leopard-Index verarbeitet im Median 1,56M QPS bzw. im 99. Perzentil 2,22M QPS, basierend auf über 7 Tage aggregierten Daten. Über dieselben 7 Tage antworten Leopard-Server im Median in weniger als 150 μs bzw. im 99. Perzentil in unter 1 ms. Die inkrementelle Schicht von Leopard schreibt während dieser 7 Tage im Median etwa 500 Indexaktualisierungen pro Sekunde und im 99. Perzentil etwa 1,5K Aktualisierungen pro Sekunde."
+  s4-5:
+    text: "Gewonnene Erkenntnisse"
+  s4-5-p1:
+    text: "Zanzibar hat sich weiterentwickelt, um die vielfältigen und hohen Anforderungen einer wachsenden Menge von Clients zu erfüllen, darunter Google Calendar, Google Cloud, Google Drive, Google Maps, Google Photos und YouTube. Dieser Abschnitt hebt die aus dieser Erfahrung gewonnenen Erkenntnisse hervor."
+  s4-5-p2:
+    text: "Ein wiederkehrendes Thema war die Bedeutung von Flexibilität, um Unterschieden zwischen Clients gerecht zu werden. Zum Beispiel:"
+  s4-5-flex:
+    items:
+      - "*Zugriffskontrollmuster variieren stark:* Im Laufe der Zeit haben wir Funktionen hinzugefügt, um bestimmte Clients zu unterstützen. So haben wir beispielsweise `computed_userset` hinzugefügt, um die Eigentümer-ID eines Objekts aus dem Präfix der Objekt-ID ableiten zu können, was den Speicherbedarf für Clients wie Drive und Photos verringert, die viele private Objekte verwalten. Ebenso haben wir `tuple_to_userset` hinzugefügt, um Objekthierarchien mit nur einem Relationstupel pro Hop darzustellen. Die Vorteile sind sowohl Platzersparnis als auch Flexibilität – es erlaubt Clients wie Cloud, ACL-Vererbung kompakt auszudrücken und ACL-Vererbungsregeln zu ändern, ohne große Mengen von Tupeln aktualisieren zu müssen. Siehe [§2.3.1](#s2-3-1)."
+      - "*Aktualitätsanforderungen sind oft, aber nicht immer locker:* Clients erlauben während der ACL-Auswertung oft eine nicht näher spezifizierte, moderate Veraltung, verlangen aber manchmal eine genauer spezifizierte Aktualität. Wir haben unser zookie-Protokoll um diese Eigenschaft herum entworfen, sodass wir die meisten Anfragen von einem standardmäßigen, bereits replizierten Snapshot bedienen können und Clients dennoch erlauben, die Veraltung bei Bedarf zu begrenzen. Außerdem haben wir die Granularität unserer Snapshot-Zeitstempel auf die Aktualitätsanforderungen der Clients abgestimmt. Die daraus resultierenden groben Zeitstempelquanten erlauben es uns, die Mehrheit der Autorisierungsprüfungen auf einer kleinen Anzahl von Snapshots durchzuführen, was die Häufigkeit von Datenbank-Lesevorgängen stark reduziert. Siehe [§3.2.1](#s3-2-1)."
+  s4-5-p3:
+    text: "Ein weiteres Thema war die Notwendigkeit, Leistungsoptimierungen hinzuzufügen, um im Produktivbetrieb beobachtetes Client-Verhalten zu unterstützen. Zum Beispiel:"
+  s4-5-perf:
+    items:
+      - "*Request-Hedging ist der Schlüssel zur Verringerung der Tail-Latenz:* Clients, die ihren Benutzern Suchfunktionen anbieten, wie etwa Drive, führen oft Dutzende bis Hunderte von Autorisierungsprüfungen durch, um eine einzige Menge von Suchergebnissen auszuliefern. Wir haben Hedging von Spanner- und Leopard-Anfragen eingeführt, um zu verhindern, dass eine gelegentliche langsame Operation die gesamte Benutzerinteraktion verlangsamt. Siehe [§3.2.7](#s3-2-7)."
+      - "*Die Abmilderung von Hotspots ist entscheidend für hohe Verfügbarkeit:* Manche Arbeitslasten erzeugen Hotspots in ACL-Daten, die die zugrunde liegenden Datenbankserver überlasten können. Ein häufiges Muster ist eine Häufung von ACL-Prüfungen für ein Objekt, auf das die ACLs vieler verschiedener Objekte indirekt verweisen. Konkrete Fälle ergeben sich aus dem oben erwähnten Suchanwendungsfall, bei dem die Dokumente in der Suche indirekt ACLs für eine große soziale oder Arbeitsgruppe teilen, sowie aus Cloud-Anwendungsfällen, in denen viele Objekte indirekt ACLs für dasselbe, in einer Hierarchie weit oben liegende Objekt teilen. Zanzibar behandelt die meisten Hotspots mit allgemeinen Mechanismen wie seinem verteilten Cache und seiner Sperrtabelle, doch wir haben festgestellt, dass bestimmte Anwendungsfälle optimiert werden müssen. Beispielsweise haben wir Cache-Prefetching aller Relationstupel für ein heißes Objekt hinzugefügt. Außerdem haben wir den Abbruch sekundärer ACL-Prüfungen verzögert, wenn es nebenläufige Anfragen für dieselben ACL-Daten gibt. Siehe [§3.2.5](#s3-2-5)."
+      - "*Leistungsisolation ist unverzichtbar zum Schutz vor sich fehlverhaltenden Clients:* Selbst mit Maßnahmen zur Abmilderung von Hotspots könnte unerwartetes und manchmal unbeabsichtigtes Client-Verhalten unser System oder die zugrunde liegende Infrastruktur dennoch überlasten. Beispiele sind Fälle, in denen Clients neue Funktionen einführen, die sich als unerwartet populär erweisen, oder Zanzibar auf unbeabsichtigte Weise nutzen. Im Laufe der Zeit haben wir Isolationsschutzmaßnahmen hinzugefügt, um sicherzustellen, dass es keine kaskadierenden Ausfälle zwischen Clients oder zwischen Objekten desselben Clients gibt. Zu diesen Schutzmaßnahmen gehören feingranulare Kostenerfassung, Kontingente und Drosselung. Siehe [§3.2.6](#s3-2-6)."
+  s5:
+    text: "Verwandte Arbeiten"
+  s5-p1:
+    text: "Zanzibar ist ein verteiltes System zur Speicherung und Auswertung von ACLs im planetaren Maßstab. Viele seiner Autorisierungskonzepte wurden bereits zuvor in den Bereichen Zugriffskontrolle und soziale Graphen untersucht, und seine Skalierungsherausforderungen wurden auf dem Gebiet der verteilten Systeme erforscht."
+  s5-p2:
+    text: "Zugriffskontrolle ist ein Kernbestandteil von Mehrbenutzer-Betriebssystemen. Multics [[23](#ref-23)] unterstützt ACLs auf Segmenten und Verzeichnissen. ACL-Einträge bestehen aus einem Principal-Bezeichner und einer Menge von Berechtigungsbits. In der ersten Ausgabe von UNIX [[9](#ref-9)] geben Datei-Flags an, ob Eigentümer und Nicht-Eigentümer die Datei lesen oder schreiben dürfen. Bis zur 4. Ausgabe waren die Berechtigungsbits auf Lese-/Schreib-/Ausführungsbits für Eigentümer, Gruppe und andere erweitert worden. POSIX-ACLs [[4](#ref-4)] fügen eine beliebige Liste von Benutzern und Gruppen hinzu, jeweils mit bis zu 32 Berechtigungsbits. VMS [[7](#ref-7), [8](#ref-8)] unterstützt ACL-Vererbung für Dateien, die innerhalb eines Verzeichnisbaums erstellt werden. Das Datenmodell von Zanzibar unterstützt Berechtigungen, Benutzer, Gruppen und Vererbung, wie sie in den oben genannten Systemen zu finden sind."
+  s5-p3:
+    text: "Taos [[24](#ref-24), [10](#ref-10)] unterstützt zusammengesetzte Principals, die abbilden, wie eine Identität beim Durchlaufen eines verteilten Systems transformiert wurde. Wenn sich beispielsweise Benutzer $U$ an Workstation $W$ angemeldet hat, um auf Dateiserver $S$ zuzugreifen, würde $S$ Anfragen sehen, die als „$W$ für $U$“ statt nur als $U$ authentifiziert sind. Dies würde es ermöglichen, für die E-Mail eines Benutzers eine ACL zu schreiben, die nur für den Benutzer zugänglich wäre, und nur dann, wenn der Zugriff über den Mailserver erfolgt. Abadi et al. erörtern in [[11](#ref-11)] ein Modell gruppenbasierter ACLs mit Unterstützung für zusammengesetzte Identitäten. Ihr Begriff der „Blessings“ ähnelt den Zanzibar-Tupeln. Zanzibar verwendet jedoch mithilfe von Usersets eine einheitliche Darstellung für ACLs und Gruppen, während diese in [[11](#ref-11)] getrennte Konzepte sind."
+  s5-p4:
+    text: "Rollenbasierte Zugriffskontrolle (RBAC), erstmals in [[17](#ref-17)] vorgeschlagen, führte den Begriff der Rollen ein, die den Relationen von Zanzibar ähneln. Rollen können voneinander erben und Berechtigungen implizieren. Eine Reihe von Zanzibar-Clients hat RBAC-Richtlinien auf Basis der Namespace-Konfigurationssprache von Zanzibar implementiert."
+  s5-p5:
+    text: "Eine Diskussion von ACL-Speichern im Jahr 2019 wäre unvollständig ohne die Erwähnung der Identity-and-Access-Management-Systeme (IAM), die kommerziell von Amazon [[1](#ref-1)], Google [[5](#ref-5)], Microsoft [[2](#ref-2)] und anderen angeboten werden. Diese Systeme erlauben es Kunden der Cloud-Produkte dieser Unternehmen, flexible Zugriffskontrollen auf Basis verschiedener Funktionen zu konfigurieren, etwa: Zuweisung von Benutzern zu Rollen oder Gruppen; domänenspezifische Richtliniensprachen; und APIs, die das Erstellen und Ändern von ACLs ermöglichen. Allen diesen Systemen gemeinsam sind eine einheitliche ACL-Speicherung und eine RPC-basierte API, eine Philosophie, die auch für das Design von Zanzibar zentral ist. Das Cloud-IAM-System von Google [[5](#ref-5)] ist als Schicht auf dem ACL-Speicher- und Auswertungssystem von Zanzibar aufgebaut."
+  s5-p6:
+    text: "TAO [[13](#ref-13)] ist ein verteilter Datenspeicher für den sozialen Graphen von Facebook. Mehrere Zanzibar-Clients nutzen Zanzibar ebenfalls, um ihre sozialen Graphen zu speichern. Sowohl Zanzibar als auch TAO stellen Clients Autorisierungsprüfungen bereit. Beide werden als Single-Instance-Dienste betrieben, beide arbeiten in großem Maßstab, und beide sind für reine Leseoperationen optimiert. TAO bietet letztendliche globale Konsistenz (Eventual Consistency) mit asynchroner Replikation und Read-after-Write-Konsistenz nach dem Best-Effort-Prinzip mit synchronen Cache-Aktualisierungen. Im Gegensatz dazu bietet Zanzibar externe Konsistenz und Snapshot-Lesevorgänge mit begrenzter Veraltung, sodass es die kausale Reihenfolge zwischen ACL- und Inhaltsaktualisierungen respektiert und damit vor dem „New Enemy“-Problem schützt."
+  s5-p7:
+    text: "Lamport-Uhren [[22](#ref-22)] liefern teilweise geordnete Vektor-Zeitstempel, mit denen sich die Reihenfolge von Ereignissen bestimmen lässt. Lamport-Uhren erfordern jedoch die explizite Beteiligung aller „Prozesse“, wobei in den Anwendungsfällen von Zanzibar einige der „Prozesse“ externe Clients oder sogar menschliche Benutzer sein können. Im Gegensatz dazu stützt sich Zanzibar auf sein zugrunde liegendes Datenbanksystem Spanner [[15](#ref-15)], um sowohl externe Konsistenz als auch Snapshot-Lesevorgänge mit begrenzter Veraltung zu bieten. Insbesondere baut Zanzibar auf der TrueTime-Abstraktion von Spanner [[15](#ref-15)] auf, um linearisierbare Commit-Zeitstempel bereitzustellen, die als zookies kodiert sind."
+  s5-p8:
+    text: "Zugleich fügt Zanzibar den von Spanner bereitgestellten Funktionen eine Reihe weiterer Funktionen hinzu. Zum einen lässt das zookie-Protokoll Clients ACLs *nicht* auf einem beliebigen Snapshot lesen oder auswerten. Diese Einschränkung erlaubt es Zanzibar, einen Snapshot zu wählen, der eine schnelle ACL-Auswertung begünstigt. Darüber hinaus bietet Zanzibar Widerstandsfähigkeit gegenüber Datenbank-Hotspots (z. B. Autorisierungsprüfungen für ein plötzlich populäres Video) und sicheres Pointer-Chasing trotz potenziell tiefer Rekursion (z. B. Mitgliedschaftsprüfungen auf hierarchischen Gruppen)."
+  s5-p9:
+    text: "Der verteilte Lock-Dienst Chubby [[14](#ref-14)] bietet zuverlässige Speicherung, linearisiert Schreibvorgänge und stellt Zugriffskontrolle bereit, doch ihm fehlen Funktionen, die zur Unterstützung der Anwendungsfälle von Zanzibar erforderlich sind. Insbesondere unterstützt er keine großen Datenmengen, keine effizienten Bereichslesevorgänge und keine Lesevorgänge auf einem vom Client angegebenen Snapshot mit begrenzter Veraltung. Sein Mechanismus zur Cache-Invalidierung begrenzt zudem seinen Schreibdurchsatz."
+  s5-p10:
+    text: "Schließlich bietet ZooKeeper einen hochperformanten Koordinationsdienst [[19](#ref-19)], dem jedoch ebenfalls Funktionen fehlen, die Zanzibar benötigt. Im Vergleich zu Chubby kann er höhere Lese- und Schreibraten bei gelockerter Cache-Konsistenz bewältigen. Er bietet jedoch keine externe Konsistenz für Aktualisierungen über verschiedene Knoten hinweg, da seine Linearisierbarkeit pro Knoten gilt. Außerdem bietet er keine Snapshot-Lesevorgänge mit begrenzter Veraltung."
+  s6:
+    text: "Fazit"
+  s6-p1:
+    text: "Das Autorisierungssystem Zanzibar vereinheitlicht Zugriffskontrolldaten und -logik für Google. Sein einfaches und zugleich flexibles Datenmodell und seine Konfigurationssprache unterstützen eine Vielfalt von Zugriffskontrollrichtlinien sowohl von Verbraucher- als auch von Unternehmensanwendungen."
+  s6-p2:
+    text: "Das Modell der externen Konsistenz von Zanzibar ist eines seiner herausragendsten Merkmale. Es respektiert die Reihenfolge von Benutzeraktionen und erlaubt es zugleich, Autorisierungsprüfungen an verteilten Standorten ohne globale Synchronisation auszuwerten."
+  s6-p3:
+    text: "Zanzibar setzt weitere zentrale Techniken ein, um Skalierbarkeit, niedrige Latenz und hohe Verfügbarkeit zu bieten. Beispielsweise wertet es tief oder breit verschachtelte Gruppenmitgliedschaften mit Leopard aus, einem spezialisierten Index für die effiziente Berechnung von Mengenoperationen mit Snapshot-Konsistenz. Als weiteres Beispiel kombiniert es einen verteilten Cache mit einem Mechanismus zur Deduplizierung laufender Anfragen. Damit mildert es Hotspots ab, ein kritisches Problem im Produktivbetrieb, wenn Daten auf Basis eines normalisierten, konsistenten Speichers ausgeliefert werden. Zusammen ergeben diese Maßnahmen ein System, das auf Billionen von Zugriffskontrollregeln und Millionen von Autorisierungsanfragen pro Sekunde skaliert."
+  s7:
+    text: "Danksagungen"
+  s7-p1:
+    text: "Viele Menschen haben technische Beiträge zu Zanzibar geleistet. Wir danken früheren und aktuellen Mitgliedern des Entwicklungsteams, darunter Dan Barella, Miles Chaston, Daria Jung, Alex Mendes da Costa, Xin Pan, Scott Smith, Matthew Steffen, Riva Tropp und Yuliya Zabiyaka. Wir danken außerdem früheren und aktuellen Mitgliedern des Site-Reliability-Engineering-Teams, darunter Randall Bosetti, Hannes Eder, Robert Geisberger, Tom Li, Massimo Maggi, Igor Oks, Aaron Peterson und Andrea Yu."
+  s7-p2:
+    text: "Darüber hinaus haben eine Reihe von Personen geholfen, dieses Paper zu verbessern. Wir haben aufschlussreiche Kommentare von David Bacon, Carolin Gäthke, Brad Krueger, Ari Shamash, Kai Shen und Lawrence You erhalten. Wir sind außerdem Nadav Eiron und Royal Hansen für ihre Unterstützung dankbar. Schließlich danken wir den anonymen Gutachtern und unserem Shepherd, Eric Eide, für ihr konstruktives Feedback."
+  refs:
+    text: "Literatur"
