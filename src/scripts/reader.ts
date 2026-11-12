@@ -185,20 +185,43 @@ function markCurrent() {
     if (r.top < box.top || r.bottom > box.bottom) railLink.scrollIntoView({ block: "nearest" });
   }
 }
+// ── Reading progress: from the first paragraph to the references ────────
+const paper = document.querySelector<HTMLElement>(".paper");
+const refsStart = document.getElementById("refs");
+const progressNum = document.querySelector<HTMLElement>(".progress-num");
+let shown = -1;
+function markProgress() {
+  if (!paper) return;
+  const line = readingLine();
+  const start = paper.getBoundingClientRect().top + window.scrollY - line;
+  const endEl = refsStart ?? paper;
+  const end =
+    (refsStart ? endEl.getBoundingClientRect().top : endEl.getBoundingClientRect().bottom) +
+    window.scrollY -
+    window.innerHeight;
+  const ratio = end > start ? Math.min(1, Math.max(0, (window.scrollY - start) / (end - start))) : 0;
+  root.style.setProperty("--read", ratio.toFixed(4));
+  const pct = Math.round(ratio * 100);
+  if (progressNum && pct !== shown) {
+    progressNum.textContent = `${pct}%`;
+    shown = pct;
+  }
+}
+
 let ticking = false;
-window.addEventListener(
-  "scroll",
-  () => {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(() => {
-      markCurrent();
-      ticking = false;
-    });
-  },
-  { passive: true },
-);
+const onScroll = () => {
+  if (ticking) return;
+  ticking = true;
+  requestAnimationFrame(() => {
+    markCurrent();
+    markProgress();
+    ticking = false;
+  });
+};
+window.addEventListener("scroll", onScroll, { passive: true });
+window.addEventListener("resize", onScroll, { passive: true });
 markCurrent();
+markProgress();
 
 // ── Citation preview: [15] shows reference 15 where you are ─────────────
 const tip = document.getElementById("cite-tip");

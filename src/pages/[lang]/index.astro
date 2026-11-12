@@ -52,6 +52,7 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
         >#</span
       ><span class="b-rel">translation</span><span class="b-p">@</span><span class="b-user">{lang}</span>
     </a>
+    <span class="progress-num" aria-hidden="true" data-js-only hidden>0%</span>
     <nav class="bar-tools" aria-label={t.view}>
       <details class="toc-pop pop">
         <summary>{t.contents}</summary>
@@ -60,6 +61,7 @@ const noteTr = (note && tr.blocks[note.id]?.text) || noteEn;
       <LangMenu current={lang} label={t.language} class="pop" />
       <ViewMenu t={t} />
     </nav>
+    <span class="progress" aria-hidden="true"><span class="progress-fill"></span></span>
   </header>
 
   <div class="shell">

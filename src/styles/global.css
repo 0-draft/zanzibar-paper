@@ -241,6 +241,35 @@ img {
   text-decoration: underline;
 }
 
+/* Reading progress: a hairline along the bottom of the bar and a quiet
+   number. Both are visual only (aria-hidden): the contents already mark the
+   current section for assistive tech. 0% is the start of the paper, 100% the
+   start of the references. */
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  pointer-events: none;
+}
+.progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--link);
+  transform-origin: 0 50%;
+  transform: scaleX(var(--read, 0));
+}
+.progress-num {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  min-width: 3.5ch;
+  text-align: right;
+}
+
 .bar-tools {
   display: flex;
   align-items: center;
@@ -1152,8 +1181,10 @@ html:not([data-view="both"]) .row:not(.has-shared) .pl {
   .brand {
     display: none;
   }
-  .bar {
-    justify-content: flex-end;
+  .progress-num {
+    margin-left: 0;
+    margin-right: auto;
+    text-align: left;
   }
   .pop > summary {
     min-height: 2.75rem;

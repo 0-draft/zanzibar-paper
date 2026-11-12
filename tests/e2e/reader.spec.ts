@@ -196,3 +196,16 @@ test.describe("accessibility (axe, WCAG 2.2 AA)", () => {
     expect(results.violations.map((v) => v.nodes.map((n) => n.target.join(" ")).join(", "))).toEqual([]);
   });
 });
+
+test("reading progress runs from the first paragraph to the references", async ({ page }) => {
+  await page.goto(`${BASE}ja/`);
+  const num = page.locator(".progress-num");
+  await expect(num).toHaveText("0%");
+  await page.locator("#s3-2-4").scrollIntoViewIfNeeded();
+  await page.evaluate(() => document.getElementById("s3-2-4")!.scrollIntoView({ block: "start" }));
+  await expect.poll(async () => Number.parseInt((await num.textContent()) ?? "0", 10)).toBeGreaterThan(20);
+  await expect.poll(async () => Number.parseInt((await num.textContent()) ?? "0", 10)).toBeLessThan(80);
+  await page.evaluate(() => document.getElementById("refs")!.scrollIntoView({ block: "start" }));
+  await expect(num).toHaveText("100%");
+  expect(await page.locator(".progress").getAttribute("aria-hidden")).toBe("true");
+});
