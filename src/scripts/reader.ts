@@ -329,7 +329,9 @@ if (tip) {
       hideSoon();
     });
     a.addEventListener("click", (e) => {
-      const touch = lastPointer === "touch" || !canHover.matches;
+      // a keyboard click (Enter) has detail 0: it always follows the link,
+      // even on a device that was last touched
+      const touch = e.detail !== 0 && (lastPointer === "touch" || !canHover.matches);
       if (!touch || tapped === a) return; // mouse, keyboard or a second tap: follow the link
       e.preventDefault();
       show(a, true);
