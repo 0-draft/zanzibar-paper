@@ -1,0 +1,39 @@
+{
+  "rules": {
+    "preset-ja-spacing": {
+      "ja-space-between-half-and-full-width": {
+        "space": "always",
+        "exceptPunctuation": true
+      },
+      "ja-nakaguro-or-halfwidth-space-between-katakana": true,
+      "ja-no-space-around-parentheses": false,
+      "ja-no-space-between-full-width": true,
+      "ja-space-after-exclamation": true,
+      "ja-space-after-question": true,
+      "ja-space-around-code": false,
+      "ja-space-around-link": false
+    },
+    "no-doubled-joshi": {
+      "min_interval": 1,
+      "strict": false,
+      "allow": ["も", "や", "か", "と"]
+    },
+    "ja-no-mixed-period": {
+      "periodMark": "。",
+      "allowPeriodMarks": ["：", ":"]
+    },
+    "no-mix-dearu-desumasu": {
+      "preferInHeader": "",
+      "preferInBody": "である",
+      "preferInList": "である",
+      "strict": false
+    },
+    "no-dropping-the-ra": true,
+    "no-nfd": true,
+    "ja-no-successive-word": {
+      "allowOnomatopee": true,
+      "allow": ["...", "…"]
+    },
+    "no-doubled-conjunction": true
+  }
+}

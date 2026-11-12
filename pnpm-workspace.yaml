@@ -1,0 +1,9 @@
+# Supply-chain guard: never resolve a version published less than 7 days ago.
+minimumReleaseAge: 10080
+allowBuilds:
+  esbuild: true
+  sharp: false
+overrides:
+  # A 2.0 beta of the emnapi runtime gets picked up as a peer and crashes
+  # @astrojs/check on Node 26 ("this.bridge.deleteEnv is not a function").
+  "@emnapi/runtime": "1.11.3"
