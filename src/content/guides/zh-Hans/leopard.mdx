@@ -57,7 +57,7 @@ group:eng#member@user:beto
 
 Leopard 存储 "a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID"（一组以 `(T, s, e)` 元组表示的具名集合，其中 *T* 是表示集合类型的枚举，*s* 和 *e* 是表示集合 ID 和元素 ID 的 64 位整数）（§3.2.4）。组成员关系使用两种集合类型：
 
-- `GROUP2GROUP(s)`：是祖先组 *s* 的 "*directly or indirectly*"（*直接或间接*）子组的那些组。
+- `GROUP2GROUP(s)`：作为祖先组 *s* 的 "*directly or indirectly*"（*直接或间接*）子组的那些组。
 - `MEMBER2GROUP(s)`：用户 *s* 作为 "*direct*"（*直接*）成员所在的那些组。
 
 对于这个示例，这些集合中有什么？
@@ -103,7 +103,7 @@ Leopard 存储 "a collection of named sets using `(T, s, e)` tuples, where *T* i
 (MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
 ```
 
-也就是说：用户被直接加入的组中，是否有某个也位于 *G* 之下的某处？对于 Beto 和 Anne 相对于 `group:all`，这会得到什么？
+也就是说：用户被直接加入的组中，是否有任何一个也位于 *G* 之下？对于 Beto 和 Anne 相对于 `group:all`，这会得到什么？
 
 <Graph
   width={640}
@@ -176,7 +176,7 @@ Leopard 存储 "a collection of named sets using `(T, s, e)` tuples, where *T* i
   width={640}
   height={350}
   title="Leopard 的三个部分"
-  desc="一个离线索引构建器读取 Zanzibar 元组和配置的快照，生成索引分片，这些分片被复制并替换进 Leopard 服务系统。与此并行，一个增量索引器读取 Zanzibar 的 Watch 流，把带时间戳的更新写入服务系统的增量层。aclservers 查询服务系统，服务系统在查询时间戳上把增量层合并到离线索引之上。"
+  desc="一个离线索引构建器读取 Zanzibar 元组和配置的快照，生成索引分片，这些分片被复制并替换进 Leopard 服务系统。与此并行，一个增量索引器读取 Zanzibar 的 Watch 流，把带时间戳的更新写入服务系统的增量层。aclserver 查询服务系统，服务系统在查询时间戳上把增量层合并到离线索引之上。"
   nodes={[
     { id: "snap", x: 85, y: 60, label: "元组 + 配置\n快照", kind: "store" },
     { id: "build", x: 310, y: 60, label: "离线索引构建器\n（周期性）", kind: "server" },
@@ -236,11 +236,11 @@ Leopard 存储 "a collection of named sets using `(T, s, e)` tuples, where *T* i
 
 删除比图中更微妙：只有当没有其他路径仍然连接两个组时，才能移除一个索引元组。论文没有描述索引器如何判断这一点。
 
-这也是 Leopard 是例外的原因。在其他地方，"Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)"（Zanzibar 避免存储反规范化，只依赖规范化数据（§3.2.4 中描述的情况除外））（§3.2.5），而 Leopard 只用于 "that exhibit such structure"（呈现此类结构的）选定命名空间（§3.2.4）。
+这也是 Leopard 是例外的原因。在其他地方，"Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)"（Zanzibar 避免存储反规范化，只依赖规范化数据，§3.2.4 中描述的情况除外）（§3.2.5），而 Leopard 只用于 "that exhibit such structure"（呈现此类结构的）选定命名空间（§3.2.4）。
 
 ## 生产环境中
 
-来自 §4.4，统计 7 天："The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile"（Leopard 索引的中位数为 156 万 QPS，第 99 百分位为 222 万 QPS），以及 "Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile."（Leopard 服务器的响应时间中位数不到 150 微秒，第 99 百分位不到 1 毫秒。）增量层 "writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile."（中位数约每秒写入 500 次索引更新，第 99 百分位约每秒 1,500 次。）对 Leopard 的调用与对 Spanner 的调用一样会进行对冲（§3.2.7）。
+§4.4 给出了 7 天内的数据："The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile"（Leopard 索引的中位数为 156 万 QPS，第 99 百分位为 222 万 QPS），以及 "Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile."（Leopard 服务器的响应时间中位数不到 150 微秒，第 99 百分位不到 1 毫秒。）增量层 "writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile."（中位数约每秒写入 500 次索引更新，第 99 百分位约每秒 1,500 次。）对 Leopard 的调用与对 Spanner 的调用一样会进行对冲（§3.2.7）。
 
 ## 来源
 

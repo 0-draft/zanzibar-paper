@@ -60,7 +60,7 @@ Os termos estão em ordem alfabética do nome em inglês, que é seguido da trad
 
 <dl>
   <dt id="intersection">intersection (interseção)</dt>
-  <dd>Um operador de regra de reescrita: os usuários que estão em todos os usersets de um grupo de usersets. Mais: <a href="../relation-tuples/#configuração-de-namespace">Tuplas de relação</a>, §2.3.1.</dd>
+  <dd>Um operador de regra de reescrita: os usuários que estão em cada um de vários usersets. Mais: <a href="../relation-tuples/#configuração-de-namespace">Tuplas de relação</a>, §2.3.1.</dd>
   <dt id="leopard">Leopard</dt>
   <dd>Um sistema de indexação para grupos profundamente aninhados ou muito largos. Ele achata a associação a grupos em conjuntos de inteiros, de modo que uma verificação de associação se torna uma interseção de conjuntos, e se mantém atualizado por meio do Watch. Mais: <a href="../leopard/">Leopard</a>, §3.2.4.</dd>
   <dt id="lock-table">lock table (tabela de locks)</dt>
@@ -117,9 +117,9 @@ Os termos estão em ordem alfabética do nome em inglês, que é seguido da trad
   <dt id="this"><code>_this</code></dt>
   <dd>A folha de regra de reescrita que retorna os usuários das tuplas armazenadas para este objeto e esta relação, incluindo os usersets para os quais essas tuplas apontam. É o padrão quando uma relação não tem regra. Mais: <a href="../relation-tuples/#configuração-de-namespace">Tuplas de relação</a>, §2.3.1.</dd>
   <dt id="timestamp-quantization">timestamp quantization (quantização de timestamps)</dt>
-  <dd>Arredondar os timestamps de avaliação para cima até um passo grosseiro, como um ou dez segundos, para que muitas requisições compartilhem um timestamp e, portanto, entradas de cache. Isso não enfraquece a consistência: um zookie define apenas um limite inferior, e uma leitura de snapshot do Spanner em um timestamp futuro espera até que o TrueTime o tenha ultrapassado (§3.2.5). Mais: <a href="../architecture/">Arquitetura</a>, <a href="../consistency/">Consistência</a>, §2.2, §3.2.5.</dd>
+  <dd>Arredondar os timestamps de avaliação para cima, em uma granularidade grossa, como um ou dez segundos, para que muitas requisições compartilhem um timestamp e, portanto, entradas de cache. Isso não enfraquece a consistência: um zookie define apenas um limite inferior, e uma leitura de snapshot do Spanner em um timestamp futuro espera até que o TrueTime o tenha ultrapassado (§3.2.5). Mais: <a href="../architecture/">Arquitetura</a>, <a href="../consistency/">Consistência</a>, §2.2, §3.2.5.</dd>
   <dt id="truetime">TrueTime</dt>
-  <dd>O mecanismo de relógio do Spanner, que dá a cada escrita um timestamp com resolução de microssegundos que reflete a ordem causal. É ele que torna significativos os timestamps do Zanzibar. <code>TT.now()</code> retorna um intervalo que com certeza contém o tempo real; veja o <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">artigo do Spanner</a> (OSDI 2012), §3. Mais: <a href="../consistency/">Consistência</a>, §2.2, §3.2.5.</dd>
+  <dd>O mecanismo de relógio do Spanner, que dá a cada escrita um timestamp com resolução de microssegundos que reflete a ordem causal. É ele que torna significativos os timestamps do Zanzibar. <code>TT.now()</code> retorna um intervalo que garantidamente contém o tempo real; veja o <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">artigo do Spanner</a> (OSDI 2012), §3. Mais: <a href="../consistency/">Consistência</a>, §2.2, §3.2.5.</dd>
   <dt id="tupleset">tupleset (conjunto de tuplas)</dt>
   <dd>Um seletor de tuplas armazenadas: uma única chave de tupla, ou todas as tuplas de um ID de objeto ou de um userset, opcionalmente limitadas a uma relação. Usado pelo Read e por <code>tuple_to_userset</code>. Mais: <a href="../relation-tuples/#read-e-expand">Tuplas de relação</a>, §2.4.1.</dd>
   <dt id="tuple-to-userset"><code>tuple_to_userset</code></dt>
@@ -144,7 +144,7 @@ Os termos estão em ordem alfabética do nome em inglês, que é seguido da trad
   <dt id="watchserver">watchserver</dt>
   <dd>O tipo de servidor que responde ao Watch acompanhando o changelog. Mais: <a href="../architecture/">Arquitetura</a>, §3.</dd>
   <dt id="write">Write</dt>
-  <dd>A chamada da API que adiciona ou remove tuplas. Os clientes que reescrevem todas as tuplas de um objeto fazem uma leitura e, em seguida, uma escrita condicionada a que a tupla de lock não tenha mudado. Mais: <a href="../architecture/#o-caminho-do-watch">Arquitetura</a> (o que uma escrita alcança), §2.4.2.</dd>
+  <dd>A chamada da API que adiciona ou remove tuplas. Os clientes que reescrevem todas as tuplas de um objeto fazem uma leitura e, em seguida, uma escrita condicionada a que a tupla de lock não tenha mudado. Mais: <a href="../architecture/#o-caminho-do-watch">Arquitetura</a> (o que uma escrita afeta), §2.4.2.</dd>
 </dl>
 
 ## Z

@@ -21,7 +21,7 @@ Check는 객체 하나에서 시작하여 사용자를 찾거나 경로가 다�
 
 목록에는 인가 서비스가 가지고 있지 않은 데이터도 필요하다. OpenFGA의 가이드는 이렇게 말한다. 서비스는 "does not store object metadata (names of files, creation dates, time of last update, etc)"(객체 메타데이터(파일 이름, 생성 날짜, 마지막 갱신 시각 등)를 저장하지 않으므로), 검색은 "will require data from your database"(여러분의 데이터베이스에 있는 데이터를 필요로 한다)([OpenFGA, Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)). 필터링과 정렬은 여러분의 데이터베이스에서 일어나고, 인가는 다른 서비스에서 일어나며, 답은 그 둘의 교집합이다.
 
-논문은 이 용도를 잘 알고 있다. 통합 시스템을 만드는 첫 번째 동기로 든 것 가운데 "a search index that respects access control and works across applications"(접근 제어를 준수하면서 여러 애플리케이션에 걸쳐 동작하는 검색 인덱스)가 있고(§1), 지연 시간 목표에서는 특히 "serving search results, which often require tens to hundreds of checks"(흔히 수십에서 수백 건의 검사가 필요한 검색 결과 제공)를 든다(§1).
+논문은 이 용도를 잘 알고 있다. 통합 시스템의 장점으로 든 것 가운데 "a search index that respects access control and works across applications"(접근 제어를 준수하면서 여러 애플리케이션에 걸쳐 동작하는 검색 인덱스)가 있고(§1), 지연 시간 목표에서는 특히 "serving search results, which often require tens to hundreds of checks"(흔히 수십에서 수백 건의 검사가 필요한 검색 결과 제공)를 든다(§1).
 
 ## 논문이 제공하는 것과 제공하지 않는 것
 
@@ -195,7 +195,7 @@ Anne이 문서 목록을 열 때 두 방법은 호출을 어떤 순서로 하는
 제품들은 이를 구축하는 두 가지 방법을 문서화한다.
 
 - **변경 스트림으로 직접 구축한다.** OpenFGA의 두 번째 방법은 `GET /changes`를 소비하고, 사용 중인 모델 버전에 맞게 변경을 평탄화한 다음(그 예: "`user:anne, writer, doc:planning` becomes two tuples", 두 개의 튜플이 된다), 최종 결과에 대해 `/check`를 호출하여 "to filter out any resource with permissions revoked but whose authorization data has not made it into your index yet"(권한이 회수되었지만 그 인가 데이터가 아직 인덱스에 들어오지 않은 리소스를 걸러낸다)([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)). SpiceDB에서는 그 스트림이 `Watch`다. 그 스트림이 왜 내구성 있는 큐가 아닌지는 [튜플을 데이터와 맞춰 두기](../sync/)에서 다룬다.
-- **벤더가 계산하게 한다.** AuthZed Materialize는 "takes inspiration from the Leopard index"(Leopard 인덱스에서 영감을 얻었으며), 설정된 권한을 미리 계산하고, 그 Event Streams 기능으로 "keep your own copy of it — either colocated alongside the data it protects in your application database, or in a secondary index like a search engine"(그 사본을 직접 보관할 수 있다. 애플리케이션 데이터베이스에서 보호 대상 데이터 옆에 두거나, 검색 엔진 같은 보조 인덱스에 둘 수 있다)([AuthZed, What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview)). 이는 상용 기능이다. Event Streams는 "currently in early access for AuthZed Dedicated users"(현재 AuthZed Dedicated 사용자에게 얼리 액세스로 제공된다)([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)), 그리고 문서화된 제약에는 "your application must be able to tolerate some lag"(애플리케이션이 어느 정도의 지연을 견딜 수 있어야 한다)가 포함된다([Materialize limitations](https://authzed.com/docs/materialize/getting-started/limitations)).
+- **벤더가 계산하게 한다.** AuthZed Materialize는 "takes inspiration from the Leopard index"(Leopard 인덱스에서 영감을 얻었으며), 설정된 권한을 미리 계산하고, 그 Event Streams 기능으로 "keep your own copy of it — either colocated alongside the data it protects in your application database, or in a secondary index like a search engine"(그 사본을 직접 보관할 수 있다. 애플리케이션 데이터베이스에서 보호 대상 데이터 옆에 두거나, 검색 엔진 같은 보조 인덱스에 둘 수 있다)([AuthZed, What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview)). 이는 상용 기능이다. Event Streams는 "currently in early access for AuthZed Dedicated users"(현재 AuthZed Dedicated 사용자에게 얼리 액세스로 제공된다)이며([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)), 문서화된 제약에는 "your application must be able to tolerate some lag"(애플리케이션이 어느 정도의 지연을 견딜 수 있어야 한다)가 포함된다([Materialize limitations](https://authzed.com/docs/materialize/getting-started/limitations)).
 
 ## 세 방법 나란히 비교
 

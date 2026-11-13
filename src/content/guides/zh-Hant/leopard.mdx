@@ -57,8 +57,8 @@ group:eng#member@user:beto
 
 Leopard 儲存 "a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID"（以 `(T, s, e)` 元組表示的一組具名集合，其中 *T* 是代表集合類型的列舉值，*s* 與 *e* 是代表集合 ID 與元素 ID 的 64 位元整數）（§3.2.4）。群組成員資格使用兩種集合類型：
 
-- `GROUP2GROUP(s)`：「*直接或間接*」（"*directly or indirectly*"）為祖先群組 *s* 之子群組的群組。
-- `MEMBER2GROUP(s)`：使用者 *s* 為其「*直接*」（"*direct*"）成員的群組。
+- `GROUP2GROUP(s)`："*directly or indirectly*"（*直接或間接*）為祖先群組 *s* 之子群組的群組。
+- `MEMBER2GROUP(s)`：使用者 *s* 為其"*direct*"（*直接*）成員的群組。
 
 在這個範例中，這些集合存放了什麼？
 
@@ -197,7 +197,7 @@ Leopard 儲存 "a collection of named sets using `(T, s, e)` tuples, where *T* i
 
 - **離線索引建構器。** 它 "generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples."（從 Zanzibar 關係元組與設定的快照產生索引分片，並將分片複製到全球。它遵循使用者集合改寫規則，並遞迴展開 ACL 圖中的邊，以形成 Leopard 索引元組。）伺服器 "swap old shards with new ones when they become available"（在新分片可用時，以新分片替換舊分片）。
 - **增量層。** 僅靠離線索引 "cannot do so at a fresh and consistent snapshot"（無法在新鮮且一致的快照上做到這一點），因此伺服器維護 "an incremental layer that indexes all updates since the offline snapshot"（一個為離線快照以來所有更新建立索引的增量層），每筆更新都是一個 `(T, s, e, t, d)` 元組，"where *t* is the timestamp of the update and *d* is a deletion marker"（其中 *t* 是更新的時間戳記，*d* 是刪除標記）。"Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing."（時間戳記小於或等於查詢時間戳記的更新，會在查詢處理期間合併到離線索引之上。）
-- **資料來源。** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions."（Leopard 增量索引器呼叫 Zanzibar 的 Watch API，以接收依時間排序的 Zanzibar 元組修改串流，並將這些更新轉換為依時間排序的 Leopard 元組新增、更新與刪除串流。）
+- **資料饋送。** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions."（Leopard 增量索引器呼叫 Zanzibar 的 Watch API，以接收依時間排序的 Zanzibar 元組修改串流，並將這些更新轉換為依時間排序的 Leopard 元組新增、更新與刪除串流。）
 
 此清單中的所有引文都出自 §3.2.4。由於更新帶有時間戳記，並合併到查詢時間戳記為止，Leopard 的答案可以反映與 Check 其餘部分相同的快照；論文所陳述的增量層用途是 "To support consistent ACL evaluation"（為了支援一致的 ACL 評估）。
 

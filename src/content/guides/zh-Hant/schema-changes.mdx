@@ -183,7 +183,7 @@ definition doc {
 
 </Frames>
 
-請注意存取權實際改變的位置：在步驟 1，而不是步驟 3。一旦權限不再讀取 `editor`，不同時是擁有者或檢視者的編輯者就會被拒絕，而此時元組仍在磁碟上。這就是應該停下來觀察的時間點。AuthZed 的文章（其步驟編號不同）在刪除任何資料之前的這個狀態下說："You can stay at step 2 for as long as desired, in production, to retain your ability to roll back the change"（你可以在正式環境中停留在步驟 2 任意長的時間，以保留回復這項變更的能力）（[online schema migrations](https://authzed.com/blog/online-schema-migrations)）：回復步驟 1 只是一次 schema 寫入，而回復步驟 2 則意味著要還原元組。這三個步驟出自 [AuthZed 的遷移文件](https://authzed.com/docs/spicedb/modeling/migrating-schema)，該文件也描述了從關係中移除一種允許之主體型別的相同模式（先刪除那些 relationship，再編輯 schema）。
+請注意存取權實際改變的位置：在步驟 1，而不是步驟 3。一旦權限不再讀取 `editor`，不同時是擁有者或檢視者的編輯者就會被拒絕，而此時元組仍在磁碟上。這就是應該停下來觀察的時間點。AuthZed 的文章（其步驟編號不同）在刪除任何資料之前的這個狀態下說："You can stay at step 2 for as long as desired, in production, to retain your ability to roll back the change"（你可以在正式環境中停留在步驟 2 任意長的時間，以保留復原這項變更的能力）（[online schema migrations](https://authzed.com/blog/online-schema-migrations)）：復原步驟 1 只是一次 schema 寫入，而復原步驟 2 則意味著要還原元組。這三個步驟出自 [AuthZed 的遷移文件](https://authzed.com/docs/spicedb/modeling/migrating-schema)，該文件也描述了從關係中移除一種允許之主體型別的相同模式（先刪除那些 relationship，再編輯 schema）。
 
 重新命名一個關係，就是一次移除加上一次新增。SpiceDB 的文件逐步說明了做法：新增新的關係並將它納入權限，讓應用程式同時寫入兩者，回填資料，將舊關係從權限中移除，停止寫入它，再以上述三個步驟將它移除（[migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)）。OpenFGA 處理同樣工作的方式則依賴不可變的模型：寫入新模型（一個正式環境尚未使用的新 ID）、更新應用程式、將元組複製到新的關係名稱，然後部署指向新模型 ID 的應用程式（[immutable models](https://openfga.dev/docs/getting-started/immutable-models)）。
 

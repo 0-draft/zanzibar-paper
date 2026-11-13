@@ -15,7 +15,7 @@ O Zanzibar normalmente responde a um Check seguindo as tuplas do objeto até o u
 
 ## Por que o aninhamento é lento
 
-Estenda o exemplo corrente. `group:eng` agora está dentro de `group:product`, que está dentro de `group:all`, e o readme é compartilhado com todo o `group:all`. Quantas consultas são necessárias para descobrir que Beto pode ver o readme?
+Estenda o exemplo recorrente. `group:eng` agora está dentro de `group:product`, que está dentro de `group:all`, e o readme é compartilhado com todo o `group:all`. Quantas consultas são necessárias para descobrir que Beto pode ver o readme?
 
 <Graph
   width={640}
@@ -161,7 +161,7 @@ Quão barata é a interseção? "Index tuples are stored as ordered lists of int
   edges={[
     { from: "a1", to: "b2", label: "busca 1: acerto", on: true },
     { from: "a2", to: "b5", label: "busca 2: acerto", on: true },
-    { from: "a3", to: "b10", label: "busca 3: erro", dashed: true },
+    { from: "a3", to: "b10", label: "busca 3: falha", dashed: true },
   ]}
   caption="Três elementos em A, três buscas em B. Os doze elementos de B nunca são percorridos um a um. Os níveis superiores da skip list, que tornam cada busca rápida, não estão desenhados."
 />

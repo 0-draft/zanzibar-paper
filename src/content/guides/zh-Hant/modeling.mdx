@@ -12,7 +12,7 @@ import Graph from "../../../components/diagram/Graph.astro";
 import Frames from "../../../components/diagram/Frames.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 
-論文描述了其資料模型與設定語言，但只給出一個完整的政策範例，即圖 1。其結論的宣稱更多："simple yet flexible data model and configuration language support a variety of access control policies from both consumer and enterprise applications"（簡單而有彈性的資料模型與設定語言，支援來自消費者與企業應用程式的各式存取控制政策）（§6）。其相關研究一節列出了它涵蓋的模式："Zanzibar’s data model supports permissions, users, groups, and inheritance"（Zanzibar 的資料模型支援權限、使用者、群組與繼承），如 Multics、UNIX、POSIX ACL 與 VMS 中所見，以及 "a number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language"（許多 Zanzibar 客戶端已在 Zanzibar 的命名空間設定語言之上實作了 RBAC 政策）（§5）。
+論文描述了其資料模型與設定語言，但只給出一個完整的政策範例，即圖 1。其結論的宣稱更多："simple yet flexible data model and configuration language support a variety of access control policies from both consumer and enterprise applications"（簡單而有彈性的資料模型與設定語言，支援來自消費者與企業應用程式的各式存取控制政策）（§6）。其相關研究一節列出了它涵蓋的模式："Zanzibar’s data model supports permissions, users, groups, and inheritance"（Zanzibar 的資料模型支援權限、使用者、群組與繼承），如 Multics、UNIX、POSIX ACL 與 VMS 中所見，以及 "a number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language"（一些 Zanzibar 客戶端已在 Zanzibar 的命名空間設定語言之上實作了 RBAC 政策）（§5）。
 
 本頁寫出實務上常見的八種需求。每一節都給出該模式所回答的問題、元組、在論文能夠表達時以圖 1 記法寫成的規則、以 SpiceDB 的 schema 語言與 OpenFGA 的 DSL 寫成的同一規則，以及一張元組圖，並標出決定答案的路徑。模式清單依照 OpenFGA 的[建模指南](https://openfga.dev/docs/modeling)；[元組頁面](../relation-tuples/)說明了記法。
 
@@ -138,9 +138,9 @@ Anne 的 `edit` 從何而來？
 
 ### 要有多少個關係
 
-對這種風格常見的批評與命名有關。在 Oso 的部落格文章 "Google Zanzibar Isn't Flexible"（Oso 販售一款與之競爭的授權產品）中，Greg Sarjeant 寫道 "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`"（ReBAC 的文獻中充斥著像 `can_delete` 與 `can_archive` 這樣的「關係」），稱之為 "essentially the same thing as creating a relation for every authorized action"（本質上等同於為每一個被授權的動作建立一個關係），並結論說這是 "an indication that relations are the wrong abstraction for authorization"（關係是錯誤的授權抽象的跡象）（[Oso，2024-11-01，2025-11-07 更新](https://www.osohq.com/post/google-zanzibar-isnt-flexible)）。
+對這種風格常見的批評與命名有關。在 Oso 的部落格文章 "Google Zanzibar Isn't Flexible"（Oso 販售一款與之競爭的授權產品）中，Greg Sarjeant 寫道 "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`"（ReBAC 的文獻中充斥著像 `can_delete` 與 `can_archive` 這樣的「關係」），稱之為 "essentially the same thing as creating a relation for every authorized action"（本質上等同於為每一個被授權的動作建立一個關係），並結論說這是 "an indication that relations are the wrong abstraction for authorization"（顯示關係對授權而言是錯誤的抽象）（[Oso，2024-11-01，2025-11-07 更新](https://www.osohq.com/post/google-zanzibar-isnt-flexible)）。
 
-數量確實會增加：應用程式檢查的每一個動作，都需要在 schema 中有一個名稱。改寫規則能壓低的，是儲存元組的數量，以及任何人會寫入的關係數量。在上面的 schema 中，有三個關係存放元組（`owner`、`editor`、`viewer`），權限則是它們的純函數，因此新增 `can_archive` 只需修改 schema 一次，不必動任何元組。論文自己引入改寫規則的動機也相同：為每個物件將衍生關係儲存為元組 "would be wasteful and make it hard to make modifications across all objects"（既浪費，也會使跨所有物件的修改變得困難）（§2.3.1）。schema 中的權限名稱究竟是成本還是文件，正是 Oso 與 Zanzibar 風格產品意見分歧之處；本頁不對此下定論。
+數量確實會增加：應用程式檢查的每一個動作，都需要在 schema 中有一個名稱。改寫規則能壓低的，是儲存元組的數量，以及任何人會寫入的關係數量。在上面的 schema 中，有三個關係存放元組（`owner`、`editor`、`viewer`），權限則是它們的純函式，因此新增 `can_archive` 只需修改 schema 一次，不必動任何元組。論文自己引入改寫規則的動機也相同：為每個物件將衍生關係儲存為元組 "would be wasteful and make it hard to make modifications across all objects"（既浪費，也會使跨所有物件的修改變得困難）（§2.3.1）。schema 中的權限名稱究竟是成本還是文件，正是 Oso 與 Zanzibar 風格產品意見分歧之處；本頁不對此下定論。
 
 ## 父子繼承
 

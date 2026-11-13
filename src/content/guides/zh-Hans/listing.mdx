@@ -21,7 +21,7 @@ Check 从一个对象出发，沿着元组前进，直到找到该用户或没�
 
 列表还需要授权服务所不持有的数据。OpenFGA 的指南是这样说的：该服务 "does not store object metadata (names of files, creation dates, time of last update, etc)"（不存储对象元数据（文件名、创建日期、最后更新时间等）），因此搜索 "will require data from your database"（将需要来自你的数据库的数据）（[OpenFGA, Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。过滤和排序在你的数据库中进行；授权在另一个服务中进行；答案是两者的交集。
 
-论文很清楚这种用例。它为统一系统陈述的第一个动机就包括 "a search index that respects access control and works across applications"（一个遵循访问控制且跨应用工作的搜索索引）（§1），其延迟目标还特别提到 "serving search results, which often require tens to hundreds of checks"（提供搜索结果，这通常需要数十到数百次检查）（§1）。
+论文很清楚这种用例。它为统一系统列举的优点之中就有 "a search index that respects access control and works across applications"（一个遵循访问控制且跨应用工作的搜索索引）（§1），其延迟目标还特别提到 "serving search results, which often require tens to hundreds of checks"（提供搜索结果，这通常需要数十到数百次检查）（§1）。
 
 ## 论文提供了什么，没有提供什么
 
@@ -157,7 +157,7 @@ SpiceDB 的指南给出了这个循环及其约束："because we don't know how 
 
 </Frames>
 
-注意成本转移到了哪里。预过滤只付出一次代价，与 Anne 能看到的全部内容成正比。后过滤按轮付出代价，与她看不到的候选数量成正比。OpenFGA 的指南把这一点变成了一条规则：当数据库查询返回的行很少，或用户能看到其中很高比例时，先搜索后检查很合适；当用户能看到很多对象、但这些对象只占总数很小比例时，就很不合适，即其 “Google Drive” 情形，因为 "you will be retrieving and checking against a lot of items and discarding most of them"（你会取出并检查大量条目，然后丢弃其中的大部分）（[Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。
+注意成本转移到了哪里。预过滤只付出一次代价，与 Anne 能看到的全部内容成正比。后过滤按轮付出代价，与她看不到的候选数量成正比。OpenFGA 的指南把这一点变成了一条规则：当数据库查询返回的行很少，或用户能看到其中很高比例时，先搜索后检查很合适；当用户能看到很多对象、但这些对象只占总数很小比例时，就很不合适，即其“Google Drive”情形，因为 "you will be retrieving and checking against a lot of items and discarding most of them"（你会取出并检查大量条目，然后丢弃其中的大部分）（[Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。
 
 ## 方法三：由 Watch 馈送的反规范化索引
 

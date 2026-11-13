@@ -24,7 +24,7 @@ Zanzibar そのものは購入できない。論文が記述しているのは�
 
 ## 99.999% の可用性とは年に約 5 分の停止を意味する
 
-論文は時計の時間で測っていない。"We define availability as the fraction of 'qualified' RPCs the service answers successfully within latency thresholds: 5 seconds for a Safe request, and 15 seconds for a Recent request" (可用性を、サービスがレイテンシのしきい値内に正常に応答した「適格な」RPC の割合として定義する。しきい値は Safe リクエストで 5 秒、Recent リクエストで 15 秒である) (§4.3)。可用性は、サンプリングしたリクエストをプローバーで再生し、"success ratios over 90-day windows averaged across clusters" (クラスタ全体で平均した 90 日間の成功率) を集計して測る。時間に換算した値として、論文は "for every quarter, Zanzibar has less than 2 minutes of global downtime and fewer than 13 minutes when the global error ratio exceeds 10%" (四半期ごとに、Zanzibar のグローバルな停止は 2 分未満であり、グローバルなエラー率が 10% を超える時間は 13 分未満である) と述べている (§4.3)。2019 年の HN スレッドでは、この数字を年あたりの分数に換算した読者が、§4.3 の定義によって訂正されている ([HN 20132520](https://news.ycombinator.com/item?id=20132520))。
+論文は実時間で測っていない。"We define availability as the fraction of 'qualified' RPCs the service answers successfully within latency thresholds: 5 seconds for a Safe request, and 15 seconds for a Recent request" (可用性を、サービスがレイテンシのしきい値内に正常に応答した「適格な」RPC の割合として定義する。しきい値は Safe リクエストで 5 秒、Recent リクエストで 15 秒である) (§4.3)。可用性は、サンプリングしたリクエストをプローバーで再生し、"success ratios over 90-day windows averaged across clusters" (クラスタ全体で平均した 90 日間の成功率) を集計して測る。時間に換算した値として、論文は "for every quarter, Zanzibar has less than 2 minutes of global downtime and fewer than 13 minutes when the global error ratio exceeds 10%" (四半期ごとに、Zanzibar のグローバルな停止は 2 分未満であり、グローバルなエラー率が 10% を超える時間は 13 分未満である) と述べている (§4.3)。2019 年の HN スレッドでは、この数字を年あたりの分数に換算した読者が、§4.3 の定義によって訂正されている ([HN 20132520](https://news.ycombinator.com/item?id=20132520))。
 
 ## 論文は p95 レイテンシしか報告していない
 
@@ -56,7 +56,7 @@ Zanzibar 自身は使っていない。"Zanzibar stores ACLs and their metadata 
 
 ## TrueTime か原子時計が必要である
 
-必要なのは、書き込みを順序付け、一貫したスナップショットを読む方法である。TrueTime は Google がそれを得た手段である。論文は "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness" (下層のデータベースシステムである Spanner に、外部一貫性と有界な古さを伴うスナップショット読み取りの両方の提供を頼っている) (§5)。AuthZed は、SpiceDB が他の環境で同じ順序付けをどう得るかを説明している。重なるキーに対してのみ外部一貫性を提供する CockroachDB では、デフォルトの戦略が "all relationship writes touch the same row" (すべての関係の書き込みが同じ行に触れる) ようにする。PostgreSQL は外部一貫性を直接与えるが、スナップショット読み取りは上に追加する必要がある ([AuthZed blog, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb))。ある製品が new enemy に対する保証を保つかどうかは、クロックのハードウェアではなくこうした細部で決まる。[一貫性、スナップショット、zookie](../consistency/) を参照。
+必要なのは、書き込みを順序付け、一貫したスナップショットを読む方法である。TrueTime は Google がそれを得た手段である。論文は "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness" (下層のデータベースシステムである Spanner に、外部一貫性と有界な古さを伴うスナップショット読み取りの両方の提供を頼っている) (§5)。AuthZed は、SpiceDB が他の環境で同じ順序付けをどう得るかを説明している。重なるキーに対してのみ外部一貫性を提供する CockroachDB では、デフォルトの戦略が "all relationship writes touch the same row" (すべてのリレーションシップの書き込みが同じ行に触れる) ようにする。PostgreSQL は外部一貫性を直接与えるが、スナップショット読み取りは上に追加する必要がある ([AuthZed blog, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb))。ある製品が 「new enemy」問題に対する保証を保つかどうかは、クロックのハードウェアではなくこうした細部で決まる。[一貫性、スナップショット、zookie](../consistency/) を参照。
 
 ## 出典
 

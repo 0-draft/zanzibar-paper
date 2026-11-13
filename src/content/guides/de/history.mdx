@@ -18,13 +18,13 @@ Das Zanzibar-Paper beschreibt seine eigene Herkunft in [§5 Related Work](../../
 
 Die ersten Mehrbenutzersysteme mussten entscheiden, wer was anfassen darf. 1966 gaben Dennis und Van Horn jeder Berechnung eine Liste von *Capabilities*, unfälschbaren Tokens, die ein Objekt benennen und Rechte daran gewähren ([Dennis und Van Horn](https://doi.org/10.1145/365230.365252)). Lampsons Zugriffsmatrix von 1971 zeigte, dass Capabilities und Zugriffskontrolllisten zwei Arten sind, dieselbe Tabelle zu speichern, zeilenweise oder spaltenweise ([Lampson](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)). Multics nahm die Spaltensicht: Jedes Segment und jedes Verzeichnis trug eine ACL ([Saltzer](https://dl.acm.org/doi/10.1145/361011.361067)). Auch Zanzibar steht auf der ACL-Seite: Es beantwortet „wer darf dieses Objekt anfassen?“.
 
-Betriebssysteme machten die Listen dann billiger und gröber und später wieder reichhaltiger. Das Paper zeichnet das selbst nach: In der ersten Edition von UNIX sagen Datei-Flags, "whether owner and non-owner can read or write the file" (ob Eigentümer und Nicht-Eigentümer die Datei lesen oder schreiben können); in der vierten Edition gibt es Lese-, Schreib- und Ausführungsbits "for owner, group, and others" (für Eigentümer, Gruppe und andere); POSIX-ACLs fügen "an arbitrary list of users and groups" (eine beliebige Liste von Benutzern und Gruppen) hinzu; VMS "supports ACL inheritance for files created within a directory tree" (§5) (unterstützt ACL-Vererbung für Dateien, die innerhalb eines Verzeichnisbaums angelegt werden). Diese vier Begriffe, Berechtigungen, Benutzer, Gruppen und Vererbung, sind das, was das Datenmodell von Zanzibar unterstützen will.
+Betriebssysteme machten die Listen dann billiger und gröber und später wieder reichhaltiger. Das Paper zeichnet das selbst nach: In der ersten Edition von UNIX sagen Datei-Flags, "whether owner and non-owner can read or write the file" (ob Eigentümer und Nicht-Eigentümer die Datei lesen oder schreiben können); in der vierten Edition gibt es Lese-, Schreib- und Ausführungsbits "for owner, group, and others" (für Eigentümer, Gruppe und andere); POSIX-ACLs fügen "an arbitrary list of users and groups" (eine beliebige Liste von Benutzern und Gruppen) hinzu; VMS "supports ACL inheritance for files created within a directory tree" (§5) (unterstützt ACL-Vererbung für Dateien, die innerhalb eines Verzeichnisbaums angelegt werden). Diese vier Begriffe – Berechtigungen, Benutzer, Gruppen und Vererbung – sind das, was das Datenmodell von Zanzibar unterstützen soll.
 
-Ab den 1970er-Jahren entfernten sich die Modelle von Listen pro Objekt. Bell–LaPadula und Biba ließen das System, nicht den Eigentümer, anhand von Labels entscheiden; Zanzibar ist diskretionär, also sind sie Kontrast, nicht Herkunft. Rollenbasierte Zugriffskontrolle (1992) legte Rollen zwischen Benutzer und Berechtigungen; das Paper sagt, Rollen "are similar to Zanzibar relations" (§5) (ähneln Zanzibar-Relationen). Attributbasierte Kontrolle, definiert im NIST-Leitfaden SP 800-162 von 2014, berechnet Entscheidungen zur Anfragezeit aus Attributen. Beziehungsbasierte Kontrolle, 2007 von Gates benannt und 2011 von Fong formalisiert, entscheidet anhand von Beziehungen wie „Mitglied von“ oder „übergeordneter Ordner von“, die sich zusammensetzen lassen ([Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)). Das Paper verwendet das Wort ReBAC nie, aber seine Relationstupel sind ein solcher Graph.
+Ab den 1970er-Jahren entfernten sich die Modelle von Listen pro Objekt. Bell–LaPadula und Biba ließen das System, nicht den Eigentümer, anhand von Labels entscheiden; Zanzibar ist diskretionär, also sind sie Kontrast, nicht Herkunft. Rollenbasierte Zugriffskontrolle (1992) legte Rollen zwischen Benutzer und Berechtigungen; das Paper sagt, Rollen "are similar to Zanzibar relations" (§5) (ähneln Zanzibar-Relationen). Attributbasierte Kontrolle, definiert im NIST-Leitfaden SP 800-162 von 2014, berechnet Entscheidungen zur Anfragezeit aus Attributen. Beziehungsbasierte Kontrolle, 2007 von Gates benannt und 2011 von Fong formalisiert, entscheidet anhand von Beziehungen wie „Mitglied von“ oder „übergeordneter Ordner von“, die sich verketten lassen ([Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)). Das Paper verwendet das Wort ReBAC nie, aber seine Relationstupel sind ein solcher Graph.
 
-Neu bei Google waren Größenordnung und Konsistenz. Das Paper sagt, Zanzibar "has been in production use for more than 5 years" (§4) (ist seit mehr als 5 Jahren im Produktivbetrieb), Stand des Papers vom Juli 2019; es lief also spätestens 2014; keine öffentliche Quelle nennt ein Startjahr. Es bedient Calendar, Cloud, Drive, Maps, Photos und YouTube (§1). TAO, mit dem das Paper es vergleicht, bietet "eventual global consistency" (letztliche globale Konsistenz), während Zanzibar "external consistency and snapshot reads with bounded staleness" (externe Konsistenz und Snapshot-Lesevorgänge mit begrenzter Veraltung) bereitstellt, sodass es vor dem „New Enemy“-Problem schützt (§5). Lamport-Uhren schieden aus, weil sie "require explicit participation of all “processes”" (die explizite Beteiligung aller „Prozesse“ erfordern), und manche der „Prozesse“ von Zanzibar sind "external clients or even human users" (externe Clients oder sogar menschliche Benutzer). Chubby unterstützt nicht "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness" (große Datenmengen, effiziente Bereichs-Lesevorgänge oder Lesevorgänge auf einem vom Client angegebenen Snapshot mit begrenzter Veraltung), und ZooKeeper bietet weder externe Konsistenz über Knoten hinweg noch Snapshot-Lesevorgänge mit begrenzter Veraltung (§5). Spanner und seine TrueTime-Uhr lieferten die Garantie ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)).
+Neu bei Google waren Größenordnung und Konsistenz. Das Paper sagt, Zanzibar "has been in production use for more than 5 years" (§4) (ist seit mehr als 5 Jahren im Produktivbetrieb), Stand des Papers vom Juli 2019; es lief also spätestens 2014, doch keine öffentliche Quelle nennt ein Startjahr. Es bedient Calendar, Cloud, Drive, Maps, Photos und YouTube (§1). TAO, mit dem das Paper es vergleicht, bietet "eventual global consistency" (letztendlich eintretende globale Konsistenz), während Zanzibar "external consistency and snapshot reads with bounded staleness" (externe Konsistenz und Snapshot-Lesevorgänge mit begrenzter Veraltung) bereitstellt, sodass es vor dem „New Enemy“-Problem schützt (§5). Lamport-Uhren schieden aus, weil sie "require explicit participation of all “processes”" (die explizite Beteiligung aller „Prozesse“ erfordern), und manche der „Prozesse“ von Zanzibar sind "external clients or even human users" (externe Clients oder sogar menschliche Benutzer). Chubby unterstützt nicht "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness" (große Datenmengen, effiziente Bereichs-Lesevorgänge oder Lesevorgänge auf einem vom Client angegebenen Snapshot mit begrenzter Veraltung), und ZooKeeper bietet weder externe Konsistenz über Knoten hinweg noch Snapshot-Lesevorgänge mit begrenzter Veraltung (§5). Spanner und seine TrueTime-Uhr lieferten die Garantie ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)).
 
-Nach dem Paper bauten andere das Design offen nach. Ory Keto wurde 2021 darum herum neu geschrieben, und SpiceDB, OpenFGA, Permify und Topaz folgten innerhalb von etwa achtzehn Monaten. Gleichzeitig reiften Policy-Engines aus der ABAC-Linie, OPA und Cedar, und die 2023 gegründete Arbeitsgruppe AuthZEN der OpenID Foundation standardisierte, wie eine Anwendung eine Autorisierungs-Engine um eine Entscheidung bittet: Ihre Authorization API 1.0 wurde im Januar 2026 zur OpenID Final Specification. Die Details jedes Systems stehen auf den Ökosystem-Seiten.
+Nach dem Paper bauten andere das Design als Open Source nach. Ory Keto wurde 2021 auf dieser Grundlage neu geschrieben, und SpiceDB, OpenFGA, Permify und Topaz folgten innerhalb von etwa achtzehn Monaten. Gleichzeitig reiften Policy-Engines aus der ABAC-Linie, OPA und Cedar, und die 2023 gegründete Arbeitsgruppe AuthZEN der OpenID Foundation standardisierte, wie eine Anwendung eine Autorisierungs-Engine um eine Entscheidung bittet: Ihre Authorization API 1.0 wurde im Januar 2026 zur OpenID Final Specification. Die Details jedes Systems stehen auf den Ökosystem-Seiten.
 
 ## Zeitleiste
 
@@ -63,7 +63,7 @@ Nach dem Paper bauten andere das Design offen nach. Ory Keto wurde 2021 darum he
       era: "Betriebssysteme",
       year: "1997–1998",
       title: "POSIX.1e-ACLs: Entwurf 17, dann zurückgezogen",
-      body: "Entwurf 17 (Oktober 1997) wurde die Grundlage der Linux-ACLs; die Förderung für 1003.1e wurde im Januar 1998 zurückgezogen.",
+      body: "Entwurf 17 (Oktober 1997) wurde die Grundlage der Linux-ACLs; das Sponsoring für 1003.1e wurde im Januar 1998 zurückgezogen.",
       href: "https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html",
     },
     {
@@ -84,7 +84,7 @@ Nach dem Paper bauten andere das Design offen nach. Ory Keto wurde 2021 darum he
       era: "Modelle und Standards",
       year: "1975–1977",
       title: "Integritätsmodell von Biba",
-      body: "Das Integritäts-Gegenstück zu Bell–LaPadula. MITRE MTR-3153 (Juni 1975), meist zitiert als ESD-TR-76-372 (April 1977).",
+      body: "Das Integritäts-Gegenstück zu Bell–LaPadula. MITRE MTR-3153 (Juni 1975); der überarbeitete Bericht, MTR-3153 Rev. 1, erschien im April 1977 als ESD-TR-76-372 (DTIC AD-A039324).",
       href: "https://seclab.cs.ucdavis.edu/projects/history/CD/index.html",
     },
     {
@@ -126,7 +126,7 @@ Nach dem Paper bauten andere das Design offen nach. Ory Keto wurde 2021 darum he
       era: "Modelle und Standards",
       year: "2011",
       title: "Fong: ein ReBAC-Schutzmodell",
-      body: "Entscheidungen auf Grundlage der Beziehung zwischen Eigentümer und Zugreifendem in einem sozialen Netzwerk; Relationen lassen sich zusammensetzen, anders als Rollen.",
+      body: "Entscheidungen auf Grundlage der Beziehung zwischen Eigentümer und Zugreifendem in einem sozialen Netzwerk; Relationen lassen sich verketten, anders als Rollen.",
       href: "https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf",
     },
     {
@@ -152,7 +152,7 @@ Nach dem Paper bauten andere das Design offen nach. Ory Keto wurde 2021 darum he
     },
     {
       era: "Weltmaßstab",
-      year: "bis 2014",
+      year: "spätestens 2014",
       title: "Zanzibar im Produktivbetrieb",
       body: "Das Paper sagt, es \"has been in production use for more than 5 years\" (ist seit mehr als 5 Jahren im Produktivbetrieb) (§4). Damit liegt der Start vor Mitte 2014; keine öffentliche Quelle nennt das Jahr.",
       href: "https://www.usenix.org/conference/atc19/presentation/pang",
@@ -175,7 +175,7 @@ Nach dem Paper bauten andere das Design offen nach. Ory Keto wurde 2021 darum he
     {
       era: "Open Source und Standards",
       year: "2021",
-      title: "OPA graduiert in der CNCF",
+      title: "OPA erreicht in der CNCF den Graduated-Status",
       body: "Angekündigt am 4. Februar 2021.",
       href: "https://www.cncf.io/announcements/2021/02/04/cloud-native-computing-foundation-announces-open-policy-agent-graduation/",
     },
@@ -183,7 +183,7 @@ Nach dem Paper bauten andere das Design offen nach. Ory Keto wurde 2021 darum he
       era: "Open Source und Standards",
       year: "2021",
       title: "Zanzibar-Neufassung von Ory Keto",
-      body: "v0.6.0-alpha.1, 7. April 2021. Keto selbst stammt von 2018.",
+      body: "v0.6.0-alpha.1, 7. April 2021. Keto selbst stammt aus dem Jahr 2018.",
       href: "https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1",
     },
     {
@@ -197,7 +197,7 @@ Nach dem Paper bauten andere das Design offen nach. Ory Keto wurde 2021 darum he
       era: "Open Source und Standards",
       year: "2022",
       title: "Erstes Release von OpenFGA",
-      body: "10. Juni 2022. Entwickelt von Okta-Mitarbeitern; seit November 2025 ein CNCF-Incubating-Projekt (CNCF-Blog, 11. November 2025).",
+      body: "10. Juni 2022. Entwickelt von Okta-Mitarbeitern; seit dem 28. Oktober 2025 ein CNCF-Incubating-Projekt, angekündigt im CNCF-Blog am 11. November 2025.",
       href: "https://github.com/openfga/openfga",
     },
     {
@@ -278,7 +278,7 @@ Welche frühere Arbeit taucht in welchem Teil von Zanzibar auf?
   caption="Durchgezogene Pfeile: Zanzibar läuft darauf. Gestrichelte Pfeile: Das Paper nennt es als Vorläufer oder ähnliche Idee (§5, §3.2.4)."
 />
 
-Beachten Sie die Teilung. Das Datenmodell in der oberen Hälfte ist eine Neukombination alter Ideen; der eigene Anspruch des Papers ist die Vereinheitlichung, die Modellierung mit Tupeln "allows us to unify the concepts of ACLs and groups" (§2.1) (erlaubt es uns, die Konzepte von ACLs und Gruppen zu vereinheitlichen), wo Abadi et al. sie getrennt hielten (§5). Die untere Hälfte ist das, was es im Maßstab von Google funktionieren ließ: Spanner für "external consistency and snapshot reads with bounded staleness" (§5) (externe Konsistenz und Snapshot-Lesevorgänge mit begrenzter Veraltung) und Leopard, "an indexing system used to optimize operations on large and deeply nested sets" (§3) (ein Indexierungssystem zur Optimierung von Operationen auf großen und tief verschachtelten Mengen), für Gruppen, die Zeigerverfolgung nicht schnell genug bedienen kann (§3.2.4).
+Beachten Sie die Teilung. Das Datenmodell in der oberen Hälfte ist eine Neukombination alter Ideen; der eigene Anspruch des Papers ist die Vereinheitlichung: Die Modellierung mit Tupeln "allows us to unify the concepts of ACLs and groups" (§2.1) (erlaubt es uns, die Konzepte von ACLs und Gruppen zu vereinheitlichen), wo Abadi et al. sie getrennt hielten (§5). Die untere Hälfte ist das, was es im Maßstab von Google funktionieren ließ: Spanner für "external consistency and snapshot reads with bounded staleness" (§5) (externe Konsistenz und Snapshot-Lesevorgänge mit begrenzter Veraltung) und Leopard, "an indexing system used to optimize operations on large and deeply nested sets" (§3) (ein Indexierungssystem zur Optimierung von Operationen auf großen und tief verschachtelten Mengen), für Gruppen, die Zeigerverfolgung nicht schnell genug bedienen kann (§3.2.4).
 
 <Callout kind="note" title="IAM obendrauf">
 
@@ -294,27 +294,27 @@ Verwandte Arbeiten, mit jedem auf dieser Seite genannten System: §5. Produktion
 
 ## Quellen
 
-
 - Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
-- J. B. Dennis and E. C. Van Horn, "Programming Semantics for Multiprogrammed Computations", CACM 9(3), 1966, [doi.org/10.1145/365230.365252](https://doi.org/10.1145/365230.365252); earlier version MIT Project MAC TR-23, December 1965, [dspace.mit.edu](https://dspace.mit.edu/handle/1721.1/149345)
-- B. W. Lampson, "Protection", 1971; reprinted in ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
-- UNIX First Edition sys-chmod(2), archive copy, [man.cat-v.org/unix-1st/2/sys-chmod](http://man.cat-v.org/unix-1st/2/sys-chmod)
-- UNIX Fourth Edition chmod(2), Unix history repository, [github.com/dspinellis/unix-history-repo](https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2)
+- J. B. Dennis und E. C. Van Horn, "Programming Semantics for Multiprogrammed Computations", CACM 9(3), 1966, [doi.org/10.1145/365230.365252](https://doi.org/10.1145/365230.365252); frühere Fassung MIT Project MAC TR-23, Dezember 1965, [dspace.mit.edu](https://dspace.mit.edu/handle/1721.1/149345)
+- B. W. Lampson, "Protection", 1971; nachgedruckt in ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
+- UNIX First Edition sys-chmod(2), Archivkopie, [man.cat-v.org/unix-1st/2/sys-chmod](http://man.cat-v.org/unix-1st/2/sys-chmod)
+- UNIX Fourth Edition chmod(2), Unix-History-Repository, [github.com/dspinellis/unix-history-repo](https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2)
 - J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
 - A. Grünbacher, "POSIX Access Control Lists on Linux", USENIX ATC 2003 FREENIX, [usenix.org](https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html)
 - D. E. Bell, "Looking Back at the Bell-La Padula Model", ACSAC 2005, [PDF](https://www.acsac.org/2005/papers/Bell.pdf)
-- UC Davis Computer Security Lab history archive (Biba), [seclab.cs.ucdavis.edu/projects/history/CD](https://seclab.cs.ucdavis.edu/projects/history/CD/index.html)
+- K. J. Biba, "Integrity Considerations for Secure Computer Systems", MTR-3153 Rev. 1 / ESD-TR-76-372, April 1977, [DTIC AD-A039324](https://apps.dtic.mil/sti/html/tr/ADA039324/index.html)
+- UC Davis Computer Security Lab, historisches Archiv (Biba), [seclab.cs.ucdavis.edu/projects/history/CD](https://seclab.cs.ucdavis.edu/projects/history/CD/index.html)
 - NIST, Role Based Access Control project, [csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
-- OASIS, XACML 3.0 core specification, [docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html)
+- OASIS, XACML-3.0-Kernspezifikation, [docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html)
 - NIST SP 800-162, [csrc.nist.gov/pubs/sp/800/162/upd2/final](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)
 - P. W. L. Fong, "Relationship-Based Access Control: Protection Model and Policy Language", CODASPY '11, [dl.acm.org/doi/10.1145/1943513.1943539](https://dl.acm.org/doi/10.1145/1943513.1943539), [PDF](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)
 - J. C. Corbett et al., "Spanner: Google's Globally-Distributed Database", OSDI '12, [PDF](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
-- Open Policy Agent releases, [github.com/open-policy-agent/opa/releases](https://github.com/open-policy-agent/opa/releases); CNCF graduation announcement, [cncf.io](https://www.cncf.io/announcements/2021/02/04/cloud-native-computing-foundation-announces-open-policy-agent-graduation/)
+- Open Policy Agent, Releases, [github.com/open-policy-agent/opa/releases](https://github.com/open-policy-agent/opa/releases); CNCF-Ankündigung des Graduated-Status, [cncf.io](https://www.cncf.io/announcements/2021/02/04/cloud-native-computing-foundation-announces-open-policy-agent-graduation/)
 - Ory Keto v0.6.0-alpha.1, [github.com/ory/keto/releases/tag/v0.6.0-alpha.1](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)
 - SpiceDB, [github.com/authzed/spicedb](https://github.com/authzed/spicedb)
 - OpenFGA, [github.com/openfga/openfga](https://github.com/openfga/openfga)
 - Permify, [github.com/Permify/permify](https://github.com/Permify/permify)
 - Topaz, [github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
-- AWS, Cedar open-source announcement, [aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/05/cedar-open-source-language-access-control); Amazon Verified Permissions GA, [aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/06/amazon-verified-permissions-generally-available/)
-- CNCF, OpenFGA becomes a CNCF incubating project, 11 November 2025, [cncf.io](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
-- OpenID Foundation, AuthZEN working group announcement, [openid.net/announcing-authzen-working-group](https://openid.net/announcing-authzen-working-group/); Authorization API 1.0 Final, [openid.net/authorization-api-1-0-final-specification-approved](https://openid.net/authorization-api-1-0-final-specification-approved/); the specification, [openid.net/specs/authorization-api-1_0.html](https://openid.net/specs/authorization-api-1_0.html)
+- AWS, Ankündigung der Open-Source-Veröffentlichung von Cedar, [aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/05/cedar-open-source-language-access-control); allgemeine Verfügbarkeit von Amazon Verified Permissions, [aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/06/amazon-verified-permissions-generally-available/)
+- CNCF, OpenFGA becomes a CNCF incubating project, 11. November 2025, [cncf.io](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
+- OpenID Foundation, Ankündigung der Arbeitsgruppe AuthZEN, [openid.net/announcing-authzen-working-group](https://openid.net/announcing-authzen-working-group/); Authorization API 1.0 Final, [openid.net/authorization-api-1-0-final-specification-approved](https://openid.net/authorization-api-1-0-final-specification-approved/); die Spezifikation, [openid.net/specs/authorization-api-1_0.html](https://openid.net/specs/authorization-api-1_0.html)

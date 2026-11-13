@@ -168,9 +168,9 @@ Obsérvese que las dos lecturas de instantánea difieren en *cuánto* ven, pero 
 
 Zanzibar no calcula estas marcas de tiempo por sí mismo. Almacena las ACL en Spanner, cuyo "TrueTime mechanism assigns each ACL write a microsecond-resolution timestamp, such that the timestamps of writes reflect the causal ordering between writes" (mecanismo TrueTime asigna a cada escritura de ACL una marca de tiempo con resolución de microsegundos, de modo que las marcas de tiempo de las escrituras reflejan el orden causal entre ellas) (§2.2). El esquema de su funcionamiento está en §3, §4.1.2 y §4.2.1 del [artículo de Spanner (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf).
 
-- `TT.now()` devuelve un intervalo `[earliest, latest]` que contiene con garantía el tiempo absoluto en el que se llamó. La incertidumbre `ε` es la mitad de la anchura del intervalo; en el entorno de producción de Google era "typically a sawtooth function of time, varying from about 1 to 7 ms over each poll interval" (normalmente una función en diente de sierra del tiempo, que varía entre unos 1 y 7 ms en cada intervalo de sondeo).
+- `TT.now()` devuelve un intervalo `[earliest, latest]` que contiene con garantía el tiempo absoluto en el que se llamó. La incertidumbre `ε` es la mitad de la anchura del intervalo; en el entorno de producción de Google era "typically a sawtooth function of time, varying from about 1 to 7 ms over each poll interval" (normalmente una función en diente de sierra del tiempo, que varía entre aproximadamente 1 y 7 ms en cada intervalo de sondeo).
 - **Inicio**: el líder asigna a una escritura una marca de tiempo de confirmación `s` no menor que `TT.now().latest`.
-- **Espera de confirmación** (commit wait): los clientes no pueden ver la escritura hasta que `TT.after(s)` sea verdadero, es decir, hasta que `s` haya pasado con certeza en todas partes. Spanner señala que "the expected wait is at least 2 ∗ ε̄" (la espera esperada es de al menos 2 ∗ ε̄), donde `ε̄` es la cota de error media (§4.2.1).
+- **Espera de confirmación** (commit wait): los clientes no pueden ver la escritura hasta que `TT.after(s)` sea verdadero, es decir, hasta que `s` haya pasado con certeza en todas partes. Spanner señala que "the expected wait is at least 2 ∗ ε̄" (la espera prevista es de al menos 2 ∗ ε̄), donde `ε̄` es la cota de error media (§4.2.1).
 
 ¿Cómo hace la espera que las marcas de tiempo sean causales?
 
@@ -252,7 +252,7 @@ Paso a paso, según §2.2 y §2.4.4:
 2. **Emisión del zookie.** Si el cambio está permitido, la respuesta incluye un zookie. Zanzibar "encodes a current global timestamp in the zookie and ensures that all prior ACL writes have lower timestamps" (codifica una marca de tiempo global actual en el zookie y garantiza que todas las escrituras de ACL anteriores tengan marcas de tiempo menores) (§2.2).
 3. **Almacenado con el contenido.** "The client stores the zookie with the content change in an atomic write to the client storage" (El cliente almacena el zookie junto con el cambio de contenido en una escritura atómica en el almacenamiento del cliente) (§2.2). La comprobación en sí no tiene por qué estar en la misma transacción que la escritura del contenido.
 4. **Llevado por las comprobaciones posteriores.** Cada comprobación posterior de esa versión del contenido envía el zookie almacenado.
-5. **Evaluado al menos tan reciente.** "A check is always evaluated at a consistent snapshot no earlier than the given zookie" (Una comprobación se evalúa siempre en una instantánea consistente no anterior al zookie dado) (§2.4.4).
+5. **Evaluación al menos tan reciente.** "A check is always evaluated at a consistent snapshot no earlier than the given zookie" (Una comprobación se evalúa siempre en una instantánea consistente no anterior al zookie dado) (§2.4.4).
 
 En el Ejemplo B, el zookie almacenado con el contenido nuevo codifica `T_B2`, y `T_B2 > T_B1`, así que la comprobación de Bob del paso 5 tiene que ver su eliminación.
 

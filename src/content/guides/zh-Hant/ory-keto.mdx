@@ -165,7 +165,7 @@ Keto 部署中的哪些部分彼此溝通？
 
 論文的 zookie 讓客戶端可以要求在 "at a consistent snapshot no earlier than the given zookie"（不早於給定 zookie 的一致性快照上）進行檢查（§2.4.4）。Keto 的 protobuf API 在欄位名稱中帶有相同的概念：Check、Expand 與 ListRelationTuples 上的 `snaptoken`，TransactRelationTuples 上的 `snaptokens`，以及用於內容變更檢查的 `latest` 旗標。這些欄位每一個都被記載為 "not implemented yet and has no effect"（尚未實作，沒有作用）（[check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)）。
 
-客戶端今天送出的權杖會怎麼樣？
+客戶端目前送出的權杖會怎麼樣？
 
 <Swimlane
   lanes={["你的服務", "Keto", "SQL 資料庫"]}
@@ -184,7 +184,7 @@ Keto 部署中的哪些部分彼此溝通？
     { from: [1, 1], to: [0, 1], dashed: true },
     { from: [0, 2], to: [1, 2] },
   ]}
-  caption="API 的形式依循論文的 zookie 協定；但行為尚未實現。"
+  caption="API 的形式依循論文的 zookie 協定；但行為尚未實作。"
 />
 
 請注意，論文以 zookie 建立的保證，也就是保護內容免於「new enemy」問題（§2.2），因此取決於底層 SQL 資料庫的行為。此處查核的 Keto 文件頁面對一致性沒有任何陳述。

@@ -21,7 +21,7 @@ import Graph from "../../../components/diagram/Graph.astro";
 
 Topaz ist ein in Go geschriebener Autorisierungsdienst. Er "uses the Open Policy Agent (OPA) as its decision engine, and provides a built-in directory that is inspired by the Google Zanzibar data model" (verwendet den Open Policy Agent (OPA) als Entscheidungs-Engine und bietet ein eingebautes Verzeichnis, das vom Datenmodell von Google Zanzibar inspiriert ist) ([README](https://github.com/aserto-dev/topaz)). Eine Entscheidung trifft eine Rego-Richtlinie; die Richtlinie kann das Verzeichnis fragen, ob zwischen einem Subjekt und einem Objekt eine Relation oder Berechtigung besteht, und das ist der Teil, der Zanzibar ähnelt. Die Verzeichnisdaten werden "modeled and stored locally in an embedded database" (lokal in einer eingebetteten Datenbank modelliert und gespeichert) (dasselbe README).
 
-Topaz wurde von Aserto gebaut. Am 2025-04-27 kündigte Aserto an, es sei "sunsetting the Aserto SaaS control plane and will shut it down by May 31, 2025" (dabei, die SaaS-Control-Plane von Aserto auslaufen zu lassen, und werde sie bis zum 31. Mai 2025 abschalten), es werde "wind down Aserto as a commercial entity" (Aserto als kommerzielles Unternehmen abwickeln), und "we have a set of maintainers that will continue to support Topaz" (wir haben eine Gruppe von Maintainern, die Topaz weiter unterstützen werden) ([Aserto-Blog](https://www.aserto.com/blog/the-final-chapter-for-aserto), vom Hersteller verfasst). Seitdem sind weiter Releases erschienen. Die 30 neuesten Commits auf dem Standardbranch stammen mit Stand 2026-11-13 alle von einem Autor, Gert Drapers, der auch den Beitrag zur Abwicklung unterzeichnet hat ([Commits](https://github.com/aserto-dev/topaz/commits/main)).
+Topaz wurde von Aserto entwickelt. Am 2025-04-27 kündigte Aserto an, es sei "sunsetting the Aserto SaaS control plane and will shut it down by May 31, 2025" (dabei, die SaaS-Control-Plane von Aserto auslaufen zu lassen, und werde sie bis zum 31. Mai 2025 abschalten), es werde "wind down Aserto as a commercial entity" (Aserto als kommerzielles Unternehmen abwickeln), und "we have a set of maintainers that will continue to support Topaz" (wir haben eine Gruppe von Maintainern, die Topaz weiter unterstützen werden) ([Aserto-Blog](https://www.aserto.com/blog/the-final-chapter-for-aserto), vom Hersteller verfasst). Seitdem sind weiter Releases erschienen. Die 30 neuesten Commits auf dem Standardbranch stammen mit Stand 2026-11-13 alle von einem Autor, Gert Drapers, der auch den Beitrag zur Abwicklung unterzeichnet hat ([Commits](https://github.com/aserto-dev/topaz/commits/main)).
 
 ## Paper und Topaz nebeneinander
 
@@ -90,7 +90,7 @@ Die fünf Relationen des durchgehenden Beispiels im JSON-Lines-Format der Beispi
 {"object_type":"folder","object_id":"A","relation":"viewer","subject_type":"user","subject_id":"chen"}
 ```
 
-Welcher Datensatz und welcher Berechtigungsausdruck entscheiden über das `can_read` jeder Person auf dem Readme?
+Welcher Datensatz und welcher Berechtigungsausdruck entscheiden über das `can_read` jeder Person für das Readme?
 
 <Graph
   width={600}
@@ -169,13 +169,12 @@ Der zookie des Papers erlaubt es einem Client, eine Prüfung "at a consistent sn
 
 ## Quellen
 
-
-- Topaz repository and README: [github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
-- Topaz docs, introduction: [topaz.sh/docs/intro](https://www.topaz.sh/docs/intro)
-- Architecture: [topaz.sh/docs/architecture](https://www.topaz.sh/docs/architecture)
-- Manifest reference: [topaz.sh/docs/directory/manifest-reference](https://www.topaz.sh/docs/directory/manifest-reference)
-- Sample manifest and relations: [manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml), [gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)
-- Directory API: [reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto), [importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)
-- Recent commits: [github.com/aserto-dev/topaz/commits/main](https://github.com/aserto-dev/topaz/commits/main)
-- Authorizer API: [authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)
-- Aserto wind-down: [aserto.com/blog/the-final-chapter-for-aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto)
+- Repository und README von Topaz: [github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
+- Topaz-Dokumentation, Einführung: [topaz.sh/docs/intro](https://www.topaz.sh/docs/intro)
+- Architektur: [topaz.sh/docs/architecture](https://www.topaz.sh/docs/architecture)
+- Manifest-Referenz: [topaz.sh/docs/directory/manifest-reference](https://www.topaz.sh/docs/directory/manifest-reference)
+- Beispielmanifest und -relationen: [manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml), [gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)
+- Verzeichnis-API: [reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto), [importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)
+- Neueste Commits: [github.com/aserto-dev/topaz/commits/main](https://github.com/aserto-dev/topaz/commits/main)
+- Autorisierer-API: [authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)
+- Abwicklung von Aserto: [aserto.com/blog/the-final-chapter-for-aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto)

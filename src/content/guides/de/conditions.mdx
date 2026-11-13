@@ -14,7 +14,7 @@ import Callout from "../../../components/diagram/Callout.astro";
 
 Manche Regeln handeln nicht davon, wer zu was in Beziehung steht. „Nur aus dem Büronetz“, „nur während der Geschäftszeiten“, „nur für Überweisungen unter 1.000“, „nur bis Freitag“: Jede hängt von einer Tatsache über die Anfrage oder die Uhr ab. Das Paper hat keine Möglichkeit, sie zu schreiben. Produkte, die auf seinen Ideen aufbauen, fügen eine hinzu, jedes auf andere Weise. Diese Seite erklärt, warum die Lücke besteht, was drei Produkte hinzufügen und wann die Regel besser in der Anwendung bleibt.
 
-Das durchgehende Beispiel: Anne, Beto und Chen (`user:anne`, `user:beto`, `user:chen`); das Dokument `doc:readme` in `folder:A`; die Gruppe `group:eng`. Anne ist Eigentümerin des Readme, Beto ist in eng, die Mitglieder von eng sehen das Readme, und Chen sieht Ordner A. Die [Modellierungsseite](../modeling/) enthält die Beziehungsmuster, auf denen diese Seite aufbaut.
+Das durchgehende Beispiel: Anne, Beto und Chen (`user:anne`, `user:beto`, `user:chen`); das Dokument `doc:readme` in `folder:A`; die Gruppe `group:eng`. Anne ist Eigentümerin des Readmes, Beto ist in eng, die Mitglieder von eng sehen das Readme, und Chen sieht Ordner A. Die [Modellierungsseite](../modeling/) enthält die Beziehungsmuster, auf denen diese Seite aufbaut.
 
 ## Was ein Tupel nicht sagen kann
 
@@ -51,7 +51,7 @@ Was trägt ein Check, und was fehlt?
 
 Die Antwort kann nur von gespeicherten Tupeln und dem Snapshot abhängen, den der zookie auswählt. Das macht sie cachebar und konsistent, schließt aber auch eine Bedingung an die Anfrage aus.
 
-Manche Anforderungen lassen sich in Relationen verbiegen. Ein Ablauf lässt sich durch einen Job umsetzen, der das Tupel löscht, wenn die Zeit um ist, mit dem Preis, dass der Zugriff bis zum Lauf des Jobs bestehen bleibt. Eine Menge erlaubter Netzwerke kann ein Objekt sein, zu dem die Anwendung den Aufrufer in Beziehung setzt. Ein Überweisungslimit geht nicht: Der Betrag ist kein Objekt, zu dem jemand in Beziehung steht. Das Paper behandelt keinen dieser Umwege.
+Manche Anforderungen lassen sich in Relationen pressen. Ein Ablauf lässt sich durch einen Job umsetzen, der das Tupel löscht, wenn die Zeit um ist, um den Preis, dass der Zugriff bis zum Lauf des Jobs bestehen bleibt. Eine Menge erlaubter Netzwerke kann ein Objekt sein, zu dem die Anwendung den Aufrufer in Beziehung setzt. Ein Überweisungslimit geht nicht: Der Betrag ist kein Objekt, zu dem jemand in Beziehung steht. Das Paper behandelt keinen dieser Umwege.
 
 ## SpiceDB-Caveats
 
@@ -237,13 +237,13 @@ rule check_ip_range(ip_range string[]) {
 
 *Permify-Schema; aus dem dokumentierten Beispiel kopiert mit Stand 2026-11-13; kein Validator wurde ausgeführt.*
 
-`ip_range` ist ein gespeichertes Attribut der Organisation; `context.data.ip` kommt mit der Check-Anfrage. Beträge passen in dieselbe Form; das Bankbeispiel auf der ABAC-Seite hat `permission withdraw = check_balance(balance) and owner`. Was ein Permify-Check zurückgibt, wenn `context.data` ein Wert fehlt, wurde auf den zitierten Seiten nicht gefunden und wird hier nicht behauptet.
+`ip_range` ist ein gespeichertes Attribut der Organisation; `context.data.ip` kommt mit der Check-Anfrage. Beträge passen in dieselbe Form; das Bankbeispiel auf der ABAC-Seite hat `permission withdraw = check_balance(balance) and owner`. Was ein Permify-Check zurückgibt, wenn in `context.data` ein Wert fehlt, wurde auf den zitierten Seiten nicht gefunden und wird hier nicht behauptet.
 
 ## Nebeneinander
 
 | | Paper | SpiceDB | OpenFGA | Permify |
 | --- | --- | --- | --- | --- |
-| Wo die Bedingung liegt | Nirgends: Tupel haben vier Teile (§2.1) | An einer Beziehung: ein benanntes Caveat, das im Schema per `with` erlaubt wird | An einem Tupel: eine benannte Condition, die in der Typbeschränkung per `with` erlaubt wird | In einer `rule`, die eine Berechtigung aufruft, über `attribute`s von Entitäten und Anfragekontext |
+| Wo die Bedingung liegt | Nirgends: Ein Tupel besteht nur aus Objekt, Relation und Benutzer (§2.1) | An einer Beziehung: ein benanntes Caveat, das im Schema per `with` erlaubt wird | An einem Tupel: eine benannte Condition, die in der Typbeschränkung per `with` erlaubt wird | In einer `rule`, die eine Berechtigung aufruft, über `attribute`s von Entitäten und Anfragekontext |
 | Ausdruckssprache | Keine | CEL | CEL | „Auf Grundlage von“ CEL |
 | Tatsachen zur Anfragezeit | Keine; Check trägt Userset, Benutzer und zookie (§2.4.4) | `context` bei `CheckPermission` | `context` bei Check; kontextuelle Tupel | `context` (`context.data`) |
 | Gespeicherter Wert vs. Anfragewert | Nicht anwendbar | Beziehung gewinnt | Persistierter Kontext gewinnt | Nicht verifiziert |
@@ -254,7 +254,7 @@ Die Quellen für jede Zelle stehen in den Abschnitten oben.
 
 ## Wie Cedar Zanzibar einordnet
 
-Cedar ist eine Richtliniensprache, deren Paper sie als nativ RBAC und ABAC unterstützend beschreibt. Das Paper (Cutler et al., "Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)", [arXiv:2403.04651v2](https://arxiv.org/abs/2403.04651), 2024-03-08) behandelt Zanzibar in seinen verwandten Arbeiten (§6). Es nennt Zanzibar "a highly scalable, relationship-based access control (ReBAC) system" (ein hoch skalierbares System für beziehungsbasierte Zugriffskontrolle (ReBAC)) und sagt, "Zanzibar supports RBAC and ReBAC with a natural syntax, and with policy validation" (Zanzibar unterstützt RBAC und ReBAC mit einer natürlichen Syntax und mit Richtlinienvalidierung), dass "forbid-style policies are supported by expressing one relationship in terms of non-membership in some other relation" (Richtlinien im forbid-Stil unterstützt werden, indem eine Beziehung über die Nichtzugehörigkeit zu einer anderen Relation ausgedrückt wird) und dass "it does not support ABAC, string matching, or search." (es ABAC, String-Matching oder Suche nicht unterstützt.) Cedar beschreibt es umgekehrt: "Cedar natively supports RBAC and ABAC, can encode ReBAC, and supports forbid policies." (Cedar unterstützt RBAC und ABAC nativ, kann ReBAC kodieren und unterstützt forbid-Richtlinien.)
+Cedar ist eine Richtliniensprache, deren Paper ihr native Unterstützung für RBAC und ABAC zuschreibt. Das Paper (Cutler et al., "Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)", [arXiv:2403.04651v2](https://arxiv.org/abs/2403.04651), 2024-03-08) behandelt Zanzibar in seinen verwandten Arbeiten (§6). Es nennt Zanzibar "a highly scalable, relationship-based access control (ReBAC) system" (ein hoch skalierbares System für beziehungsbasierte Zugriffskontrolle (ReBAC)) und sagt, "Zanzibar supports RBAC and ReBAC with a natural syntax, and with policy validation" (Zanzibar unterstützt RBAC und ReBAC mit einer natürlichen Syntax und mit Richtlinienvalidierung), dass "forbid-style policies are supported by expressing one relationship in terms of non-membership in some other relation" (Richtlinien im forbid-Stil unterstützt werden, indem eine Beziehung über die Nichtzugehörigkeit zu einer anderen Relation ausgedrückt wird) und dass "it does not support ABAC, string matching, or search." (es ABAC, String-Matching oder Suche nicht unterstützt.) Cedar beschreibt es umgekehrt: "Cedar natively supports RBAC and ABAC, can encode ReBAC, and supports forbid policies." (Cedar unterstützt RBAC und ABAC nativ, kann ReBAC kodieren und unterstützt forbid-Richtlinien.)
 
 Das Cedar-Paper beschreibt das Zanzibar-Paper von 2019; seine Experimente verwenden OpenFGA, das es als "a recently developed language for specifying relationship-based access control (ReBAC) [43] policies" (eine kürzlich entwickelte Sprache zur Spezifikation von Richtlinien für beziehungsbasierte Zugriffskontrolle (ReBAC) [43]) vorstellt, wobei Referenz 43 das Zanzibar-Paper ist (§1). Die obigen Caveats und Conditions sind Produkterweiterungen, die die Einordnung des Papers nicht abdeckt. Sein Satz zum „forbid-Stil“ ist das Ausschlussmuster auf der [Modellierungsseite](../modeling/#sperrlisten-ausschluss).
 
@@ -265,7 +265,7 @@ Bedingungen im Autorisierungsdienst sind nicht umsonst. Dieser Abschnitt ist ein
 - **Die Tatsache existiert nur in der Anfrage.** Ein Überweisungsbetrag oder die IP-Adresse des Aufrufers ist zuerst der Anwendung bekannt. Ihn als Kontext zu übergeben funktioniert, aber der Dienst wertet ihn nur aus; er kann ihn weder speichern noch auflisten noch auditieren. Eine Regel wie „Betrag höchstens 1.000“, die die Anwendung nach der Beziehungsprüfung prüft, ist oft einfacher und hält die Antworten des Autorisierungsdienstes cachebar.
 - **Auflisten und Indexieren brauchen gespeicherte Tatsachen.** Expand existiert im Paper, damit Clients "build efficient search indices for access-controlled content" (§2.4.5) (effiziente Suchindizes für zugriffskontrollierte Inhalte aufbauen) können. Eine Berechtigung, die von der Anfrage abhängt, kann nicht im Voraus indexiert werden; der Leitfaden von OpenFGA sagt das über kontextuelle Tupel, und eine SpiceDB-Prüfung kann `CONDITIONAL_PERMISSION` liefern, bis der Aufrufer den Kontext angibt.
 - **Zeitlimits gehören in den Speicher.** Ablauf ist eine Eigenschaft der Berechtigung, nicht der Anfrage. Eingebauter Ablauf (SpiceDB) oder eine Condition am gespeicherten Tupel (OpenFGA) hält ihn neben der Berechtigung, wo ein Audit von „wer konnte das Readme letzten Dienstag sehen“ ihn sehen kann.
-- **Attribute, die sich oft ändern, sind als Kontext günstiger als als Tupel.** Jedes Mal ein Tupel zu schreiben, wenn sich der Standort eines Benutzers oder der Status eines Dokuments ändert, macht jede Änderung zu einem doppelten Schreibvorgang. Eine gegen Anfragekontext ausgewertete Condition vermeidet das, mit dem Preis, dem Aufrufer zu vertrauen, dass er die richtigen Werte sendet.
+- **Attribute, die sich oft ändern, sind als Kontext günstiger als als Tupel.** Jedes Mal ein Tupel zu schreiben, wenn sich der Standort eines Benutzers oder der Status eines Dokuments ändert, macht jede Änderung zu einem doppelten Schreibvorgang. Eine gegen Anfragekontext ausgewertete Condition vermeidet das, um den Preis, dass man dem Aufrufer vertrauen muss, die richtigen Werte zu senden.
 
 <Callout kind="paper" title="Im Paper">
 
@@ -282,9 +282,9 @@ Die Tupelgrammatik und ihr Primärschlüssel: §2.1. Der Zeilenschlüssel im Spe
 - AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
 - AuthZed, [`dispatch.proto`](https://github.com/authzed/spicedb/blob/main/proto/internal/dispatch/v1/dispatch.proto)
 - Google, [CEL-Spezifikation](https://github.com/google/cel-spec)
-- OpenFGA, [conditions](https://openfga.dev/docs/modeling/conditions)
-- OpenFGA, [contextual and time-based authorization](https://openfga.dev/docs/modeling/contextual-time-based-authorization)
+- OpenFGA, [Conditions-Leitfaden](https://openfga.dev/docs/modeling/conditions)
+- OpenFGA, [Leitfaden zu kontextueller und zeitbasierter Autorisierung](https://openfga.dev/docs/modeling/contextual-time-based-authorization)
 - Andres Aguiar, [Conditional Relationship Tuples for OpenFGA](https://openfga.dev/blog/conditional-tuples-announcement), OpenFGA-Blog, 2023-11-06
-- Permify, [ABAC use case](https://fusionauth.io/permify-docs/use-cases/abac) und [modeling guide](https://fusionauth.io/permify-docs/getting-started/modeling)
+- Permify, [ABAC-Anwendungsfall](https://fusionauth.io/permify-docs/use-cases/abac) und [Modellierungsleitfaden](https://fusionauth.io/permify-docs/getting-started/modeling)
 - Permify, [An Exciting New Chapter: Permify Joins FusionAuth](https://permify.co/post/fusionauth-acquires-permify/), 2025-11-20
 - Joseph W. Cutler et al., [Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)](https://arxiv.org/abs/2403.04651), arXiv:2403.04651v2, 2024-03-08

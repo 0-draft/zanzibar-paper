@@ -76,7 +76,7 @@ Spanner 從具有已知誤差界限的同步時鐘取得特性 ①，代價是�
   caption="中間這一欄需要應用程式層的協助。"
 />
 
-請注意，單一主資料庫的資料庫可以免費取得特性 ①，因為一台伺服器會依序看到每一次提交；它們放棄的是論文的全球複製。CockroachDB 會在全球複製，但只部分提供特性 ①。下一節談的就是這個缺口。
+請注意，只有單一主節點的資料庫可以免費取得特性 ①，因為一台伺服器會依序看到每一次提交；它們放棄的是論文的全球複製。CockroachDB 會在全球複製，但只部分提供特性 ①。下一節談的就是這個缺口。
 
 ## CockroachDB：重疊鍵規則
 
@@ -158,7 +158,7 @@ AuthZed 發現共用的讀取並不足夠："we needed both transactions to writ
 
 ## PostgreSQL 與 MySQL：由單一主資料庫決定
 
-單一主資料庫的資料庫本來就會依序看到每一次提交，因此特性 ① 不需要時鐘。尚待解決的是特性 ②：讀取可能會送往一個落後的副本。
+只有單一主節點的資料庫本來就會依序看到每一次提交，因此特性 ① 不需要時鐘。尚待解決的是特性 ②：讀取可能會送往一個落後的副本。
 
 SpiceDB 的 PostgreSQL 驅動程式完全不使用時間來排序。revision 是來自 `pg_current_xact_id()` 與 `pg_current_snapshot()` 的交易 ID 與快照；驅動程式中的一段註解寫道 "timestamps cannot be used for ordering transactions in PG"（在 PG 中不能用時間戳記來排序交易），以及兩個快照可能 "mutually uncomparable"（彼此無法比較）（[`postgres/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/postgres/revisions.go)，v1.57.1）。在 `x` 提交之後取得的快照會將 `x` 列為已提交，這就是以 PostgreSQL 自己的術語表述的特性 ①。MySQL 驅動程式會在一張交易表中寫入一列，其 `id` 為 `AUTO_INCREMENT`，並以該 id 作為 revision（[`migrations`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/migrations/zz_migration.0001_initial_schema.go)、[`revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/revisions.go)）。在另一次寫入提交之後才開始的寫入，會較晚插入其列，因此得到較大的 id；這個推論是本頁的，SpiceDB 的文件中並未陳述。
 

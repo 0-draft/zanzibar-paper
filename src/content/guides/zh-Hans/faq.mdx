@@ -24,11 +24,11 @@ paper: ["1", "2.1", "2.2", "2.3.1", "2.4.4", "2.4.5", "3", "3.1.1", "3.2.3", "3.
 
 ## 99.999% 的可用性意味着每年约五分钟的停机时间
 
-论文衡量的不是时钟时间。"We define availability as the fraction of 'qualified' RPCs the service answers successfully within latency thresholds: 5 seconds for a Safe request, and 15 seconds for a Recent request"（我们把可用性定义为服务在延迟阈值内成功应答的“合格” RPC 所占的比例：Safe 请求为 5 秒，Recent 请求为 15 秒）（§4.3）。它通过探测器重放抽样请求来测量，并汇总 "success ratios over 90-day windows averaged across clusters"（在各集群间取平均的 90 天窗口内的成功率）；以时间计，论文说 "for every quarter, Zanzibar has less than 2 minutes of global downtime and fewer than 13 minutes when the global error ratio exceeds 10%"（每个季度，Zanzibar 的全局停机时间少于 2 分钟，全局错误率超过 10% 的时间少于 13 分钟）（§4.3）。在 2019 年的 HN 讨论中，一位把该数字换算成每年分钟数的读者被人用 §4.3 的定义纠正了（[HN 20132520](https://news.ycombinator.com/item?id=20132520)）。
+论文衡量的不是时钟时间。"We define availability as the fraction of 'qualified' RPCs the service answers successfully within latency thresholds: 5 seconds for a Safe request, and 15 seconds for a Recent request"（我们把可用性定义为服务在延迟阈值内成功应答的“合格”RPC 所占的比例：Safe 请求为 5 秒，Recent 请求为 15 秒）（§4.3）。它通过探测器重放抽样请求来测量，并汇总 "success ratios over 90-day windows averaged across clusters"（在各集群间取平均的 90 天窗口内的成功率）；以时间计，论文说 "for every quarter, Zanzibar has less than 2 minutes of global downtime and fewer than 13 minutes when the global error ratio exceeds 10%"（每个季度，Zanzibar 的全局停机时间少于 2 分钟，全局错误率超过 10% 的时间少于 13 分钟）（§4.3）。在 2019 年的 HN 讨论中，一位把该数字换算成每年分钟数的读者被人用 §4.3 的定义纠正了（[HN 20132520](https://news.ycombinator.com/item?id=20132520)）。
 
 ## 论文只报告了 p95 延迟
 
-摘要只提到了第 95 百分位，但评估部分走得更远。表 2 给出了 Check、Read、Expand 和 Write 的第 50、95 和 99 百分位；Safe 检查分别为 3.0、9.46 和 15.0 毫秒（§4.2）。图 4 补充了第 99.9 百分位："At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively"（在第 50、95、99 和 99.9 百分位，其峰值分别约为 3、11、20 和 93 毫秒）（§4.2）。Recent 各行在尾部要慢得多（Check 的 p95 为 60.0 毫秒），这正是论文把两类请求分开报告的原因（§4.1）。
+摘要只提到了第 95 百分位，但评估部分不止于此。表 2 给出了 Check、Read、Expand 和 Write 的第 50、95 和 99 百分位；Safe 检查分别为 3.0、9.46 和 15.0 毫秒（§4.2）。图 4 补充了第 99.9 百分位："At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively"（在第 50、95、99 和 99.9 百分位，其峰值分别约为 3、11、20 和 93 毫秒）（§4.2）。Recent 各行在尾部要慢得多（Check 的 p95 为 60.0 毫秒），这正是论文把两类请求分开报告的原因（§4.1）。
 
 ## ACL 条目的顺序很重要，拒绝是一种否定条目
 
@@ -52,11 +52,11 @@ Zanzibar 本身并没有使用图数据库："Zanzibar stores ACLs and their met
 
 ## Zanzibar 完全做不了 ABAC，或者原生支持 ABAC
 
-两种说法都不对。论文没有属性条件：其关系配置用并集、交集和排除组合用户集（§2.3.1），元组中也没有存放上下文的字段（§2.1）。各产品以扩展的形式加入了条件：SpiceDB 用 CEL 编写的 caveat、OpenFGA 的条件、Permify 的属性和规则（见 [ACL、RBAC、ABAC、ReBAC](../access-control-models/)）。在 2021 年 HN 上关于 Oso 的 “Why Authorization Is Hard” 的讨论中，一位 AuthZed 创始人反驳了“ReBAC 系统无法实现 ABAC”的说法，而该文作者也同意 Zanzibar 风格的系统可以与策略引擎搭配使用（[HN 28543457](https://news.ycombinator.com/item?id=28543457)）。
+两种说法都不对。论文没有属性条件：其关系配置用并集、交集和排除组合用户集（§2.3.1），元组中也没有存放上下文的字段（§2.1）。各产品以扩展的形式加入了条件：SpiceDB 用 CEL 编写的 caveat、OpenFGA 的条件、Permify 的属性和规则（见 [ACL、RBAC、ABAC、ReBAC](../access-control-models/)）。在 2021 年 HN 上关于 Oso 的“Why Authorization Is Hard”的讨论中，一位 AuthZed 创始人反驳了“ReBAC 系统无法实现 ABAC”的说法，而该文作者也同意 Zanzibar 风格的系统可以与策略引擎搭配使用（[HN 28543457](https://news.ycombinator.com/item?id=28543457)）。
 
 ## 需要 TrueTime 或原子钟
 
-你需要的是一种对写入排序并读取一致快照的方法；TrueTime 是 Google 获得这种方法的途径。论文 "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness"（依靠其底层数据库系统 Spanner 来同时提供外部一致性和有界陈旧度的快照读）（§5）。AuthZed 描述了 SpiceDB 如何在其他地方获得同样的顺序：在只对重叠键提供外部一致性的 CockroachDB 上，其默认策略让 "all relationship writes touch the same row"（所有关系写入都涉及同一行）；PostgreSQL 直接提供外部一致性，但需要在其上加上快照读（[AuthZed 博客，2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)）。某个产品能否保持 new enemy 保证，取决于这些细节，而不是时钟硬件；参见[一致性、快照与 zookie](../consistency/)。
+你需要的是一种对写入排序并读取一致快照的方法；TrueTime 是 Google 获得这种方法的途径。论文 "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness"（依靠其底层数据库系统 Spanner 来同时提供外部一致性和有界陈旧度的快照读）（§5）。AuthZed 描述了 SpiceDB 如何在其他数据库上获得同样的顺序：在只对重叠键提供外部一致性的 CockroachDB 上，其默认策略让 "all relationship writes touch the same row"（所有关系写入都涉及同一行）；PostgreSQL 直接提供外部一致性，但需要在其上加上快照读（[AuthZed 博客，2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)）。某个产品能否保持“new enemy”保证，取决于这些细节，而不是时钟硬件；参见[一致性、快照与 zookie](../consistency/)。
 
 ## 来源
 

@@ -207,7 +207,7 @@ Check 請求指定一個使用者集合 ⟨*object#relation*⟩ 與一名使用�
 
 <Callout kind="note" title="是分格，不是時間軸">
 
-這幾格一次只走一個分支，讓每一格都能單獨閱讀。Zanzibar 並不會像這樣等待：它會評估 "all leaf nodes of the boolean expression tree concurrently"（布林運算式樹的所有葉節點，同時進行），並在某個節點決定結果後取消該子樹其餘的評估（§3.2.3）。
+這幾格一次只走一個分支，讓每一格都能單獨閱讀。Zanzibar 並不會像這樣等待：它會同時評估 "all leaf nodes of the boolean expression tree concurrently"（布林運算式樹的所有葉節點），並在某個節點決定結果後取消該子樹其餘的評估（§3.2.3）。
 
 </Callout>
 

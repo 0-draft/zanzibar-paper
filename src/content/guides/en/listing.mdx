@@ -21,7 +21,7 @@ Check starts at one object and walks the tuples until it finds the user or runs 
 
 The list also needs data that the authorization service does not hold. OpenFGA's guide puts it this way: the service "does not store object metadata (names of files, creation dates, time of last update, etc)", so search "will require data from your database" ([OpenFGA, Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)). Filtering and sorting happen in your database; authorization happens in the other service; the answer is the intersection of the two.
 
-The paper knows this use case well. Its first stated motivation for a unified system includes "a search index that respects access control and works across applications" (§1), and its latency goal singles out "serving search results, which often require tens to hundreds of checks" (§1).
+The paper knows this use case well. Among the advantages it gives for a unified system is "a search index that respects access control and works across applications" (§1), and its latency goal singles out "serving search results, which often require tens to hundreds of checks" (§1).
 
 ## What the paper offers, and what it does not
 

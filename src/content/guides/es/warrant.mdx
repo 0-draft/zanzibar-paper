@@ -22,11 +22,11 @@ import Swimlane from "../../../components/diagram/Swimlane.astro";
 
 Warrant es un servicio de autorización escrito en Go. Su README describe "a relationship based access control (ReBAC) engine (inspired by Google Zanzibar)" (un motor de control de acceso basado en relaciones, ReBAC, inspirado en Google Zanzibar) que también cubre reglas basadas en roles y en atributos, y escribe una relación como `[user:1] is an [editor] of [document:docA]` ([README](https://github.com/warrant-dev/warrant)). Una relación almacenada se llama *warrant*.
 
-WorkOS adquirió Warrant en 2024. La fecha, 2024-04-23, procede de una publicación de WorkOS en X ([publicación](https://x.com/WorkOS/status/1782774170146791776)): X no sirvió la página al verificador de este sitio, así que la fecha se dedujo del ID de la publicación, y su texto ("Today, we are excited to announce the acquisition of @warrant_dev", hoy nos complace anunciar la adquisición de @warrant_dev) solo se vio en un resultado de búsqueda. No se encontró ninguna entrada de blog de primera mano de WorkOS. El sitio web de Warrant dice ahora "Warrant —> Now WorkOS FGA" (Warrant —> ahora WorkOS FGA) ([warrant.dev](https://warrant.dev)), y el README enlaza a la documentación de WorkOS FGA.
+WorkOS adquirió Warrant en 2024. La fecha, 2024-04-23, procede de una publicación de WorkOS en X ([publicación](https://x.com/WorkOS/status/1782774170146791776)): X no sirvió la página al verificador de este sitio, así que la fecha se dedujo del ID de la publicación, y su texto ("Today, we are excited to announce the acquisition of @warrant_dev", hoy nos complace anunciar la adquisición de @warrant_dev) solo se vio en un resultado de búsqueda. No se encontró ninguna entrada en el blog propio de WorkOS. El sitio web de Warrant dice ahora "Warrant —> Now WorkOS FGA" (Warrant —> ahora WorkOS FGA) ([warrant.dev](https://warrant.dev)), y el README enlaza a la documentación de WorkOS FGA.
 
 ## El artículo y Warrant, uno al lado del otro
 
-El sitio de documentación de Warrant ya no existe, así que esta tabla se basa en el código de código abierto.
+El sitio de documentación de Warrant ya no existe, así que esta tabla se basa en el código abierto.
 
 | En el artículo | En Warrant (código abierto) |
 | --- | --- |
@@ -119,8 +119,8 @@ Los cinco warrants del ejemplo de referencia, como cuerpos de `POST /v2/warrants
 <Graph
   width={600}
   height={240}
-  title="Despliegue de Warrant, según el código de código abierto"
-  desc="El servicio llama a un único servicio HTTP de Warrant. Las escrituras, y las lecturas que llevan Warrant-Token latest, van a la base de datos SQL primaria. Las demás lecturas van al grupo de lectura cuando hay configurado un DSN de lectura."
+  title="Despliegue de Warrant, según el código abierto"
+  desc="Su servicio llama a un único servicio HTTP de Warrant. Las escrituras, y las lecturas que llevan Warrant-Token latest, van a la base de datos SQL primaria. Las demás lecturas van al grupo de lectura cuando hay configurado un DSN de lectura."
   nodes={[
     { id: "app", x: 90, y: 120, label: "Su servicio", kind: "client" },
     { id: "w", x: 300, y: 120, label: "Servicio HTTP\nde Warrant", kind: "server" },
@@ -137,7 +137,7 @@ Los cinco warrants del ejemplo de referencia, como cuerpos de `POST /v2/warrants
 
 - Un único servicio en Go sirve la API HTTP ([router.go](https://github.com/warrant-dev/warrant/blob/main/pkg/service/router.go)).
 - Las configuraciones de MySQL y PostgreSQL aceptan un `dsn` y un `readerDsn` opcional ([config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)); SQLite también se admite, "in-memory or file" (en memoria o en archivo) ([README](https://github.com/warrant-dev/warrant)).
-- La regla para elegir un grupo de conexiones es un comentario en [sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go): usar el de escritura si la llamada es una escritura, si no hay lector, si el contexto "contains 'latest' wookie" (contiene un wookie 'latest') o si código interno del servidor ha forzado el de escritura; en otro caso, usar el de lectura.
+- La regla para elegir un grupo de conexiones es un comentario en [sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go): usar el de escritura si la llamada es una escritura, si no hay grupo de lectura, si el contexto "contains 'latest' wookie" (contiene un wookie 'latest') o si código interno del servidor ha forzado el de escritura; en otro caso, usar el de lectura.
 
 ## Consistencia
 
@@ -181,7 +181,7 @@ Obsérvese la diferencia con el artículo. Un zookie fija una cota inferior, lo 
 ## Estado
 
 - Código abierto: primera versión v0.1.0 el 2023-02-23; última versión v1.15.1 el 2024-06-10; último commit el 2025-12-05, un cambio en el README; no archivado; unas 1.3k estrellas ([versiones](https://github.com/warrant-dev/warrant/releases), API de GitHub, 2026-11-13).
-- Empresa: adquirida por WorkOS, anunciado en X el 2024-04-23 (véase más arriba; la publicación en sí no pudo cargarse).
+- Empresa: adquirida por WorkOS, con anuncio en X el 2024-04-23 (véase más arriba; la publicación en sí no pudo cargarse).
 - Producto: WorkOS FGA. Su documentación actual no menciona Warrant ni Zanzibar. Presenta FGA como una extensión del RBAC de WorkOS: "You configure resource types in the WorkOS Dashboard" (los tipos de recurso se configuran en el panel de WorkOS), y FGA "can be adopted incrementally, with no data migration or confusing schema DSL" (puede adoptarse de forma incremental, sin migración de datos ni un DSL de esquema confuso) ([documentación de WorkOS FGA](https://workos.com/docs/fga), escrita por el proveedor). El JSON de tipos de objeto de esta página es el formato de código abierto, no el de WorkOS FGA.
 
 ## Fuentes

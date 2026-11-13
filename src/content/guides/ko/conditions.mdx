@@ -132,7 +132,7 @@ caveat가 붙은 검사는 예도 아니요도 아닌 채로 끝날 수 있다. 
 
 ### 만료되는 관계
 
-만료는 caveat의 흔한 용도였다. 이에 관한 AuthZed의 글은 많은 사용자가 만료 외에는 아무것도 원하지 않았다고 말하며, 내장 형태를 소개한다. 관계는 선택적인 만료 시각을 가지며, 스키마는 `use expiration`과 `with expiration`으로 이를 선택한다. 글에 따르면 이 기능은 SpiceDB v1.40에서 `--enable-experimental-relationship-expiration` 뒤의 실험적 기능으로 출시되었다([AuthZed 블로그, 2025-02-13](https://authzed.com/blog/the-evolution-of-expiration)).
+만료는 caveat의 흔한 용도였다. 이에 관한 AuthZed의 글은 많은 사용자가 만료 외에는 아무것도 원하지 않았다고 말하며, 내장 형태를 소개한다. 관계는 선택적인 만료 시각을 가지며, 스키마는 `use expiration`과 `with expiration`으로 이 기능을 켠다. 글에 따르면 이 기능은 SpiceDB v1.40에서 `--enable-experimental-relationship-expiration` 뒤의 실험적 기능으로 출시되었다([AuthZed 블로그, 2025-02-13](https://authzed.com/blog/the-evolution-of-expiration)).
 
 ```text
 use expiration
@@ -174,7 +174,7 @@ condition non_expired_grant(current_time: timestamp, grant_time: timestamp, gran
 
 튜플 `user:chen`, `viewer`, `doc:readme`는 조건 이름 `non_expired_grant`, 그리고 `grant_time`과 `grant_duration`의 컨텍스트와 함께 기록된다(가이드의 예는 `2023-01-01T00:00:00Z`와 `10m`을 쓴다). 각 Check는 `current_time`을 전달한다. 가이드의 두 검사가 결과를 보여 준다. `00:09:50`에는 allowed가 `true`이고, `00:10:01`에는 `false`다. SpiceDB와 마찬가지로 저장된 컨텍스트와 요청 컨텍스트는 "merged together into a single evaluation context"(하나의 평가 컨텍스트로 병합되며), "persisted context has higher precedence than request context"(저장된 컨텍스트가 요청 컨텍스트보다 우선한다)(조건 가이드).
 
-SpiceDB와 다른 점이 두 가지 있다. 컨텍스트 누락은 세 번째 답이 아니라 오류다. "If you don't provide the current_time in the context, the Check and ListObjects operations will fail"(컨텍스트에 current_time을 제공하지 않으면 Check와 ListObjects 작업은 실패한다)이며, 메시지는 "failed to evaluate relationship condition 'non_expired_grant': context is missing parameters '[current_time]'"이다([OpenFGA 블로그, 2023-11-06](https://openfga.dev/blog/conditional-tuples-announcement)). 그리고 문서화된 한도가 있다. 저장된 컨텍스트는 "is limited to 32KB in size"(크기가 32KB로 제한된다), 서버는 "a maximum Google CEL expression evaluation cost of 100 (by default)"(Google CEL 표현식 평가 비용 최대 100(기본값))을 강제한다(조건 가이드). 같은 블로그 글은 이 기능을 OpenFGA 1.4.0-rc1로 날짜를 매긴다.
+SpiceDB와 다른 점이 두 가지 있다. 컨텍스트 누락은 세 번째 답이 아니라 오류다. "If you don't provide the current_time in the context, the Check and ListObjects operations will fail"(컨텍스트에 current_time을 제공하지 않으면 Check와 ListObjects 작업은 실패한다)이며, 메시지는 "failed to evaluate relationship condition 'non_expired_grant': context is missing parameters '[current_time]'"이다([OpenFGA 블로그, 2023-11-06](https://openfga.dev/blog/conditional-tuples-announcement)). 그리고 문서화된 한도가 있다. 저장된 컨텍스트는 "is limited to 32KB in size"(크기가 32KB로 제한된다), 서버는 "a maximum Google CEL expression evaluation cost of 100 (by default)"(Google CEL 표현식 평가 비용 최대 100(기본값))을 강제한다(조건 가이드). 같은 블로그 글은 이 기능이 OpenFGA 1.4.0-rc1에서 나왔다고 밝힌다.
 
 ### 컨텍스트 튜플
 
@@ -221,7 +221,7 @@ IP 매칭이 어디에서 일어났는지에 주목하라. 호출 전에 애플�
 
 ## Permify 속성과 규칙
 
-FusionAuth에 인수된다고 2025-11-20에 발표된 Permify([Permify, 2025-11-20](https://permify.co/post/fusionauth-acquires-permify/))는 관계에 조건을 저장하는 대신 엔터티에 속성을 저장한다. 스키마에는 `attribute`와 `rule`이 있으며, 문서는 "we design our schema language based on"(우리는 스키마 언어를 다음에 기반해 설계한다) CEL이라고 말한다([Permify ABAC 문서](https://fusionauth.io/permify-docs/use-cases/abac)). 다음은 Permify [모델링 가이드](https://fusionauth.io/permify-docs/getting-started/modeling)의 예다.
+FusionAuth에 인수된다고 2025-11-20에 발표된 Permify([Permify, 2025-11-20](https://permify.co/post/fusionauth-acquires-permify/))는 관계에 조건을 저장하는 대신 엔터티에 속성을 저장한다. 스키마에는 `attribute`와 `rule`이 있으며, 문서는 "we design our schema language based on" CEL(스키마 언어를 CEL에 기반해 설계한다)이라고 말한다([Permify ABAC 문서](https://fusionauth.io/permify-docs/use-cases/abac)). 다음은 Permify [모델링 가이드](https://fusionauth.io/permify-docs/getting-started/modeling)의 예다.
 
 ```text
 entity organization {
@@ -243,7 +243,7 @@ rule check_ip_range(ip_range string[]) {
 
 | | 논문 | SpiceDB | OpenFGA | Permify |
 | --- | --- | --- | --- | --- |
-| 조건이 있는 곳 | 없음: 튜플은 네 부분으로 이루어진다(§2.1) | 관계에: 스키마의 `with`로 허용되는 이름 붙은 caveat | 튜플에: 타입 제약의 `with`로 허용되는 이름 붙은 조건 | 권한이 호출하는 `rule`에: 엔터티 `attribute`와 요청 컨텍스트를 대상으로 |
+| 조건이 있는 곳 | 없음: 튜플은 객체, 관계, 사용자뿐이다(§2.1) | 관계에: 스키마의 `with`로 허용되는 이름 붙은 caveat | 튜플에: 타입 제약의 `with`로 허용되는 이름 붙은 조건 | 권한이 호출하는 `rule`에: 엔터티 `attribute`와 요청 컨텍스트를 대상으로 |
 | 표현식 언어 | 없음 | CEL | CEL | CEL에 "기반" |
 | 요청 시점의 사실 | 없음. Check는 유저셋, 사용자, zookie를 담는다(§2.4.4) | `CheckPermission`의 `context` | Check의 `context`, 컨텍스트 튜플 | `context`(`context.data`) |
 | 저장된 값과 요청 값 | 해당 없음 | 관계가 우선 | 저장된 컨텍스트가 우선 | 확인하지 않음 |

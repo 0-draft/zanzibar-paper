@@ -16,7 +16,7 @@ Das Paper beschreibt sein Datenmodell und seine Konfigurationssprache, gibt aber
 
 Diese Seite schreibt acht Anforderungen aus, die in der Praxis vorkommen. Jeder Abschnitt nennt die Frage, die das Muster beantwortet, die Tupel, die Regel in der Notation des Papers aus Abbildung 1, wo das Paper sie ausdrücken kann, dieselbe Regel in der Schemasprache von SpiceDB und in der DSL von OpenFGA sowie einen Graphen der Tupel, in dem der Pfad hervorgehoben ist, der die Antwort entscheidet. Die Liste der Muster folgt den [Modellierungsleitfäden](https://openfga.dev/docs/modeling) von OpenFGA; die [Tupelseite](../relation-tuples/) erklärt die Notation.
 
-Das durchgehende Beispiel: Anne, Beto und Chen (`user:anne`, `user:beto`, `user:chen`); das Dokument `doc:readme` in `folder:A`; die Gruppe `group:eng`. Anne ist Eigentümerin des Readme, Beto ist in eng, die Mitglieder von eng sehen das Readme, und Chen sieht Ordner A.
+Das durchgehende Beispiel: Anne, Beto und Chen (`user:anne`, `user:beto`, `user:chen`); das Dokument `doc:readme` in `folder:A`; die Gruppe `group:eng`. Anne ist Eigentümerin des Readmes, Beto ist in eng, die Mitglieder von eng sehen das Readme, und Chen sieht Ordner A.
 
 <Callout kind="note" title="Wie die Schemas auf dieser Seite geprüft wurden">
 
@@ -315,7 +315,7 @@ group:eng#member@user:beto
 doc:readme#blocked@user:beto
 ```
 
-Das Paper führt den Ausschluss als Operator (§2.3.1) und als Knoten im Userset-Baum von Expand (§2.4.5), aber Abbildung 1 zeigt nicht, wie er geschrieben wird. Der folgende Block übernimmt die Form von Abbildung 1 mit `exclusion` anstelle von `union`; das Schlüsselwort und die Regel, dass das erste Kind die Basis ist und das zweite abgezogen wird, sind Annahmen dieser Seite, nicht die Syntax des Papers.
+Das Paper nennt den Ausschluss als Operator (§2.3.1) und als Knoten im Userset-Baum von Expand (§2.4.5), aber Abbildung 1 zeigt nicht, wie er geschrieben wird. Der folgende Block übernimmt die Form von Abbildung 1 mit `exclusion` anstelle von `union`; das Schlüsselwort und die Regel, dass das erste Kind die Basis ist und das zweite abgezogen wird, sind Annahmen dieser Seite, nicht die Syntax des Papers.
 
 ```text
 relation { name: "blocked" }
@@ -509,7 +509,7 @@ doc:readme#viewer@role:reviewer#assignee
 doc:readme#editor@role:maintainer#assignee
 ```
 
-Im Paper ist das das Gruppenmuster mit einem anderen Namespace-Namen: `role` ist ein Namespace mit einer einfachen Relation, und das `viewer` des Readme speichert ein Userset, das darauf zeigt. Keine Regel ändert sich:
+Im Paper ist das das Gruppenmuster mit einem anderen Namespace-Namen: `role` ist ein Namespace mit einer einfachen Relation, und das `viewer` des Readmes speichert ein Userset, das darauf zeigt. Keine Regel ändert sich:
 
 ```text
 name: "role"
@@ -585,9 +585,9 @@ delete  doc:readme#owner@user:anne
 write   doc:readme#owner@user:beto
 ```
 
-Die Write-API des Papers deckt das ab. Clients "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control" (können auch alle Tupel eines Objekts über einen Read-Modify-Write-Prozess mit optimistischer Nebenläufigkeitskontrolle ändern): die Tupel des Objekts einschließlich eines „Lock“-Tupels pro Objekt lesen, die Schreibvorgänge "along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read" (zusammen mit einer Berührung des Lock-Tupels … mit der Bedingung, dass die Schreibvorgänge nur committet werden, wenn das Lock-Tupel seit dem Lesen nicht geändert wurde) senden und es andernfalls erneut versuchen (§2.4.2). Das Lock-Tupel verhindert, dass zwei gleichzeitige Übertragungen beide gelingen.
+Die Write-API des Papers deckt das ab. Clients "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control" (können auch alle Tupel eines Objekts über einen Read-Modify-Write-Prozess mit optimistischer Nebenläufigkeitskontrolle ändern): die Tupel des Objekts einschließlich eines „Lock“-Tupels pro Objekt lesen, die Schreibvorgänge "along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read" (zusammen mit einem Touch auf das Lock-Tupel … mit der Bedingung, dass die Schreibvorgänge nur committet werden, wenn das Lock-Tupel seit dem Lesen nicht geändert wurde) senden und es andernfalls erneut versuchen (§2.4.2). Das Lock-Tupel verhindert, dass zwei gleichzeitige Übertragungen beide gelingen.
 
-- **SpiceDB.** `WriteRelationships` "atomically writes and/or deletes a set of specified relationships" (schreibt und/oder löscht atomar eine Menge angegebener Beziehungen), und "if any preconditions fail, the entire transaction will be reverted" (wenn eine Vorbedingung fehlschlägt, wird die gesamte Transaktion rückgängig gemacht) ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). Eine Vorbedingung `MUST_MATCH` auf `doc:readme#owner@user:anne` spielt das Lock-Tupel des Papers: Die Übertragung schlägt fehl, wenn Anne nicht mehr Eigentümerin ist.
+- **SpiceDB.** `WriteRelationships` "atomically writes and/or deletes a set of specified relationships" (schreibt und/oder löscht atomar eine Menge angegebener Beziehungen), und "if any preconditions fail, the entire transaction will be reverted" (wenn eine Vorbedingung fehlschlägt, wird die gesamte Transaktion rückgängig gemacht) ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). Eine Vorbedingung `MUST_MATCH` auf `doc:readme#owner@user:anne` übernimmt die Rolle des Lock-Tupels aus dem Paper: Die Übertragung schlägt fehl, wenn Anne nicht mehr Eigentümerin ist.
 - **OpenFGA.** "You can combine both writes and deletes in a single transactional API request" (Sie können Schreib- und Löschvorgänge in einer einzigen transaktionalen API-Anfrage kombinieren), und "all operations in the request will either succeed together or fail together" (alle Operationen der Anfrage gelingen entweder gemeinsam oder scheitern gemeinsam), bis zu 100 Tupel pro Anfrage ([Tupel aktualisieren](https://openfga.dev/docs/getting-started/update-tuples)). Dieselbe Seite sagt, dass das Schreiben eines bereits existierenden Tupels "would normally cause the whole request to fail" (normalerweise die ganze Anfrage scheitern lassen würde), und bietet `on_missing: "ignore"` für "deleting tuples that might not exist" (das Löschen von Tupeln, die möglicherweise nicht existieren) an (OpenFGA v1.10.0 und später). Das legt nahe, dass das Löschen eines fehlenden Tupels die Anfrage standardmäßig scheitern lässt, wodurch das Löschen wie das Lock-Tupel wirken würde; die Seite nennt diesen Standard nicht ausdrücklich, und er wurde hier nicht ausprobiert.
 
 Was ändert sich?

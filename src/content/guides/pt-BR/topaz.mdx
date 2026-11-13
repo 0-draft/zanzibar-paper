@@ -42,7 +42,7 @@ O Topaz foi construído pela Aserto. Em 2025-04-27, a Aserto anunciou que estava
 | Leopard (§3.2.4) | Nenhum equivalente documentado |
 | Spanner (§3.1) | Um arquivo BoltDB embarcado ([arquitetura](https://www.topaz.sh/docs/architecture)) |
 
-## O exemplo em curso como manifesto do Topaz
+## O exemplo recorrente como manifesto do Topaz
 
 A Figura 1 do artigo torna os donos editores, os editores visualizadores, e os visualizadores da pasta pai visualizadores do documento (§2.3.1). Um manifesto do Topaz separa as `relations`, que contêm registros armazenados, das `permissions`, que são calculadas a partir de relações e de outras permissões.
 
@@ -80,7 +80,7 @@ types:
 Este manifesto segue a sintaxe documentada em 2026-11-13: a [referência do manifesto](https://www.topaz.sh/docs/directory/manifest-reference) e o exemplo dos mantenedores no estilo do Google Drive [assets/v34/gdrive/manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml), que também usa o nome de tipo `doc`. Ele não foi carregado no Topaz.
 </Callout>
 
-As cinco relações do exemplo em curso, no formato JSON lines dos dados de exemplo dos mantenedores ([gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)):
+As cinco relações do exemplo recorrente, no formato JSON lines dos dados de exemplo dos mantenedores ([gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)):
 
 ```json
 {"object_type":"doc","object_id":"readme","relation":"owner","subject_type":"user","subject_id":"anne"}
@@ -95,7 +95,7 @@ Qual registro e qual expressão de permissão decidem o `can_read` de cada pesso
 <Graph
   width={600}
   height={260}
-  title="O exemplo em curso como relações do Topaz"
+  title="O exemplo recorrente como relações do Topaz"
   desc="Cinco relações. O user anne é owner do doc readme. O user beto é member do group eng. group eng#member é viewer do doc readme. A folder A é parent do doc readme. O user chen é viewer da folder A. O caminho de Chen pela folder A está destacado: ele é resolvido pela seta parent->can_read."
   nodes={[
     { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
@@ -144,7 +144,7 @@ Onde uma decisão é executada, e onde ficam os dados de relacionamento?
   caption="Amarelo: componentes do Topaz. Verde: armazenamento. Azul: chamadores. Uma instância do Topaz é executada como sidecar ou microsserviço ao lado da aplicação."
 />
 
-- "The Authorizer exposes three APIs to the calling application" (o Authorizer expõe três APIs à aplicação chamadora): `authz/is`, `authz/query` e `authz/decisiontree`, cada uma "a POST or gRPC API" (uma API POST ou gRPC) ([arquitetura](https://www.topaz.sh/docs/architecture)).
+- "The Authorizer exposes three APIs to the calling application" (o autorizador expõe três APIs à aplicação chamadora): `authz/is`, `authz/query` e `authz/decisiontree`, cada uma "a POST or gRPC API" (uma API POST ou gRPC) ([arquitetura](https://www.topaz.sh/docs/architecture)).
 - As políticas alcançam o diretório por meio de built-ins do OPA, incluindo `ds.check`, `ds.check_relation` e `ds.check_permission` (mesma página).
 - "The directory is implemented as a BoltDB instance" (o diretório é implementado como uma instância do BoltDB) (mesma página). "Directory objects are loaded on-demand, in contrast to `data.json` files" (os objetos do diretório são carregados sob demanda, ao contrário dos arquivos `data.json`), que são carregados junto com a política.
 - "The authorizer captures and stores decision logs for every decision that it evaluates" (o autorizador captura e armazena logs de decisão para cada decisão que avalia) (mesma página).

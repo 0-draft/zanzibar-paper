@@ -49,7 +49,7 @@ Permify 还有论文没有描述的查找调用：`LookupEntity`、`LookupSubjec
 
 ## 用 Permify Schema 表示贯穿示例
 
-论文的图 1 为文档设定了三个同心关系：所有者是编辑者，编辑者是查看者，父文件夹的查看者是文档的查看者（§2.3.1）。下面是用 Permify Schema 写出、采用贯穿示例类型的该模型。
+论文的图 1 为文档设定了三个同心关系：所有者是编辑者，编辑者是查看者，父文件夹的查看者是文档的查看者（§2.3.1）。下面用 Permify Schema、按贯穿示例的类型写出这个模型。
 
 ```text
 entity user {}
@@ -78,7 +78,7 @@ entity doc {
 `@group#member` 让关系可以存放一个用户集：“该组的所有成员”。`parent.view` 沿着 `parent` 关系到达文件夹，并在那里评估文件夹的 `view` 权限；文档说 "The same traversal rule applies to both `relation.userset` and `relation.permission`"（同样的遍历规则既适用于 `relation.userset`，也适用于 `relation.permission`）（[建模](https://fusionauth.io/permify-docs/getting-started/modeling)）。
 
 <Callout title="对照文档核对，未实际运行">
-这个 schema 遵循截至 2026-11-13 的文档语法：[建模页面](https://fusionauth.io/permify-docs/getting-started/modeling)以及维护者的示例 [google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml)。它没有经过 Permify 验证器的运行。
+这个 schema 遵循截至 2026-11-13 的文档语法：[建模页面](https://fusionauth.io/permify-docs/getting-started/modeling)以及维护者的示例 [google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml)。它没有用 Permify 的验证器检查过。
 </Callout>
 
 贯穿示例是五个元组：

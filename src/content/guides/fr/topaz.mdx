@@ -1,6 +1,6 @@
 ---
 title: "Topaz"
-description: "Un service d’autorisation open source qui associe des politiques Open Policy Agent à un annuaire de type Zanzibar dans une base de données embarquée, maintenu par ses mainteneurs après la cessation d’activité d’Aserto en 2025."
+description: "Un service d’autorisation open source qui associe des politiques Open Policy Agent à un annuaire de type Zanzibar dans une base de données embarquée, pris en charge par ses mainteneurs après la cessation d’activité d’Aserto en 2025."
 section: ecosystem
 order: 5
 checked: "2026-11-13"
@@ -19,26 +19,26 @@ product:
 import Callout from "../../../components/diagram/Callout.astro";
 import Graph from "../../../components/diagram/Graph.astro";
 
-Topaz est un service d’autorisation écrit en Go. Il « uses the Open Policy Agent (OPA) as its decision engine, and provides a built-in directory that is inspired by the Google Zanzibar data model » (utilise Open Policy Agent (OPA) comme moteur de décision et fournit un annuaire intégré inspiré du modèle de données de Google Zanzibar) ([README](https://github.com/aserto-dev/topaz)). Une décision est prise par une politique Rego ; la politique peut demander à l’annuaire si une relation ou une permission existe entre un sujet et un objet, et c’est cette partie qui ressemble à Zanzibar. Les données de l’annuaire sont « modeled and stored locally in an embedded database » (modélisées et stockées localement dans une base de données embarquée) (même README).
+Topaz est un service d’autorisation écrit en Go. Il « uses the Open Policy Agent (OPA) as its decision engine, and provides a built-in directory that is inspired by the Google Zanzibar data model » (utilise Open Policy Agent (OPA) comme moteur de décision et fournit un annuaire intégré inspiré du modèle de données de Google Zanzibar) ([README](https://github.com/aserto-dev/topaz)). Une décision est prise par une politique Rego ; la politique peut demander à l’annuaire si une relation ou une permission existe entre un sujet et un objet, et c’est cette partie qui ressemble à Zanzibar. Les données de l’annuaire sont « modeled and stored locally in an embedded database » (modélisées et stockées localement dans une base de données embarquée) (même README).
 
-Topaz a été construit par Aserto. Le 2025-04-27, Aserto a annoncé qu’elle était en train de « sunsetting the Aserto SaaS control plane and will shut it down by May 31, 2025 » (mettre fin au plan de contrôle SaaS d’Aserto, qui sera arrêté d’ici le 31 mai 2025), qu’elle allait « wind down Aserto as a commercial entity » (cesser l’activité d’Aserto en tant qu’entité commerciale), et que « we have a set of maintainers that will continue to support Topaz » (nous avons un groupe de mainteneurs qui continueront à prendre en charge Topaz) ([blog d’Aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto), rédigé par l’éditeur). Les versions se sont poursuivies depuis. Les 30 commits les plus récents sur la branche par défaut, au 2026-11-13, sont tous d’un même auteur, Gert Drapers, qui a également signé le billet annonçant la cessation d’activité ([commits](https://github.com/aserto-dev/topaz/commits/main)).
+Topaz a été développé par Aserto. Le 2025-04-27, Aserto a annoncé qu’elle était en train de « sunsetting the Aserto SaaS control plane and will shut it down by May 31, 2025 » (mettre fin au plan de contrôle SaaS d’Aserto, qui sera arrêté d’ici le 31 mai 2025), qu’elle allait « wind down Aserto as a commercial entity » (cesser l’activité d’Aserto en tant qu’entité commerciale), et que « we have a set of maintainers that will continue to support Topaz » (nous avons un groupe de mainteneurs qui continueront à prendre en charge Topaz) ([blog d’Aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto), rédigé par l’éditeur). De nouvelles versions ont été publiées depuis. Les 30 commits les plus récents sur la branche par défaut, au 2026-11-13, sont tous d’un même auteur, Gert Drapers, qui a également signé le billet annonçant la cessation d’activité ([commits](https://github.com/aserto-dev/topaz/commits/main)).
 
 ## L’article et Topaz côte à côte
 
 | Dans l’article | Dans Topaz |
 | --- | --- |
 | Configuration d’espace de noms (§2.3) | Un type d’objet sous `types` dans le manifeste, un fichier YAML avec `model: version: 3` ([manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)) |
-| Tuple de relation `object#relation@user` (§2.1) | Un enregistrement de relation : `object_type`, `object_id`, `relation`, `subject_type`, `subject_id` et un `subject_relation` facultatif |
-| `_this` | Les enregistrements stockés d’une relation ; la relation énumère les types de sujets qu’elle accepte, comme `viewer: user \| group#member` |
+| Tuple de relation `object#relation@user` (§2.1) | Un enregistrement de relation : `object_type`, `object_id`, `relation`, `subject_type`, `subject_id` et un `subject_relation` facultatif |
+| `_this` | Les enregistrements stockés d’une relation ; la relation énumère les types de sujets qu’elle accepte, comme `viewer: user \| group#member` |
 | `computed_userset` | Nommer une autre relation ou permission du même type dans une permission |
 | `tuple_to_userset` | La flèche, comme `parent->can_read` |
 | Union, intersection, exclusion | `\|`, `&`, `-` |
 | Zookie (§2.2, §2.4) | Aucun documenté |
-| Check (§2.4.4) | `Reader.Check` et `Checks` de l’annuaire ; décisions de politique via `Authorizer.Is` ([reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)) |
+| Check (§2.4.4) | `Reader.Check` et `Checks` de l’annuaire ; décisions de politique via `Authorizer.Is` ([reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)) |
 | Read (§2.4.1) | `Reader.GetRelation`, `GetRelations` |
-| Write (§2.4.2) | `Writer.SetRelation`, `DeleteRelation` ([writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto)) ; chargements en masse via `Importer.Import` ([importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)) |
+| Write (§2.4.2) | `Writer.SetRelation`, `DeleteRelation` ([writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto)) ; chargements en masse via `Importer.Import` ([importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)) |
 | Watch (§2.4.3) | Aucun dans l’API de l’annuaire |
-| Expand (§2.4.5) | Pas d’appel Expand ; `Reader.GetGraph` (« get object relationship graph », obtenir le graphe des relations d’un objet) est le plus proche |
+| Expand (§2.4.5) | Pas d’appel Expand ; `Reader.GetGraph` (« get object relationship graph », obtenir le graphe des relations d’un objet) est le plus proche |
 | Leopard (§3.2.4) | Aucun équivalent documenté |
 | Spanner (§3.1) | Un fichier BoltDB embarqué ([architecture](https://www.topaz.sh/docs/architecture)) |
 
@@ -74,13 +74,13 @@ types:
       can_read: viewer | can_write | parent->can_read
 ```
 
-`group#member` accorde la relation à « everyone with the `member` relation to a specified `group` » (toute personne ayant la relation `member` avec un `group` donné), et la flèche « allows a permission to be granted to subjects who have a specified relation or permission with another object » (permet d’accorder une permission aux sujets qui ont une relation ou une permission donnée avec un autre objet) ([manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)). Les noms doivent être en minuscules et compter au plus 64 caractères.
+`group#member` accorde la relation à « everyone with the `member` relation to a specified `group` » (toute personne ayant la relation `member` avec un `group` donné), et la flèche « allows a permission to be granted to subjects who have a specified relation or permission with another object » (permet d’accorder une permission aux sujets qui ont une relation ou une permission donnée avec un autre objet) ([manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)). Les noms doivent être en minuscules et compter au plus 64 caractères.
 
 <Callout title="Vérifié par rapport à la documentation, non exécuté">
-Ce manifeste suit la syntaxe documentée au 2026-11-13 : la [manifest reference](https://www.topaz.sh/docs/directory/manifest-reference) et l’exemple des mainteneurs de type Google Drive [assets/v34/gdrive/manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml), qui utilise lui aussi le nom de type `doc`. Il n’a pas été chargé dans Topaz.
+Ce manifeste suit la syntaxe documentée au 2026-11-13 : la [manifest reference](https://www.topaz.sh/docs/directory/manifest-reference) et l’exemple de type Google Drive fourni par les mainteneurs, [assets/v34/gdrive/manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml), qui utilise lui aussi le nom de type `doc`. Il n’a pas été chargé dans Topaz.
 </Callout>
 
-Les cinq relations de l’exemple suivi, au format JSON Lines des données d’exemple des mainteneurs ([gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)) :
+Les cinq relations de l’exemple suivi, au format JSON Lines des données d’exemple des mainteneurs ([gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)) :
 
 ```json
 {"object_type":"doc","object_id":"readme","relation":"owner","subject_type":"user","subject_id":"anne"}
@@ -90,13 +90,13 @@ Les cinq relations de l’exemple suivi, au format JSON Lines des données d’e
 {"object_type":"folder","object_id":"A","relation":"viewer","subject_type":"user","subject_id":"chen"}
 ```
 
-Quel enregistrement et quelle expression de permission décident du `can_read` de chaque personne sur le readme ?
+Quel enregistrement et quelle expression de permission décident du `can_read` de chaque personne sur le readme ?
 
 <Graph
   width={600}
   height={260}
   title="L’exemple suivi sous forme de relations Topaz"
-  desc="Cinq relations. L’utilisateur anne est owner du doc readme. L’utilisateur beto est member du groupe eng. group eng#member est viewer du doc readme. Le dossier A est parent du doc readme. L’utilisateur chen est viewer du dossier A. Le chemin de Chen via le dossier A est mis en évidence : il est résolu par la flèche parent->can_read."
+  desc="Cinq relations. L’utilisateur anne est owner du doc readme. L’utilisateur beto est member du groupe eng. group eng#member est viewer du doc readme. Le dossier A est parent du doc readme. L’utilisateur chen est viewer du dossier A. Le chemin de Chen via le dossier A est mis en évidence : il est résolu par la flèche parent->can_read."
   nodes={[
     { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
     { id: "beto", x: 80, y: 130, label: "user:beto", kind: "subject", mono: true },
@@ -112,14 +112,14 @@ Quel enregistrement et quelle expression de permission décident du `can_read` d
     { from: "chen", to: "folder", label: "viewer", on: true },
     { from: "folder", to: "doc", label: "parent", on: true },
   ]}
-  caption="Anne : owner → can_write → can_read. Beto : la relation de sujet group#member. Chen : parent->can_read. Pointillés : une relation de sujet, et non un utilisateur unique."
+  caption="Anne : owner → can_write → can_read. Beto : la relation de sujet group#member. Chen : parent->can_read. Pointillés : une relation de sujet, et non un utilisateur unique."
 />
 
-On remarque que l’annuaire répond seul à cette question, via `Reader.Check`. La couche de politique est ce que Topaz ajoute par-dessus : une règle Rego peut appeler l’annuaire et combiner sa réponse avec des attributs de la requête.
+On remarque que l’annuaire répond seul à cette question, via `Reader.Check`. La couche de politique est ce que Topaz ajoute par-dessus : une règle Rego peut appeler l’annuaire et combiner sa réponse avec des attributs de la requête.
 
 ## Architecture
 
-Où une décision s’exécute-t-elle, et où résident les données de relations ?
+Où une décision s’exécute-t-elle, et où résident les données de relations ?
 
 <Graph
   width={620}
@@ -141,22 +141,22 @@ Où une décision s’exécute-t-elle, et où résident les données de relation
     { from: "dir", to: "bolt" },
     { from: "authz", to: "logs" },
   ]}
-  caption="Jaune : composants de Topaz. Vert : stockage. Bleu : appelants. Une instance Topaz s’exécute comme sidecar ou comme microservice à côté de l’application."
+  caption="Jaune : composants de Topaz. Vert : stockage. Bleu : appelants. Une instance Topaz s’exécute comme sidecar ou comme microservice à côté de l’application."
 />
 
-- « The Authorizer exposes three APIs to the calling application » (l’authorizer expose trois API à l’application appelante) : `authz/is`, `authz/query` et `authz/decisiontree`, chacune étant « a POST or gRPC API » (une API POST ou gRPC) ([architecture](https://www.topaz.sh/docs/architecture)).
+- « The Authorizer exposes three APIs to the calling application » (l’authorizer expose trois API à l’application appelante) : `authz/is`, `authz/query` et `authz/decisiontree`, chacune étant « a POST or gRPC API » (une API POST ou gRPC) ([architecture](https://www.topaz.sh/docs/architecture)).
 - Les politiques atteignent l’annuaire au moyen de fonctions intégrées d’OPA, dont `ds.check`, `ds.check_relation` et `ds.check_permission` (même page).
-- « The directory is implemented as a BoltDB instance » (l’annuaire est implémenté sous la forme d’une instance BoltDB) (même page). « Directory objects are loaded on-demand, in contrast to `data.json` files » (les objets de l’annuaire sont chargés à la demande, contrairement aux fichiers `data.json`), qui sont chargés avec la politique.
-- « The authorizer captures and stores decision logs for every decision that it evaluates » (l’authorizer capture et stocke des journaux de décision pour chaque décision qu’il évalue) (même page).
-- Topaz peut être déployé « as a sidecar or a microservice in your cloud » (comme sidecar ou comme microservice dans votre cloud) ([intro](https://www.topaz.sh/docs/intro)).
+- « The directory is implemented as a BoltDB instance » (l’annuaire est implémenté sous la forme d’une instance BoltDB) (même page). « Directory objects are loaded on-demand, in contrast to `data.json` files » (les objets de l’annuaire sont chargés à la demande, contrairement aux fichiers `data.json`), qui sont chargés avec la politique.
+- « The authorizer captures and stores decision logs for every decision that it evaluates » (l’authorizer capture et stocke des journaux de décision pour chaque décision qu’il évalue) (même page).
+- Topaz peut être déployé « as a sidecar or a microservice in your cloud » (comme sidecar ou comme microservice dans votre cloud) ([intro](https://www.topaz.sh/docs/intro)).
 
 ## Cohérence
 
-Le zookie de l’article permet à un client de demander une vérification « at a consistent snapshot no earlier than the given zookie » (sur un instantané cohérent qui n’est pas antérieur au zookie donné) (§2.4.4). Topaz ne documente rien de comparable : les pages de référence du manifeste et d’architecture ne disent rien de la cohérence, et les messages Reader et Writer de l’annuaire ne comportent aucun champ de jeton ou d’instantané ([reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto)). Une vérification lit le fichier BoltDB de l’instance Topaz sur laquelle elle s’exécute. La manière dont plusieurs instances partagent ou copient les données n’est pas décrite dans les pages consultées ici.
+Le zookie de l’article permet à un client de demander une vérification « at a consistent snapshot no earlier than the given zookie » (sur un instantané cohérent qui n’est pas antérieur au zookie donné) (§2.4.4). Topaz ne documente rien de comparable : les pages de référence du manifeste et d’architecture ne disent rien de la cohérence, et les messages Reader et Writer de l’annuaire ne comportent aucun champ de jeton ou d’instantané ([reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto)). Une vérification lit le fichier BoltDB de l’instance Topaz sur laquelle elle s’exécute. La manière dont plusieurs instances partagent ou copient les données n’est pas décrite dans les pages consultées ici.
 
 ## Différences avec l’article
 
-- **La politique d’abord.** L’API de décision est `Is`, qui évalue une politique Rego ; la vérification de type Zanzibar n’est qu’une entrée dont la politique peut se servir. Dans l’article, le Check sur le userset est la décision (§2.4.4).
+- **La politique d’abord.** L’API de décision est `Is`, qui évalue une politique Rego ; la vérification de type Zanzibar n’est qu’une entrée dont la politique peut se servir. Dans l’article, le Check sur le userset est la décision (§2.4.4).
 - **Stockage local et embarqué.** Un fichier BoltDB par instance au lieu de Spanner répliqué dans le monde entier (§3.1).
 - **Ni zookie, ni Watch, ni Leopard.** Aucun n’est documenté.
 - **Jokers.** `viewer: user | user:*` permet une relation avec le sujet d’identifiant `*` ([manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)).
@@ -164,17 +164,17 @@ Le zookie de l’article permet à un client de demander une vérification « at
 
 ## Statut
 
-- Première version v0.20.3 le 2022-10-25 ; dernière v0.33.27 le 2026-11-10 ; dernier commit sur la branche par défaut le 2026-11-10 ; environ 1.4k étoiles ([versions](https://github.com/aserto-dev/topaz/releases), API GitHub, 2026-11-13).
-- Aserto a annoncé sa cessation d’activité le 2025-04-27 et la fin de son plan de contrôle SaaS d’ici le 2025-05-31 ; des mainteneurs poursuivent Topaz ([blog d’Aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto)). Le dépôt se trouve toujours dans l’organisation `aserto-dev`.
+- Première version v0.20.3 le 2022-10-25 ; dernière v0.33.27 le 2026-11-10 ; dernier commit sur la branche par défaut le 2026-11-10 ; environ 1.4k étoiles ([versions](https://github.com/aserto-dev/topaz/releases), API GitHub, 2026-11-13).
+- Aserto a annoncé sa cessation d’activité le 2025-04-27 et la fin de son plan de contrôle SaaS d’ici le 2025-05-31 ; des mainteneurs poursuivent Topaz ([blog d’Aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto)). Le dépôt se trouve toujours dans l’organisation `aserto-dev`.
 
 ## Sources
 
-- Dépôt et README de Topaz : [github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
-- Documentation de Topaz, introduction : [topaz.sh/docs/intro](https://www.topaz.sh/docs/intro)
-- Architecture : [topaz.sh/docs/architecture](https://www.topaz.sh/docs/architecture)
-- Référence du manifeste : [topaz.sh/docs/directory/manifest-reference](https://www.topaz.sh/docs/directory/manifest-reference)
-- Manifeste et relations d’exemple : [manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml), [gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)
-- API de l’annuaire : [reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto), [importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)
-- Commits récents : [github.com/aserto-dev/topaz/commits/main](https://github.com/aserto-dev/topaz/commits/main)
-- API de l’authorizer : [authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)
-- Cessation d’activité d’Aserto : [aserto.com/blog/the-final-chapter-for-aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto)
+- Dépôt et README de Topaz : [github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
+- Documentation de Topaz, introduction : [topaz.sh/docs/intro](https://www.topaz.sh/docs/intro)
+- Architecture : [topaz.sh/docs/architecture](https://www.topaz.sh/docs/architecture)
+- Référence du manifeste : [topaz.sh/docs/directory/manifest-reference](https://www.topaz.sh/docs/directory/manifest-reference)
+- Manifeste et relations d’exemple : [manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml), [gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)
+- API de l’annuaire : [reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto), [importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)
+- Commits récents : [github.com/aserto-dev/topaz/commits/main](https://github.com/aserto-dev/topaz/commits/main)
+- API de l’authorizer : [authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)
+- Cessation d’activité d’Aserto : [aserto.com/blog/the-final-chapter-for-aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto)

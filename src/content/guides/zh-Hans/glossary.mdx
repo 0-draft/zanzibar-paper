@@ -51,7 +51,7 @@ paper: []
   <dt id="heartbeat-zookie">心跳 zookie（heartbeat zookie）</dt>
   <dd>每个 Watch 响应中的一个 zookie，标记流已经推进到哪里，以便客户端从那里继续。详见：§2.4.3。</dd>
   <dt id="hedging">对冲（hedging）</dt>
-  <dd>在确知第一台服务器较慢之后，把同一请求发送到第二台服务器，使用最先到达的回复并取消另一个。Zanzibar 对发往 Spanner 和 Leopard 的调用进行对冲，但不对其自身服务器之间的调用进行对冲。该技术见 Dean 和 Barroso 的 <a href="https://research.google/pubs/the-tail-at-scale/">“The Tail at Scale”</a>（CACM，2013）。详见：<a href="../architecture/">架构</a>，§3.2.7。</dd>
+  <dd>在确知第一台服务器较慢之后，把同一请求发送到第二台服务器，使用最先到达的回复并取消另一个。Zanzibar 对发往 Spanner 和 Leopard 的调用进行对冲，但不对其自身服务器之间的调用进行对冲。该技术见 Dean 和 Barroso 的<a href="https://research.google/pubs/the-tail-at-scale/">“The Tail at Scale”</a>（CACM，2013）。详见：<a href="../architecture/">架构</a>，§3.2.7。</dd>
   <dt id="hot-spot">热点（hot spot）</dt>
   <dd>流量远高于其他的键、对象或组，可能使存储它的服务器过载，例如被许多 ACL 共享的热门组。详见：<a href="../architecture/">架构</a>，§3.2.5。</dd>
 </dl>
@@ -81,7 +81,7 @@ paper: []
   <dt id="object">对象（object）</dt>
   <dd>被保护的东西，写作 ⟨<em>namespace</em>⟩:⟨<em>object_id</em>⟩，例如 <code>doc:readme</code>。详见：<a href="../relation-tuples/#语法">关系元组</a>，§2.1。</dd>
   <dt id="paxos">Paxos</dt>
-  <dd>一种共识协议，使一组副本即使其中一些发生故障，也能就每次写入达成一致。论文把 Zanzibar 存储的五个投票副本放在彼此 25 毫秒以内，以便 Paxos 事务能够快速提交。见 Lamport 的 <a href="https://lamport.azurewebsites.net/pubs/paxos-simple.pdf">“Paxos Made Simple”</a>（2001）。详见：<a href="../architecture/">架构</a>，§3.1.4。</dd>
+  <dd>一种共识协议，使一组副本即使其中一些发生故障，也能就每次写入达成一致。论文把 Zanzibar 存储的五个投票副本放在彼此 25 毫秒以内，以便 Paxos 事务能够快速提交。见 Lamport 的<a href="https://lamport.azurewebsites.net/pubs/paxos-simple.pdf">“Paxos Made Simple”</a>（2001）。详见：<a href="../architecture/">架构</a>，§3.1.4。</dd>
   <dt id="pointer-chasing">指针追逐（pointer chasing）</dt>
   <dd>通过一次一跳地沿着用户集前进来回答 Check：从 readme 的查看者到 <code>group:eng#member</code>，再到该组的成员，依此类推。组很深或很宽时会很慢。详见：<a href="../relation-tuples/#把-check-看作图搜索">关系元组</a>、<a href="../leopard/">Leopard</a>，§3.2.3、§3.2.4。</dd>
   <dt id="read">Read</dt>
@@ -113,7 +113,7 @@ paper: []
 
 <dl>
   <dt id="tail-latency">尾部延迟（tail latency）</dt>
-  <dd>最慢那部分请求的延迟，例如第 99 或第 99.9 百分位。它很重要，因为一页搜索结果可能需要数十到数百次检查。见 Dean 和 Barroso 的 <a href="https://research.google/pubs/the-tail-at-scale/">“The Tail at Scale”</a>（CACM，2013）。详见：<a href="../architecture/#对缓慢的-spanner-读取进行对冲">架构</a>，§1、§3.2.7、§4.2、§4.5。</dd>
+  <dd>最慢那部分请求的延迟，例如第 99 或第 99.9 百分位。它很重要，因为一页搜索结果可能需要数十到数百次检查。见 Dean 和 Barroso 的<a href="https://research.google/pubs/the-tail-at-scale/">“The Tail at Scale”</a>（CACM，2013）。详见：<a href="../architecture/#对缓慢的-spanner-读取进行对冲">架构</a>，§1、§3.2.7、§4.2、§4.5。</dd>
   <dt id="this"><code>_this</code></dt>
   <dd>重写规则的一种叶节点，返回针对该对象和关系所存储的元组中的用户，包括这些元组所指向的用户集。关系没有规则时的默认行为。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.3.1。</dd>
   <dt id="timestamp-quantization">时间戳量化（timestamp quantization）</dt>

@@ -190,7 +190,7 @@ Zanzibar는 이 타임스탬프를 직접 계산하지 않는다. Zanzibar는 AC
     { from: "req", to: "s", label: "s 선택" },
     { from: "s", to: "after", label: "커밋 대기", on: true, labelOffset: -34 },
     { from: "after", to: "vis" },
-    { from: "vis", to: "next", label: "원인" },
+    { from: "vis", to: "next", label: "이어짐" },
   ]}
   minWidth={520}
   caption="시간은 왼쪽에서 오른쪽으로, 그다음 아래의 다음 쓰기로 흐른다. 불확실성만큼 기다린다는 것은 누군가가 그 쓰기에 따라 행동하기 전에 s가 이미 과거가 된다는 뜻이다."

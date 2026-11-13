@@ -62,11 +62,11 @@ paper: []
   <dt id="intersection">積集合 (intersection)</dt>
   <dd>書き換えルールの演算子。複数のユーザーセットのすべてに含まれるユーザー。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.3.1。</dd>
   <dt id="leopard">Leopard</dt>
-  <dd>深く入れ子になったグループや非常に大きいグループのためのインデックスシステム。グループメンバーシップを整数の集合に平坦化してメンバーシップチェックを集合の積に変え、Watch によって最新の状態を保つ。詳細: <a href="../leopard/">Leopard</a>、§3.2.4。</dd>
+  <dd>深く入れ子になったグループや非常に大きいグループのためのインデックスシステム。グループメンバーシップを整数の集合に平坦化してメンバーシップチェックを積集合の演算に変え、Watch によって最新の状態を保つ。詳細: <a href="../leopard/">Leopard</a>、§3.2.4。</dd>
   <dt id="lock-table">ロックテーブル (lock table)</dt>
   <dd>処理中の読み取りとチェックを記録する、サーバーごとの表。キャッシュキーを共有するリクエストのうち実行されるのは 1 つだけで、残りはその結果を待つ。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.2.5。</dd>
   <dt id="lock-tuple">ロックタプル (lock tuple)</dt>
-  <dd>クライアントがオブジェクトへの書き込みのたびに touch する通常のリレーションタプル。これにより、読み取り以降に誰も書き込んでいないことを条件に書き込みを行える。詳細: §2.4.2。</dd>
+  <dd>クライアントがオブジェクトへの書き込みのたびに更新する通常のリレーションタプル。これにより、読み取り以降に誰も書き込んでいないことを条件に書き込みを行える。詳細: §2.4.2。</dd>
   <dt id="namespace">名前空間 (namespace)</dt>
   <dd>クライアントが定義するオブジェクトの種類。<code>doc</code> や <code>folder</code> など。<code>doc:readme</code> のコロンより前の部分である。各名前空間のタプルはそれぞれ専用のデータベースに置かれる。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.1、§2.3、§3.1.1。</dd>
   <dt id="namespace-config">名前空間設定 (namespace config)</dt>
@@ -140,7 +140,7 @@ paper: []
   <dt id="userset-tree">ユーザーセット木 (userset tree)</dt>
   <dd>Expand の結果。葉はユーザー ID またはユーザーセット、中間ノードは集合演算子である。詳細: <a href="../relation-tuples/#read-と-expand">リレーションタプル</a>、§2.4.5。</dd>
   <dt id="watch">Watch</dt>
-  <dd>1 つ以上の名前空間のタプル変更を、zookie を起点にタイムスタンプ順でストリームする API 呼び出し。Leopard のようなセカンダリインデックスを最新に保つために使われる。詳細: <a href="../architecture/#watch-の経路">アーキテクチャ</a>、§2.4.3。</dd>
+  <dd>1 つ以上の名前空間のタプル変更を、zookie を起点にタイムスタンプ順でストリームする API 呼び出し。Leopard のような二次インデックスを最新に保つために使われる。詳細: <a href="../architecture/#watch-の経路">アーキテクチャ</a>、§2.4.3。</dd>
   <dt id="watchserver">watchserver</dt>
   <dd>変更ログを追いかけて Watch に応答するサーバーの種類。詳細: <a href="../architecture/">アーキテクチャ</a>、§3。</dd>
   <dt id="write">Write</dt>

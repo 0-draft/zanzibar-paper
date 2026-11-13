@@ -134,7 +134,7 @@ ACL 檢查回答的是「此使用者現在能否做這件事」。在一個複�
 
 §2.2 列出兩項特性：*外部一致性*與*具有有界陳舊度的快照讀取*。論文以 [Gifford 1981 年的博士論文](#資料來源)作為外部一致性的出處。Spanner 論文對交易陳述了同一項特性："if a transaction T1 commits before another transaction T2 starts, then T1's commit timestamp is smaller than T2's"（若交易 T1 在另一筆交易 T2 開始之前提交，則 T1 的提交時間戳記小於 T2 的提交時間戳記），並指出這 "equivalently, linearizability"（等同於可線性化），引用 [Herlihy 與 Wing（1990）](https://doi.org/10.1145/78969.78972)。
 
-用 Zanzibar 的話來說（§2.2），兩個具因果關係的更新 `x ≺ y` 所獲得的時間戳記滿足 `T_x < T_y`。在時間戳記 `T` 進行的快照讀取 "observes all updates with timestamps ≤ T"（會觀察到所有時間戳記 ≤ T 的更新）。兩者合起來：若一次讀取看到 `y`，它也會看到所有發生在 `y` 之前的事。這之所以成立，是因為儲存區是多版本的：Spanner 將快照讀取定義為 "a read in the past that executes without locking"（在過去某一時間點執行、不需鎖定的讀取）（[Spanner §4.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)），而在多版本儲存區中，"each write on a data item produces a new copy (or version)"（對資料項目的每一次寫入都會產生一份新的副本（或版本））（[Bernstein 與 Goodman，1983](https://doi.org/10.1145/319996.319998)）。
+用 Zanzibar 的話來說（§2.2），兩個具因果關係的更新 `x ≺ y` 所獲得的時間戳記滿足 `T_x < T_y`。在時間戳記 `T` 進行的快照讀取 "observes all updates with timestamps ≤ T"（會觀察到所有時間戳記 ≤ T 的更新）。兩者合起來：若一次讀取看到 `y`，它也會看到所有發生在 `y` 之前的事。這之所以成立，是因為儲存區是多版本的：Spanner 將快照讀取定義為 "a read in the past that executes without locking"（在過去某一時間點執行、不需鎖定的讀取）（[Spanner §4.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)），而在多版本儲存區中，"each write on a data item produces a new copy (or version)"（對資料項目的每一次寫入都會產生一份新的複本（或版本））（[Bernstein 與 Goodman，1983](https://doi.org/10.1145/319996.319998)）。
 
 在這條規則下，讀取者會看到什麼？而最終一致副本的讀取者又可能看到什麼？在這個變化版本中，readme 起初不在 `folder:A` 中。Anne 先移除 Chen 作為 `folder:A` 檢視者的身分（`x`，於 T=10 提交），再將 `doc:readme` 移入 `folder:A`（`y`，於 T=20）。
 

@@ -12,24 +12,24 @@ import Graph from "../../../components/diagram/Graph.astro";
 import Swimlane from "../../../components/diagram/Swimlane.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 
-Certaines règles ne portent pas sur qui est en relation avec quoi. « Uniquement depuis le réseau du bureau », « uniquement aux heures ouvrées », « uniquement pour les virements inférieurs à 1,000 », « uniquement jusqu’à vendredi » : chacune dépend d’un fait relatif à la requête ou à l’horloge. L’article n’offre aucun moyen de les écrire. Les produits fondés sur ses idées en ajoutent un, chacun à sa manière. Cette page explique pourquoi cette lacune existe, ce qu’ajoutent trois produits, et quand il vaut mieux garder la règle dans l’application.
+Certaines règles ne portent pas sur qui est en relation avec quoi. « Uniquement depuis le réseau du bureau », « uniquement aux heures ouvrées », « uniquement pour les virements inférieurs à 1,000 », « uniquement jusqu’à vendredi » : chacune dépend d’un fait relatif à la requête ou à l’horloge. L’article n’offre aucun moyen de les écrire. Les produits fondés sur ses idées en ajoutent un, chacun à sa manière. Cette page explique pourquoi cette lacune existe, ce qu’ajoutent trois produits, et quand il vaut mieux garder la règle dans l’application.
 
-L’exemple récurrent : Anne, Beto et Chen (`user:anne`, `user:beto`, `user:chen`) ; le document `doc:readme` dans `folder:A` ; le groupe `group:eng`. Anne est propriétaire du readme, Beto fait partie de eng, les membres de eng consultent le readme et Chen consulte le dossier A. La [page sur la modélisation](../modeling/) présente les schémas de relations sur lesquels s’appuie cette page.
+L’exemple suivi : Anne, Beto et Chen (`user:anne`, `user:beto`, `user:chen`) ; le document `doc:readme` dans `folder:A` ; le groupe `group:eng`. Anne est propriétaire du readme, Beto fait partie de eng, les membres de eng consultent le readme et Chen consulte le dossier A. La [page sur la modélisation](../modeling/) présente les schémas de relations sur lesquels s’appuie cette page.
 
 ## Ce qu’un tuple ne peut pas dire
 
-Le tuple de l’article se compose de quatre éléments, et de rien d’autre. Sa grammaire est ⟨*object*⟩ ‘#’ ⟨*relation*⟩ ‘@’ ⟨*user*⟩, et "the primary keys required to identify a relation tuple are ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, and ⟨*user*⟩" (« les clés primaires nécessaires pour identifier un tuple de relation sont ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩ et ⟨*user*⟩ ») (§2.1). Dans le stockage, "each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*" (« chaque ligne est identifiée par la clé primaire *(identifiant de fragment, identifiant d’objet, relation, utilisateur, horodatage de validation)* ») (§3.1.1). L’article ne décrit aucune autre colonne : ni expiration, ni condition, ni attribut de l’utilisateur ou de l’objet.
+Le tuple de l’article se compose de quatre éléments, et de rien d’autre. Sa grammaire est ⟨*object*⟩ ‘#’ ⟨*relation*⟩ ‘@’ ⟨*user*⟩, et « the primary keys required to identify a relation tuple are ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, and ⟨*user*⟩ » (les clés primaires nécessaires pour identifier un tuple de relation sont ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩ et ⟨*user*⟩) (§2.1). Dans le stockage, « each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)* » (chaque ligne est identifiée par la clé primaire *(identifiant de fragment, identifiant d’objet, relation, utilisateur, horodatage de validation)*) (§3.1.1). L’article ne décrit aucune autre colonne : ni expiration, ni condition, ni attribut de l’utilisateur ou de l’objet.
 
-Le côté requête est tout aussi étroit. "A check request specifies a userset, represented by ⟨*object#relation*⟩, a putative user, often represented by an authentication token, and a zookie corresponding to the desired object version" (« Une requête de vérification spécifie un userset, représenté par ⟨*object#relation*⟩, un utilisateur présumé, souvent représenté par un jeton d’authentification, et un zookie correspondant à la version souhaitée de l’objet ») (§2.4.4). Il n’existe aucun champ pour l’adresse IP de l’appelant, l’heure de la journée ou le montant d’une transaction.
+Côté requête, le cadre est tout aussi étroit. « A check request specifies a userset, represented by ⟨*object#relation*⟩, a putative user, often represented by an authentication token, and a zookie corresponding to the desired object version » (Une requête de vérification spécifie un userset, représenté par ⟨*object#relation*⟩, un utilisateur présumé, souvent représenté par un jeton d’authentification, et un zookie correspondant à la version souhaitée de l’objet) (§2.4.4). Il n’existe aucun champ pour l’adresse IP de l’appelant, l’heure de la journée ou le montant d’une transaction.
 
-Que transporte un Check, et que manque-t-il ?
+Que transporte un Check, et que manque-t-il ?
 
 <Graph
   width={620}
   height={250}
   minWidth={520}
   title="Ce que transporte la requête Check de l’article"
-  desc="Une boîte client envoie une requête Check à une boîte serveur Zanzibar. La requête transporte trois éléments, dessinés sous forme de boîtes à gauche : le userset doc:readme#view, l’utilisateur user:chen et un zookie. À droite, un groupe en pointillés intitulé « absent de la requête de l’article » contient trois notes : l’adresse IP de l’appelant, l’heure courante et le montant de la transaction. Le serveur ne lit que des tuples de relation dans le stockage."
+  desc="Une boîte client envoie une requête Check à une boîte serveur Zanzibar. La requête transporte trois éléments, dessinés sous forme de boîtes à gauche : le userset doc:readme#view, l’utilisateur user:chen et un zookie. À droite, un groupe en pointillés intitulé « absent de la requête de l’article » contient trois notes : l’adresse IP de l’appelant, l’heure courante et le montant de la transaction. Le serveur ne lit que des tuples de relation dans le stockage."
   groups={[{ x: 400, y: 10, w: 210, h: 140, label: "absent de la requête" }]}
   nodes={[
     { id: "client", x: 90, y: 200, label: "Client", kind: "client" },
@@ -51,13 +51,13 @@ Que transporte un Check, et que manque-t-il ?
 
 Remarquez que la réponse ne peut dépendre que des tuples stockés et de l’instantané que sélectionne le zookie. C’est ce qui la rend cohérente et susceptible d’être mise en cache, et c’est aussi ce qui exclut une condition portant sur la requête.
 
-Certaines exigences peuvent être ramenées à des relations. L’expiration peut être assurée par une tâche qui supprime le tuple à l’échéance, au prix d’un accès qui dure jusqu’à l’exécution de la tâche. Un ensemble de réseaux autorisés peut être un objet auquel l’application relie l’appelant. Une limite de virement ne le peut pas : le montant n’est pas un objet avec lequel quiconque est en relation. L’article n’aborde aucun de ces contournements.
+Certaines exigences peuvent être ramenées à des relations. L’expiration peut être assurée par une tâche qui supprime le tuple à l’échéance, au prix d’un accès qui dure jusqu’à l’exécution de la tâche. Un ensemble de réseaux autorisés peut être un objet auquel l’application relie l’appelant. Une limite de virement ne le peut pas : le montant n’est pas un objet avec lequel quiconque est en relation. L’article n’aborde aucun de ces contournements.
 
 ## Les caveats de SpiceDB
 
-SpiceDB attache une condition à une relation. "Caveats are expressions that can return true or false, and they can be attached (by name) to relationships" (« Les caveats sont des expressions qui peuvent renvoyer vrai ou faux, et ils peuvent être attachés (par leur nom) à des relations ») ; "a caveat definition includes a name, one or more well-typed parameters, and a CEL expression returning a boolean value" (« une définition de caveat comprend un nom, un ou plusieurs paramètres correctement typés et une expression CEL renvoyant une valeur booléenne ») ([documentation des caveats](https://authzed.com/docs/spicedb/concepts/caveats)). CEL est le [Common Expression Language](https://github.com/google/cel-spec) de Google. Les types de paramètres comprennent `int`, `string`, `duration`, `timestamp`, `list<T>`, `map<T>` et un type `ipaddress` propre à SpiceDB.
+SpiceDB attache une condition à une relation. « Caveats are expressions that can return true or false, and they can be attached (by name) to relationships » (Les caveats sont des expressions qui peuvent renvoyer vrai ou faux, et ils peuvent être attachés (par leur nom) à des relations) ; « a caveat definition includes a name, one or more well-typed parameters, and a CEL expression returning a boolean value » (une définition de caveat comprend un nom, un ou plusieurs paramètres correctement typés et une expression CEL renvoyant une valeur booléenne) ([documentation des caveats](https://authzed.com/docs/spicedb/concepts/caveats)). CEL est le [Common Expression Language](https://github.com/google/cel-spec) de Google. Les types de paramètres comprennent `int`, `string`, `duration`, `timestamp`, `list<T>`, `map<T>` et un type `ipaddress` propre à SpiceDB.
 
-Supposons que Chen ne puisse consulter le dossier A, et à travers lui le readme, que depuis le réseau du bureau. Voici le caveat et la relation qui peut le porter, d’après l’exemple de la page sur les caveats :
+Supposons que Chen ne puisse consulter le dossier A, et à travers lui le readme, que depuis le réseau du bureau. Voici le caveat et la relation qui peut le porter, d’après l’exemple de la page sur les caveats :
 
 ```text
 definition user {}
@@ -72,17 +72,17 @@ definition folder {
 }
 ```
 
-*Schéma SpiceDB ; suit la syntaxe documentée au 2026-11-13 ; aucun validateur n’a été exécuté.*
+*Schéma SpiceDB ; suit la syntaxe documentée au 2026-11-13 ; aucun validateur n’a été exécuté.*
 
-`user | user with has_valid_ip` permet à une même relation de contenir des relations simples et des relations soumises à un caveat ; "to make the caveat **required**, the `user |` can be removed" (« pour rendre le caveat **obligatoire**, on peut supprimer `user |` ») (documentation des caveats). La relation `folder:A#viewer@user:chen` est écrite avec le nom de caveat `has_valid_ip` et une partie de son contexte, ici `allowed_range` = `10.20.30.0/24`. Le reste, `user_ip`, arrive avec chaque appel `CheckPermission` dans son champ `context`. Lorsque les deux fournissent une valeur, "the values in the Relationship take precedence over those in the CheckPermissionRequest" (« les valeurs de la Relationship l’emportent sur celles de la CheckPermissionRequest ») (documentation des caveats).
+`user | user with has_valid_ip` permet à une même relation de contenir des relations simples et des relations soumises à un caveat ; « to make the caveat **required**, the `user |` can be removed » (pour rendre le caveat **obligatoire**, on peut supprimer `user |`) (documentation des caveats). La relation `folder:A#viewer@user:chen` est écrite avec le nom de caveat `has_valid_ip` et une partie de son contexte, ici `allowed_range` = `10.20.30.0/24`. Le reste, `user_ip`, arrive avec chaque appel `CheckPermission` dans son champ `context`. Lorsque les deux fournissent une valeur, « the values in the Relationship take precedence over those in the CheckPermissionRequest » (les valeurs de la Relationship l’emportent sur celles de la CheckPermissionRequest) (documentation des caveats).
 
-Quelle arête porte la condition ?
+Quelle arête porte la condition ?
 
 <Graph
   width={600}
   height={200}
   minWidth={480}
-  title="Une relation soumise à un caveat dans l’exemple récurrent"
+  title="Une relation soumise à un caveat dans l’exemple suivi"
   desc="user:chen a une arête viewer mise en évidence vers folder:A, étiquetée avec has_valid_ip et allowed_range 10.20.30.0/24. folder:A a une arête parent vers doc:readme. user:anne a une arête owner simple vers doc:readme."
   nodes={[
     { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true },
@@ -95,28 +95,28 @@ Quelle arête porte la condition ?
     { from: "chen", to: "folder", label: "viewer\nwith has_valid_ip\n10.20.30.0/24", on: true },
     { from: "folder", to: "doc", label: "parent" },
   ]}
-  caption="Une seule arête est conditionnelle. Le chemin d’Anne n’a pas de caveat ; ses vérifications n’ont donc jamais besoin de contexte."
+  caption="Une seule arête est conditionnelle. Le chemin d’Anne n’a pas de caveat ; ses vérifications n’ont donc jamais besoin de contexte."
 />
 
 ### Trois réponses au lieu de deux
 
-Une vérification soumise à un caveat peut se terminer sans oui ni non. L’API définit trois résultats : `PERMISSIONSHIP_NO_PERMISSION`, `PERMISSIONSHIP_HAS_PERMISSION` et `PERMISSIONSHIP_CONDITIONAL_PERMISSION`, qui "indicates that the subject has the requested permission on the resource, but only if a caveat condition is met. The `partial_caveat_info` field in the response should contain the missing context fields that must be provided to fully evaluate the caveat" (« indique que le sujet dispose de la permission demandée sur la ressource, mais seulement si une condition de caveat est remplie. Le champ `partial_caveat_info` de la réponse doit contenir les champs de contexte manquants qu’il faut fournir pour évaluer entièrement le caveat ») ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). La page sur les caveats le formule ainsi : "required context is missing to determine permissionship" (« le contexte requis pour déterminer la permission est manquant »). À l’intérieur de SpiceDB, les sous-problèmes répartis entre les nœuds portent le même troisième état, `CAVEATED_MEMBER`, à côté de `MEMBER` et `NOT_MEMBER` ([`dispatch.proto`](https://github.com/authzed/spicedb/blob/main/proto/internal/dispatch/v1/dispatch.proto)).
+Une vérification soumise à un caveat peut se terminer sans oui ni non. L’API définit trois résultats : `PERMISSIONSHIP_NO_PERMISSION`, `PERMISSIONSHIP_HAS_PERMISSION` et `PERMISSIONSHIP_CONDITIONAL_PERMISSION`, qui « indicates that the subject has the requested permission on the resource, but only if a caveat condition is met. The `partial_caveat_info` field in the response should contain the missing context fields that must be provided to fully evaluate the caveat » (indique que le sujet dispose de la permission demandée sur la ressource, mais seulement si une condition de caveat est remplie. Le champ `partial_caveat_info` de la réponse doit contenir les champs de contexte manquants qu’il faut fournir pour évaluer entièrement le caveat) ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). La page sur les caveats le formule ainsi : « required context is missing to determine permissionship » (le contexte requis pour déterminer la permission est manquant). À l’intérieur de SpiceDB, les sous-problèmes répartis entre les nœuds portent le même troisième état, `CAVEATED_MEMBER`, à côté de `MEMBER` et `NOT_MEMBER` ([`dispatch.proto`](https://github.com/authzed/spicedb/blob/main/proto/internal/dispatch/v1/dispatch.proto)).
 
-Que se passe-t-il lorsque l’application oublie l’adresse IP ?
+Que se passe-t-il lorsque l’application oublie l’adresse IP ?
 
 <Swimlane
   lanes={["Application", "SpiceDB", "Relation stockée"]}
   title="Un Check soumis à un caveat qui a besoin de contexte"
-  desc="Ligne 1 : l’application envoie CheckPermission pour user:chen, view, doc:readme, sans contexte. Ligne 2 : SpiceDB suit parent->view jusqu’à folder:A et trouve la relation folder:A#viewer@user:chen avec le caveat has_valid_ip et allowed_range 10.20.30.0/24. Ligne 3 : user_ip manque ; SpiceDB répond donc PERMISSIONSHIP_CONDITIONAL_PERMISSION et indique que user_ip est manquant. Ligne 4 : l’application vérifie à nouveau avec le contexte user_ip 10.20.30.7. Ligne 5 : in_cidr est vrai et SpiceDB répond PERMISSIONSHIP_HAS_PERMISSION."
+  desc="Ligne 1 : l’application envoie CheckPermission pour user:chen, view, doc:readme, sans contexte. Ligne 2 : SpiceDB suit parent->view jusqu’à folder:A et trouve la relation folder:A#viewer@user:chen avec le caveat has_valid_ip et allowed_range 10.20.30.0/24. Ligne 3 : user_ip manque ; SpiceDB répond donc PERMISSIONSHIP_CONDITIONAL_PERMISSION et indique que user_ip est manquant. Ligne 4 : l’application vérifie à nouveau avec le contexte user_ip 10.20.30.7. Ligne 5 : in_cidr est vrai et SpiceDB répond PERMISSIONSHIP_HAS_PERMISSION."
   timeLabel="temps"
   laneWidth={190}
   rowHeight={84}
   events={[
-    { lane: 0, t: 0, label: "CheckPermission\nchen · view · readme\ncontexte : aucun", kind: "read" },
+    { lane: 0, t: 0, label: "CheckPermission\nchen · view · readme\ncontexte : aucun", kind: "read" },
     { lane: 1, t: 1, label: "parent->view\natteint folder:A", kind: "read" },
     { lane: 2, t: 1, label: "folder:A#viewer\n@user:chen\nhas_valid_ip", kind: "note", mono: true },
-    { lane: 1, t: 2, label: "user_ip manquant\nCONDITIONAL_PERMISSION\nmanquant : user_ip", kind: "bad" },
-    { lane: 0, t: 3, label: "CheckPermission\nà nouveau, contexte :\nuser_ip 10.20.30.7", kind: "read" },
+    { lane: 1, t: 2, label: "user_ip manquant\nCONDITIONAL_PERMISSION\nmanquant : user_ip", kind: "bad" },
+    { lane: 0, t: 3, label: "CheckPermission\nà nouveau, contexte :\nuser_ip 10.20.30.7", kind: "read" },
     { lane: 1, t: 4, label: "in_cidr → true\nHAS_PERMISSION", kind: "good" },
   ]}
   arrows={[
@@ -125,14 +125,14 @@ Que se passe-t-il lorsque l’application oublie l’adresse IP ?
     { from: [1, 2], to: [0, 3], label: "conditionnel", dashed: true },
     { from: [0, 3], to: [1, 4], label: "nouvelle vérif." },
   ]}
-  caption="CONDITIONAL_PERMISSION n’est ni une autorisation ni un refus. La réponse indique ce qui manquait pour que l’appelant puisse réessayer en le fournissant ; une application qui l’interprète comme un oui présente une faille."
+  caption="CONDITIONAL_PERMISSION n’est ni une autorisation ni un refus. La réponse indique ce qui manquait pour que l’appelant puisse réessayer en le fournissant ; une application qui l’interprète comme un oui présente une faille."
 />
 
 Remarquez que la relation stockée contient déjà la moitié du contexte. L’application ne fournit que ce qu’elle sait au moment de la requête.
 
 ### Relations à expiration
 
-L’expiration était un usage courant des caveats. L’article d’AuthZed à ce sujet indique que de nombreux utilisateurs voulaient l’expiration et rien d’autre, et présente une forme intégrée : les relations acceptent une date d’expiration facultative, et le schéma l’active avec `use expiration` et `with expiration`. L’article indique que cette fonctionnalité est arrivée dans SpiceDB v1.40 à titre expérimental, derrière `--enable-experimental-relationship-expiration` ([blog d’AuthZed, 2025-02-13](https://authzed.com/blog/the-evolution-of-expiration)).
+L’expiration était un usage courant des caveats. L’article d’AuthZed à ce sujet indique que de nombreux utilisateurs voulaient l’expiration et rien d’autre, et présente une forme intégrée : les relations acceptent une date d’expiration facultative, et le schéma l’active avec `use expiration` et `with expiration`. L’article indique que cette fonctionnalité est arrivée dans SpiceDB v1.40 à titre expérimental, derrière `--enable-experimental-relationship-expiration` ([blog d’AuthZed, 2025-02-13](https://authzed.com/blog/the-evolution-of-expiration)).
 
 ```text
 use expiration
@@ -143,13 +143,13 @@ definition folder {
 }
 ```
 
-*Schéma SpiceDB ; suit la syntaxe documentée au 2026-11-13 ; aucun validateur n’a été exécuté.*
+*Schéma SpiceDB ; suit la syntaxe documentée au 2026-11-13 ; aucun validateur n’a été exécuté.*
 
-La [documentation des relations à expiration](https://authzed.com/docs/spicedb/concepts/expiring-relationships) fixe l’échéance avec `OptionalExpiresAt` (RFC 3339) dans `WriteRelationships`, et donne deux raisons de la préférer à un caveat : un caveat "requires clients to provide the `now` timestamp" (« exige que les clients fournissent l’horodatage `now` »), et "expired caveats are not automatically garbage collected" (« les caveats expirés ne sont pas supprimés automatiquement par le ramasse-miettes »). Une relation expirée cesse de compter dès son expiration, à ceci près qu’un sous-résultat mis en cache avant l’expiration peut encore être servi pendant sa fenêtre de cache ; sa ligne est supprimée plus tard par le ramasse-miettes (après 24 heures par défaut, selon la même page). La page donne la version une fois sous la forme « v1.40 » et une fois sous la forme « v1.4.0 » ; l’article de blog indique v1.40. Il n’a pas été vérifié si la fonctionnalité est toujours marquée comme expérimentale dans la version actuelle.
+La [documentation des relations à expiration](https://authzed.com/docs/spicedb/concepts/expiring-relationships) fixe l’échéance avec `OptionalExpiresAt` (RFC 3339) dans `WriteRelationships`, et donne deux raisons de la préférer à un caveat : un caveat « requires clients to provide the `now` timestamp » (exige que les clients fournissent l’horodatage `now`), et « expired caveats are not automatically garbage collected » (les caveats expirés ne sont pas supprimés automatiquement par le ramasse-miettes). Une relation expirée cesse de compter dès son expiration, à ceci près qu’un sous-résultat mis en cache avant l’expiration peut encore être servi pendant sa fenêtre de cache ; sa ligne est supprimée plus tard par le ramasse-miettes (après 24 heures par défaut, selon la même page). La page donne la version une fois sous la forme « v1.40 » et une fois sous la forme « v1.4.0 » ; l’article de blog indique v1.40. Il n’a pas été vérifié si la fonctionnalité est toujours marquée comme expérimentale dans la version actuelle.
 
 ## Les conditions d’OpenFGA
 
-OpenFGA attache une condition à un tuple au moyen de la restriction de type. Voici le modèle du [guide des conditions](https://openfga.dev/docs/modeling/conditions), avec les types de l’exemple récurrent :
+OpenFGA attache une condition à un tuple au moyen de la restriction de type. Voici le modèle du [guide des conditions](https://openfga.dev/docs/modeling/conditions), avec les types de l’exemple suivi :
 
 ```text
 model
@@ -170,17 +170,17 @@ condition non_expired_grant(current_time: timestamp, grant_time: timestamp, gran
 }
 ```
 
-*DSL OpenFGA ; suit la syntaxe documentée au 2026-11-13 ; aucun validateur n’a été exécuté.*
+*DSL OpenFGA ; suit la syntaxe documentée au 2026-11-13 ; aucun validateur n’a été exécuté.*
 
-Le tuple `user:chen`, `viewer`, `doc:readme` est écrit avec le nom de condition `non_expired_grant` et un contexte composé de `grant_time` et `grant_duration` (l’exemple du guide utilise `2023-01-01T00:00:00Z` et `10m`). Chaque Check transmet `current_time`. Les deux vérifications du guide montrent le résultat : à `00:09:50`, allowed vaut `true` ; à `00:10:01`, il vaut `false`. Comme dans SpiceDB, le contexte stocké et le contexte de la requête sont "merged together into a single evaluation context" (« fusionnés en un seul contexte d’évaluation »), et "persisted context has higher precedence than request context" (« le contexte persistant a priorité sur le contexte de la requête ») (guide des conditions).
+Le tuple `user:chen`, `viewer`, `doc:readme` est écrit avec le nom de condition `non_expired_grant` et un contexte composé de `grant_time` et `grant_duration` (l’exemple du guide utilise `2023-01-01T00:00:00Z` et `10m`). Chaque Check transmet `current_time`. Les deux vérifications du guide montrent le résultat : à `00:09:50`, allowed vaut `true` ; à `00:10:01`, il vaut `false`. Comme dans SpiceDB, le contexte stocké et le contexte de la requête sont « merged together into a single evaluation context » (fusionnés en un seul contexte d’évaluation), et « persisted context has higher precedence than request context » (le contexte persistant a priorité sur le contexte de la requête) (guide des conditions).
 
-Deux différences avec SpiceDB. Un contexte manquant est une erreur, et non une troisième réponse : "If you don't provide the current_time in the context, the Check and ListObjects operations will fail" (« Si vous ne fournissez pas current_time dans le contexte, les opérations Check et ListObjects échoueront »), avec le message "failed to evaluate relationship condition 'non_expired_grant': context is missing parameters '[current_time]'" ([blog d’OpenFGA, 2023-11-06](https://openfga.dev/blog/conditional-tuples-announcement)). Et il existe des limites documentées : le contexte stocké "is limited to 32KB in size" (« est limité à 32 Ko »), et le serveur impose "a maximum Google CEL expression evaluation cost of 100 (by default)" (« un coût maximal d’évaluation d’expression Google CEL de 100 (par défaut) ») (guide des conditions). Le même article de blog date la fonctionnalité d’OpenFGA 1.4.0-rc1.
+Deux différences avec SpiceDB. Un contexte manquant est une erreur, et non une troisième réponse : « If you don't provide the current_time in the context, the Check and ListObjects operations will fail » (Si vous ne fournissez pas current_time dans le contexte, les opérations Check et ListObjects échoueront), avec le message « failed to evaluate relationship condition 'non_expired_grant': context is missing parameters '[current_time]' » ([blog d’OpenFGA, 2023-11-06](https://openfga.dev/blog/conditional-tuples-announcement)). Et il existe des limites documentées : le contexte stocké « is limited to 32KB in size » (est limité à 32 Ko), et le serveur impose « a maximum Google CEL expression evaluation cost of 100 (by default) » (un coût maximal d’évaluation d’expression Google CEL de 100 (par défaut)) (guide des conditions). Le même article de blog fait remonter la fonctionnalité à OpenFGA 1.4.0-rc1.
 
 ### Tuples contextuels
 
-OpenFGA permet aussi à une requête d’apporter ses propres tuples. Un tuple contextuel est "a tuple that can be added to a Check request, and only exists within the context of that particular request" (« un tuple qui peut être ajouté à une requête Check et qui n’existe que dans le contexte de cette requête précise ») ; les tuples contextuels "are not persisted in the store" (« ne sont pas persistés dans le store ») ([guide sur l’autorisation contextuelle et temporelle](https://openfga.dev/docs/modeling/contextual-time-based-authorization)). Le guide modélise les plages IP et les créneaux horaires autorisés sous forme d’objets (`ip-address-range`, `timeslot`) et envoie `user:anne` `user` `timeslot:12_13` avec la vérification ; un créneau que l’agence n’autorise pas renvoie `{"allowed":false}`.
+OpenFGA permet aussi à une requête d’apporter ses propres tuples. Un tuple contextuel est « a tuple that can be added to a Check request, and only exists within the context of that particular request » (un tuple qui peut être ajouté à une requête Check et qui n’existe que dans le contexte de cette requête précise) ; les tuples contextuels « are not persisted in the store » (ne sont pas persistés dans le store) ([guide sur l’autorisation contextuelle et temporelle](https://openfga.dev/docs/modeling/contextual-time-based-authorization)). Le guide modélise les plages IP et les créneaux horaires autorisés sous forme d’objets (`ip-address-range`, `timeslot`) et envoie `user:anne` `user` `timeslot:12_13` avec la vérification ; un créneau que l’agence n’autorise pas renvoie `{"allowed":false}`.
 
-Appliqué à l’exemple récurrent : le dossier A ne peut être consulté que depuis le réseau du bureau. L’application détermine, d’après l’adresse de l’appelant, que Chen se trouve sur `network:office`, et l’indique dans un tuple contextuel.
+Appliqué à l’exemple suivi : le dossier A ne peut être consulté que depuis le réseau du bureau. L’application détermine, d’après l’adresse de l’appelant, que Chen se trouve sur `network:office`, et l’indique dans un tuple contextuel.
 
 ```text
 type network
@@ -194,16 +194,16 @@ type folder
     define can_view: viewer and user from allowed_network
 ```
 
-*DSL OpenFGA ; suit la syntaxe documentée au 2026-11-13 ; aucun validateur n’a été exécuté.*
+*DSL OpenFGA ; suit la syntaxe documentée au 2026-11-13 ; aucun validateur n’a été exécuté.*
 
-Quelles arêtes sont stockées, et lesquelles n’existent que pour cette requête ?
+Quelles arêtes sont stockées, et lesquelles n’existent que pour cette requête ?
 
 <Graph
   width={600}
   height={220}
   minWidth={480}
   title="Un tuple contextuel complète une intersection"
-  desc="user:chen a une arête viewer stockée vers folder:A. network:office a une arête allowed_network stockée vers folder:A. Une arête en pointillés mise en évidence, étiquetée user, contextuel, va de user:chen à network:office : elle n’existe que dans cette requête Check. Grâce à elle, les deux branches de l’intersection sont satisfaites."
+  desc="user:chen a une arête viewer stockée vers folder:A. network:office a une arête allowed_network stockée vers folder:A. Une arête en pointillés mise en évidence, étiquetée user, contextuel, va de user:chen à network:office : elle n’existe que dans cette requête Check. Grâce à elle, les deux branches de l’intersection sont satisfaites."
   nodes={[
     { id: "chen", x: 80, y: 110, label: "user:chen", kind: "subject", mono: true, on: true },
     { id: "net", x: 300, y: 185, label: "network:office", kind: "object", mono: true, on: true },
@@ -214,14 +214,14 @@ Quelles arêtes sont stockées, et lesquelles n’existent que pour cette requê
     { from: "chen", to: "net", label: "user\n(contextuel, cette\nrequête seulement)", dashed: true, on: true },
     { from: "net", to: "folder", label: "allowed_network\n(stocké)", on: true },
   ]}
-  caption="can_view = viewer ∩ (allowed_network → user). L’arête en pointillés provient de l’application, et non du stockage ; sans elle, l’intersection échoue."
+  caption="can_view = viewer ∩ (allowed_network → user). L’arête en pointillés provient de l’application, et non du stockage ; sans elle, l’intersection échoue."
 />
 
-Remarquez où a eu lieu la correspondance de l’adresse IP : dans l’application, avant l’appel. Les tuples contextuels déplacent le fait dans la requête, pas la logique dans le service. Le guide indique aussi leur portée : ils sont pris en charge par Check et ListObjects et "are not supported on read, expand and other endpoints" (« ne sont pas pris en charge par read, expand et les autres points de terminaison »), et un index de recherche construit à partir des modifications de tuples "will not be trivial" (« ne sera pas trivial ») à combiner avec eux. Cette affirmation provient du guide tel que consulté le 2026-11-13 ; des versions ultérieures ont pu élargir cette prise en charge.
+Remarquez où a eu lieu la correspondance de l’adresse IP : dans l’application, avant l’appel. Les tuples contextuels déplacent le fait dans la requête, pas la logique dans le service. Le guide indique aussi leur portée : ils sont pris en charge par Check et ListObjects et « are not supported on read, expand and other endpoints » (ne sont pas pris en charge par read, expand et les autres points de terminaison), et un index de recherche construit à partir des modifications de tuples « will not be trivial » (ne sera pas trivial) à combiner avec eux. Cette affirmation provient du guide tel que consulté le 2026-11-13 ; des versions ultérieures ont pu élargir cette prise en charge.
 
 ## Les attributs et règles de Permify
 
-Permify, dont l’acquisition par FusionAuth a été annoncée le 2025-11-20 ([Permify, 2025-11-20](https://permify.co/post/fusionauth-acquires-permify/)), stocke des attributs sur les entités, et non des conditions sur les relations. Son schéma comporte `attribute` et `rule`, et la documentation indique "we design our schema language based on" (« nous concevons notre langage de schéma en nous fondant sur ») CEL ([documentation ABAC de Permify](https://fusionauth.io/permify-docs/use-cases/abac)). L’exemple du [guide de modélisation](https://fusionauth.io/permify-docs/getting-started/modeling) de Permify :
+Permify, dont l’acquisition par FusionAuth a été annoncée le 2025-11-20 ([Permify, 2025-11-20](https://permify.co/post/fusionauth-acquires-permify/)), stocke des attributs sur les entités, et non des conditions sur les relations. Son schéma comporte `attribute` et `rule`, et la documentation indique « we design our schema language based on » (nous concevons notre langage de schéma en nous fondant sur) CEL ([documentation ABAC de Permify](https://fusionauth.io/permify-docs/use-cases/abac)). L’exemple du [guide de modélisation](https://fusionauth.io/permify-docs/getting-started/modeling) de Permify :
 
 ```text
 entity organization {
@@ -235,17 +235,17 @@ rule check_ip_range(ip_range string[]) {
 }
 ```
 
-*Schéma Permify ; copié de l’exemple documenté au 2026-11-13 ; aucun validateur n’a été exécuté.*
+*Schéma Permify ; copié de l’exemple documenté au 2026-11-13 ; aucun validateur n’a été exécuté.*
 
-`ip_range` est un attribut stocké de l’organisation ; `context.data.ip` arrive avec la requête de vérification. Les montants s’inscrivent dans le même schéma ; l’exemple bancaire de la page ABAC comporte `permission withdraw = check_balance(balance) and owner`. Ce que renvoie une vérification Permify lorsqu’une valeur manque dans `context.data` n’a pas été trouvé dans les pages citées et n’est pas indiqué ici.
+`ip_range` est un attribut stocké de l’organisation ; `context.data.ip` arrive avec la requête de vérification. Les montants s’inscrivent dans le même schéma ; l’exemple bancaire de la page ABAC comporte `permission withdraw = check_balance(balance) and owner`. Ce que renvoie une vérification Permify lorsqu’une valeur manque dans `context.data` n’a pas été trouvé dans les pages citées et n’est pas indiqué ici.
 
 ## Comparaison
 
 | | Article | SpiceDB | OpenFGA | Permify |
 | --- | --- | --- | --- | --- |
-| Emplacement de la condition | Nulle part : les tuples ont quatre éléments (§2.1) | Sur une relation : un caveat nommé, autorisé par `with` dans le schéma | Sur un tuple : une condition nommée, autorisée par `with` dans la restriction de type | Dans une `rule` qu’appelle une permission, portant sur des `attribute` d’entités et sur le contexte de la requête |
-| Langage d’expression | Aucun | CEL | CEL | « Fondé sur » CEL |
-| Faits connus au moment de la requête | Aucun ; Check transporte userset, utilisateur et zookie (§2.4.4) | `context` dans `CheckPermission` | `context` dans Check ; tuples contextuels | `context` (`context.data`) |
+| Emplacement de la condition | Nulle part : un tuple se réduit à un objet, une relation et un utilisateur (§2.1) | Sur une relation : un caveat nommé, autorisé par `with` dans le schéma | Sur un tuple : une condition nommée, autorisée par `with` dans la restriction de type | Dans une `rule` qu’appelle une permission, portant sur des `attribute` d’entités et sur le contexte de la requête |
+| Langage d’expression | Aucun | CEL | CEL | « Fondé sur » CEL |
+| Faits connus au moment de la requête | Aucun ; Check transporte userset, utilisateur et zookie (§2.4.4) | `context` dans `CheckPermission` | `context` dans Check ; tuples contextuels | `context` (`context.data`) |
 | Valeur stockée ou valeur de la requête | Sans objet | La relation l’emporte | Le contexte persistant l’emporte | Non vérifié |
 | Contexte manquant | Sans objet | `PERMISSIONSHIP_CONDITIONAL_PERMISSION` avec les champs manquants | La requête échoue avec une erreur | Non vérifié |
 | Expiration | Supprimer le tuple (à la charge du client) | `with expiration` (v1.40), ou un caveat | Une condition sur `current_time` | Non vérifié |
@@ -254,28 +254,28 @@ Les sources de chaque cellule figurent dans les sections ci-dessus.
 
 ## Comment Cedar classe Zanzibar
 
-Cedar est un langage de politiques dont l’article le présente comme prenant en charge nativement le RBAC et l’ABAC. Cet article (Cutler et al., "Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)", [arXiv:2403.04651v2](https://arxiv.org/abs/2403.04651), 2024-03-08) situe Zanzibar dans ses travaux connexes (§6). Il qualifie Zanzibar de "a highly scalable, relationship-based access control (ReBAC) system" (« système de contrôle d’accès fondé sur les relations (ReBAC) hautement évolutif ») et indique que "Zanzibar supports RBAC and ReBAC with a natural syntax, and with policy validation" (« Zanzibar prend en charge le RBAC et le ReBAC avec une syntaxe naturelle et avec validation des politiques »), que "forbid-style policies are supported by expressing one relationship in terms of non-membership in some other relation" (« les politiques de type interdiction sont prises en charge en exprimant une relation en termes de non-appartenance à une autre relation »), et que "it does not support ABAC, string matching, or search." (« il ne prend en charge ni l’ABAC, ni la correspondance de chaînes, ni la recherche. ») Il décrit Cedar comme l’inverse : "Cedar natively supports RBAC and ABAC, can encode ReBAC, and supports forbid policies." (« Cedar prend en charge nativement le RBAC et l’ABAC, peut encoder le ReBAC et prend en charge les politiques d’interdiction. »)
+Cedar est un langage de politiques que son article présente comme prenant en charge nativement le RBAC et l’ABAC. Cet article (Cutler et al., « Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version) », [arXiv:2403.04651v2](https://arxiv.org/abs/2403.04651), 2024-03-08) situe Zanzibar dans ses travaux connexes (§6). Il qualifie Zanzibar de « a highly scalable, relationship-based access control (ReBAC) system » (système de contrôle d’accès fondé sur les relations (ReBAC) hautement évolutif) et indique que « Zanzibar supports RBAC and ReBAC with a natural syntax, and with policy validation » (Zanzibar prend en charge le RBAC et le ReBAC avec une syntaxe naturelle et avec validation des politiques), que « forbid-style policies are supported by expressing one relationship in terms of non-membership in some other relation » (les politiques de type interdiction sont prises en charge en exprimant une relation en termes de non-appartenance à une autre relation), et que « it does not support ABAC, string matching, or search. » (il ne prend en charge ni l’ABAC, ni la correspondance de chaînes, ni la recherche.) Il décrit Cedar comme l’inverse : « Cedar natively supports RBAC and ABAC, can encode ReBAC, and supports forbid policies. » (Cedar prend en charge nativement le RBAC et l’ABAC, peut encoder le ReBAC et prend en charge les politiques d’interdiction.)
 
-L’article sur Cedar décrit l’article de 2019 sur Zanzibar ; ses expériences utilisent OpenFGA, qu’il présente comme "a recently developed language for specifying relationship-based access control (ReBAC) [43] policies" (« un langage récemment développé pour spécifier des politiques de contrôle d’accès fondé sur les relations (ReBAC) [43] »), où la référence 43 est l’article sur Zanzibar (§1). Les caveats et conditions présentés ci-dessus sont des extensions de produits que la classification de l’article ne couvre pas. Sa phrase sur le "forbid-style" correspond au schéma d’exclusion de la [page sur la modélisation](../modeling/#listes-de-blocage-exclusion).
+L’article sur Cedar décrit l’article de 2019 sur Zanzibar ; ses expériences utilisent OpenFGA, qu’il présente comme « a recently developed language for specifying relationship-based access control (ReBAC) [43] policies » (un langage récemment développé pour spécifier des politiques de contrôle d’accès fondé sur les relations (ReBAC) [43]), où la référence 43 est l’article sur Zanzibar (§1). Les caveats et conditions présentés ci-dessus sont des extensions de produits que la classification de l’article ne couvre pas. Sa phrase sur le « forbid-style » correspond au schéma d’exclusion de la [page sur la modélisation](../modeling/#listes-de-blocage-exclusion).
 
 ## Quand garder la règle dans l’application
 
 Les conditions dans le service d’autorisation ne sont pas gratuites. Cette section présente les recommandations de cette page, et non une affirmation de l’article ou des éditeurs.
 
-- **Le fait n’existe que dans la requête.** Un montant de virement ou l’adresse IP de l’appelant sont d’abord connus de l’application. Les transmettre comme contexte fonctionne, mais le service ne fait que les évaluer ; il ne peut ni les stocker, ni les lister, ni les auditer. Une règle telle que « montant au plus égal à 1,000 », vérifiée par l’application après la vérification de relation, est souvent plus simple, et elle garde les réponses du service d’autorisation susceptibles d’être mises en cache.
-- **Le listage et l’indexation exigent des faits stockés.** L’API Expand de l’article existe pour que les clients puissent "build efficient search indices for access-controlled content" (« construire des index de recherche efficaces pour du contenu soumis au contrôle d’accès ») (§2.4.5). Une autorisation qui dépend de la requête ne peut pas être indexée à l’avance ; le guide d’OpenFGA le dit à propos des tuples contextuels, et une vérification SpiceDB peut renvoyer `CONDITIONAL_PERMISSION` tant que l’appelant n’a pas fourni le contexte.
-- **Les limites de temps ont leur place dans le stockage.** L’expiration est une propriété de l’autorisation, et non de la requête. L’expiration intégrée (SpiceDB) ou une condition sur le tuple stocké (OpenFGA) la conserve à côté de l’autorisation, là où un audit de type « qui pouvait consulter le readme mardi dernier » peut la voir.
+- **Le fait n’existe que dans la requête.** Un montant de virement ou l’adresse IP de l’appelant sont d’abord connus de l’application. Les transmettre comme contexte fonctionne, mais le service ne fait que les évaluer ; il ne peut ni les stocker, ni les lister, ni les auditer. Une règle telle que « montant au plus égal à 1,000 », vérifiée par l’application après la vérification de relation, est souvent plus simple, et elle garde les réponses du service d’autorisation susceptibles d’être mises en cache.
+- **Le listage et l’indexation exigent des faits stockés.** L’API Expand de l’article existe pour que les clients puissent « build efficient search indices for access-controlled content » (construire des index de recherche efficaces pour du contenu soumis au contrôle d’accès) (§2.4.5). Une autorisation qui dépend de la requête ne peut pas être indexée à l’avance ; le guide d’OpenFGA le dit à propos des tuples contextuels, et une vérification SpiceDB peut renvoyer `CONDITIONAL_PERMISSION` tant que l’appelant n’a pas fourni le contexte.
+- **Les limites de temps ont leur place dans le stockage.** L’expiration est une propriété de l’autorisation, et non de la requête. L’expiration intégrée (SpiceDB) ou une condition sur le tuple stocké (OpenFGA) la conserve à côté de l’autorisation, là où un audit de type « qui pouvait consulter le readme mardi dernier » peut la voir.
 - **Les attributs qui changent souvent coûtent moins cher en contexte qu’en tuples.** Écrire un tuple chaque fois que la localisation d’un utilisateur ou le statut d’un document change transforme chaque modification en double écriture. Une condition évaluée sur le contexte de la requête l’évite, au prix de faire confiance à l’appelant pour envoyer les bonnes valeurs.
 
 <Callout kind="paper" title="Dans l’article">
 
-La grammaire des tuples et sa clé primaire : §2.1. La clé des lignes de stockage : §3.1.1. Les trois entrées de la requête Check : §2.4.4. Expand et les index de recherche : §2.4.5. L’article ne comporte aucune section sur les conditions ou les attributs ; tout ce qui suit la première section de cette page décrit des produits.
+La grammaire des tuples et sa clé primaire : §2.1. La clé des lignes de stockage : §3.1.1. Les trois entrées de la requête Check : §2.4.4. Expand et les index de recherche : §2.4.5. L’article ne comporte aucune section sur les conditions ou les attributs ; tout ce qui suit la première section de cette page décrit des produits.
 
 </Callout>
 
 ## Sources
 
-- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- Ruoming Pang et al., « Zanzibar: Google's Consistent, Global Authorization System », USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
 - AuthZed, [documentation des caveats](https://authzed.com/docs/spicedb/concepts/caveats)
 - AuthZed, [documentation des relations à expiration](https://authzed.com/docs/spicedb/concepts/expiring-relationships)
 - AuthZed, [The Evolution of Expiration](https://authzed.com/blog/the-evolution-of-expiration), 2025-02-13

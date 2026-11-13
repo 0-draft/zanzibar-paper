@@ -29,7 +29,7 @@ El lado de la solicitud es igual de estrecho. "A check request specifies a users
   height={250}
   minWidth={520}
   title="Lo que lleva la solicitud Check del artículo"
-  desc="Una caja de cliente envía una solicitud Check a una caja de servidor de Zanzibar. La solicitud lleva tres cosas, dibujadas como cajas a la izquierda: el userset doc:readme#view, el usuario user:chen y un zookie. A la derecha, un grupo discontinuo con la etiqueta no está en la solicitud del artículo contiene tres notas: la dirección IP del llamante, la hora actual y el importe de la transacción. El servidor solo lee tuplas de relación del almacenamiento."
+  desc="Una caja de cliente envía una solicitud Check a una caja de servidor de Zanzibar. La solicitud lleva tres cosas, dibujadas como cajas a la izquierda: el userset doc:readme#view, el usuario user:chen y un zookie. A la derecha, un grupo discontinuo con la etiqueta “no está en la solicitud del artículo” contiene tres notas: la dirección IP del llamante, la hora actual y el importe de la transacción. El servidor solo lee tuplas de relación del almacenamiento."
   groups={[{ x: 400, y: 10, w: 210, h: 140, label: "no está en la solicitud del artículo" }]}
   nodes={[
     { id: "client", x: 90, y: 200, label: "Cliente", kind: "client" },
@@ -172,7 +172,7 @@ condition non_expired_grant(current_time: timestamp, grant_time: timestamp, gran
 
 *DSL de OpenFGA; sigue la sintaxis documentada a 2026-11-13; no se ha ejecutado ningún validador.*
 
-La tupla `user:chen`, `viewer`, `doc:readme` se escribe con el nombre de condición `non_expired_grant` y un contexto con `grant_time` y `grant_duration` (el ejemplo de la guía usa `2023-01-01T00:00:00Z` y `10m`). Cada comprobación pasa `current_time`. Las dos comprobaciones de la guía muestran el resultado: a las `00:09:50`, allowed es `true`; a las `00:10:01`, es `false`. Como en SpiceDB, el contexto almacenado y el de la solicitud se "merged together into a single evaluation context" (combinan en un único contexto de evaluación), y "persisted context has higher precedence than request context" (el contexto persistido tiene mayor precedencia que el contexto de la solicitud) (guía de condiciones).
+La tupla `user:chen`, `viewer`, `doc:readme` se escribe con el nombre de condición `non_expired_grant` y un contexto con `grant_time` y `grant_duration` (el ejemplo de la guía usa `2023-01-01T00:00:00Z` y `10m`). Cada comprobación pasa `current_time`. Las dos comprobaciones de la guía muestran el resultado: a las `00:09:50`, allowed es `true`; a las `00:10:01`, es `false`. Como en SpiceDB, el contexto almacenado y el de la solicitud se combinan: "merged together into a single evaluation context" (combinados en un único contexto de evaluación), y "persisted context has higher precedence than request context" (el contexto persistido tiene mayor precedencia que el contexto de la solicitud) (guía de condiciones).
 
 Dos diferencias respecto a SpiceDB. La falta de contexto es un error, no una tercera respuesta: "If you don't provide the current_time in the context, the Check and ListObjects operations will fail" (si no proporciona current_time en el contexto, las operaciones Check y ListObjects fallarán), con el mensaje "failed to evaluate relationship condition 'non_expired_grant': context is missing parameters '[current_time]'" ([blog de OpenFGA, 2023-11-06](https://openfga.dev/blog/conditional-tuples-announcement)). Y hay límites documentados: el contexto almacenado "is limited to 32KB in size" (está limitado a 32KB), y el servidor impone "a maximum Google CEL expression evaluation cost of 100 (by default)" (un coste máximo de evaluación de expresiones CEL de Google de 100, por defecto) (guía de condiciones). La misma entrada del blog sitúa la función en OpenFGA 1.4.0-rc1.
 
@@ -243,7 +243,7 @@ rule check_ip_range(ip_range string[]) {
 
 | | Artículo | SpiceDB | OpenFGA | Permify |
 | --- | --- | --- | --- | --- |
-| Dónde reside la condición | En ninguna parte: las tuplas tienen cuatro partes (§2.1) | En una relación: un caveat con nombre permitido por `with` en el esquema | En una tupla: una condición con nombre permitida por `with` en la restricción de tipo | En una `rule` a la que llama un permiso, sobre `attribute`s de entidades y el contexto de la solicitud |
+| Dónde reside la condición | En ninguna parte: una tupla es solo objeto, relación y usuario (§2.1) | En una relación: un caveat con nombre permitido por `with` en el esquema | En una tupla: una condición con nombre permitida por `with` en la restricción de tipo | En una `rule` a la que llama un permiso, sobre `attribute`s de entidades y el contexto de la solicitud |
 | Lenguaje de expresiones | Ninguno | CEL | CEL | "Based on" (basado en) CEL |
 | Datos del momento de la solicitud | Ninguno; Check lleva userset, usuario y zookie (§2.4.4) | `context` en `CheckPermission` | `context` en Check; tuplas contextuales | `context` (`context.data`) |
 | Valor almacenado frente a valor de la solicitud | No aplica | Gana la relación | Gana el contexto persistido | Sin verificar |

@@ -15,7 +15,7 @@ Jedes Autorisierungssystem beantwortet dieselbe Art von Frage: Darf dieser Benut
 
 1971 beschrieb Butler Lampson Schutz als Matrix: Zeilen sind Domänen (in heutigen Begriffen Subjekte), Spalten sind Objekte, und jede Zelle listet den Zugriff auf, den eine Domäne auf ein Objekt hat ([Lampson, „Protection“](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)). Kein reales System speichert die ganze Matrix. Eine ACL speichert ihre Spalten, Rollen und Attributregeln berechnen ihre Zellen, und ein Beziehungsgraph leitet sie durch das Verfolgen von Kanten ab.
 
-Diese Seite modelliert eine Zelle auf vier Arten. Das durchgehende Beispiel: Anne, Beto und Chen (`user:anne`, `user:beto`, `user:chen`); das Dokument `doc:readme` in `folder:A`; die Gruppe `group:eng`. Anne ist Eigentümerin des Readme, Beto ist in eng, die Mitglieder von eng sehen das Readme, und Chen sieht Ordner A. Die Entscheidung lautet:
+Diese Seite modelliert eine Zelle auf vier Arten. Das durchgehende Beispiel: Anne, Beto und Chen (`user:anne`, `user:beto`, `user:chen`); das Dokument `doc:readme` in `folder:A`; die Gruppe `group:eng`. Anne ist Eigentümerin des Readmes, Beto ist in eng, die Mitglieder von eng sehen das Readme, und Chen sieht Ordner A. Die Entscheidung lautet:
 
 ```text
 Can user:chen view doc:readme?
@@ -27,14 +27,14 @@ Die erwartete Antwort ist ja, und zwar nur wegen des Ordners. Chen hat keine dir
 
 Eine Zugriffskontrollliste hängt an jedes Objekt eine Liste von Einträgen, jeder bestehend aus einem Prinzipal und einer Menge von Rechten. Multics hatte ACLs "on segments and directories" (auf Segmenten und Verzeichnissen), mit Einträgen aus "a principal identifier and a set of permissions bits" (einem Prinzipal-Bezeichner und einer Menge von Berechtigungsbits) (§5, mit Verweis auf Saltzers Paper von der SOSP '73, überarbeitet als [Saltzer 1974](https://dl.acm.org/doi/10.1145/361011.361067)). Spätere Systeme erlaubten es einem Eintrag, eine Gruppe zu nennen, wie es POSIX-ACLs tun (§5).
 
-Was sagt die eigene Liste des Readme über Chen?
+Was sagt die eigene Liste des Readmes über Chen?
 
 <Graph
   width={600}
   height={230}
   minWidth={500}
   title="Die ACL von doc:readme"
-  desc="Zwei Listen nebeneinander. Links folder:A mit einem Eintrag: user:chen · view. Rechts doc:readme mit drei Einträgen: user:anne · owner, group:eng · view (gestrichelt, ein Gruppeneintrag) und user:chen · view. Ein gestrichelter, hervorgehobener Pfeil mit der Beschriftung von der App kopiert führt vom Chen-Eintrag des Ordners zum Chen-Eintrag des Readme."
+  desc="Zwei Listen nebeneinander. Links folder:A mit einem Eintrag: user:chen · view. Rechts doc:readme mit drei Einträgen: user:anne · owner, group:eng · view (gestrichelt, ein Gruppeneintrag) und user:chen · view. Ein gestrichelter, hervorgehobener Pfeil mit der Beschriftung von der App kopiert führt vom Chen-Eintrag des Ordners zum Chen-Eintrag des Readmes."
   nodes={[
     { id: "fh", x: 130, y: 40, label: "folder:A", kind: "object", mono: true },
     { id: "fc", x: 130, y: 100, label: "user:chen · view", kind: "object", mono: true, w: 200, on: true },
@@ -46,10 +46,10 @@ Was sagt die eigene Liste des Readme über Chen?
   edges={[
     { from: "fc", to: "dc", label: "von der App kopiert", dashed: true, on: true },
   ]}
-  caption="Jedes Objekt trägt seine eigene Liste. Der Chen-Eintrag des Readme existiert nur, weil etwas ihn vom Ordner kopiert hat."
+  caption="Jedes Objekt trägt seine eigene Liste. Der Chen-Eintrag des Readmes existiert nur, weil etwas ihn vom Ordner kopiert hat."
 />
 
-Die Prüfung selbst ist ein Nachschlagen: die Liste des Readme nach Chen durchsuchen. Beachten Sie, wo der Ordner geblieben ist. Vererbung ist nicht Teil des ACL-Modells, also muss der Eintrag auf das Readme kopiert werden, entweder beim Anlegen des Dokuments (VMS "supports ACL inheritance for files created within a directory tree", §5, also: unterstützt ACL-Vererbung für Dateien, die innerhalb eines Verzeichnisbaums angelegt werden) oder durch die Anwendung. Einmal kopiert, weiß der Eintrag nicht mehr, woher er stammt.
+Die Prüfung selbst ist ein Nachschlagen: die Liste des Readmes nach Chen durchsuchen. Beachten Sie, wo der Ordner geblieben ist. Vererbung ist nicht Teil des ACL-Modells, also muss der Eintrag auf das Readme kopiert werden, entweder beim Anlegen des Dokuments (VMS "supports ACL inheritance for files created within a directory tree", §5, also: unterstützt ACL-Vererbung für Dateien, die innerhalb eines Verzeichnisbaums angelegt werden) oder durch die Anwendung. Einmal kopiert, weiß der Eintrag nicht mehr, woher er stammt.
 
 ## RBAC: Benutzer, Rollen, Berechtigungen
 
@@ -95,7 +95,7 @@ Welche Rolle gibt Chen die Berechtigung zum Sehen?
   caption="Chen hat role:folderA_viewer, und die Berechtigungsmenge dieser Rolle enthält view doc:readme."
 />
 
-Der Ordner überlebt nur als Name. `folderA_viewer` ist mit `folder:A` auf keine Weise verbunden, die das System versteht; jemand muss ihre Berechtigungsmenge gleich „alles in Ordner A“ halten. Rollen pro Objekt wie `readme_owner` sind das Muster, das zur Rollenexplosion führt, die in der Tabelle unten besprochen wird.
+Der Ordner überlebt nur als Name. `folderA_viewer` ist mit `folder:A` auf keine Weise verbunden, die das System versteht; jemand muss dafür sorgen, dass ihre Berechtigungsmenge „allem in Ordner A“ entspricht. Rollen pro Objekt wie `readme_owner` sind das Muster, das zur Rollenexplosion führt, die in der Tabelle unten besprochen wird.
 
 ## ABAC: ein Prädikat über Attribute
 
@@ -159,7 +159,7 @@ Beachten Sie die beiden hervorgehobenen Attribute. `doc:readme.folder` und `fold
 
 ## ReBAC: ein Graph von Beziehungen
 
-Beziehungsbasierte Zugriffskontrolle entscheidet anhand der Beziehungen zwischen dem Anfragenden und der Ressource. Fong schreibt Carrie Gates die Prägung des Begriffs zu (ihr Workshop-Paper von 2007 wurde für diese Seite nicht geprüft), und das Modell von Philip Fong aus dem Jahr 2011 stützt Entscheidungen "on the relationship between the resource owner and the resource accessor" (auf die Beziehung zwischen dem Eigentümer der Ressource und demjenigen, der auf sie zugreift) ([Fong 2011](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)). Fong betont, dass sich binäre Relationen zusammensetzen lassen, etwa zu Freunden von Freunden, während eine Rolle ein einstelliges Prädikat ist, das über boolesche Kombinationen hinaus wenig bietet.
+Beziehungsbasierte Zugriffskontrolle entscheidet anhand der Beziehungen zwischen dem Anfragenden und der Ressource. Fong schreibt Carrie Gates die Prägung des Begriffs zu (ihr Workshop-Paper von 2007 wurde für diese Seite nicht geprüft), und das Modell von Philip Fong aus dem Jahr 2011 stützt Entscheidungen "on the relationship between the resource owner and the resource accessor" (auf die Beziehung zwischen dem Eigentümer der Ressource und demjenigen, der auf sie zugreift) ([Fong 2011](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)). Fong betont, dass sich binäre Relationen verketten lassen, etwa zu Freunden von Freunden, während eine Rolle ein einstelliges Prädikat ist, das über boolesche Kombinationen hinaus wenig bietet.
 
 Zanzibar speichert jede Beziehung als Relationstupel, `object#relation@user` (§2.1), und eine Namespace-Konfiguration sagt, wie sich Relationen kombinieren. Abbildung 1 des Papers kodiert genau dieses Beispiel: Eigentümer sind Bearbeiter, Bearbeiter sind Betrachter, und "viewers of the parent folder are also viewers of the document" (Betrachter des übergeordneten Ordners sind auch Betrachter des Dokuments). Das Paper verwendet das Wort ReBAC nicht.
 
@@ -190,19 +190,19 @@ Wie erreicht ein Graph gespeicherter Tupel Chen?
   caption="Durchgezogene Kanten sind gespeicherte Tupel. Die gestrichelte Kante ist nicht gespeichert: Check berechnet sie aus der parent-Regel in der Namespace-Konfiguration."
 />
 
-Hier ist der Ordner noch ein Ordner. Das Readme zeigt mit einem `parent`-Tupel auf `folder:A`, und die Regel macht zur Prüfzeit aus „Betrachter des übergeordneten Ordners“ „Betrachter des Readme“. Der schrittweise Durchgang steht auf der [Seite zu Relationstupeln](../relation-tuples/).
+Hier ist der Ordner noch ein Ordner. Das Readme zeigt mit einem `parent`-Tupel auf `folder:A`, und die Regel macht zur Prüfzeit aus „Betrachter des übergeordneten Ordners“ „Betrachter des Readmes“. Der schrittweise Durchgang steht auf der [Seite zu Relationstupeln](../relation-tuples/).
 
 ## Dasselbe Beispiel, Zelle für Zelle
 
 | | ACL | RBAC | ABAC | ReBAC (Zanzibar) |
 | --- | --- | --- | --- | --- |
-| Was gespeichert wird | Die Liste des Readme: Anne (owner), `group:eng` (view), Chen (view, von Ordner A kopiert) | Drei Rollenzuweisungen und die Berechtigungsmengen von drei Rollen | Drei Regeln, dazu Attribute an Benutzern, dem Readme und Ordner A | Fünf Tupel (owner, eng-Mitglied, eng-Betrachter, parent, Ordner-Betrachter) und eine Namespace-Konfiguration |
+| Was gespeichert wird | Die Liste des Readmes: Anne (owner), `group:eng` (view), Chen (view, von Ordner A kopiert) | Drei Rollenzuweisungen und die Berechtigungsmengen von drei Rollen | Drei Regeln, dazu Attribute an Benutzern, dem Readme und Ordner A | Fünf Tupel (owner, eng-Mitglied, eng-Betrachter, parent, Ordner-Betrachter) und eine Namespace-Konfiguration |
 | Wer das Readme sehen kann | Die Liste lesen und `group:eng` expandieren: Anne, Beto, Chen | Jeder mit einer Rolle, die „view `doc:readme`“ gewährt: Anne, Beto, Chen | Nirgends gespeichert: die Regeln für jeden Benutzer auswerten. Anne, Beto, Chen | `doc:readme#viewer` expandieren (§2.4.5): Anne, Beto, Chen |
-| Beto verlässt eng | Beto aus der Gruppe entfernen; die Liste des Readme bleibt unberührt | Betos Zuweisung zu `eng` entfernen | `user:beto.team` ändern | Ein Tupel löschen, `group:eng#member@user:beto` |
+| Beto verlässt eng | Beto aus der Gruppe entfernen; die Liste des Readmes bleibt unberührt | Betos Zuweisung zu `eng` entfernen | `user:beto.team` ändern | Ein Tupel löschen, `group:eng#member@user:beto` |
 | Das Readme wandert von Ordner A nach Ordner B | Die von A kopierten Einträge entfernen und die von B hineinkopieren, auf dem Readme und auf allem anderen, das mitgewandert ist | „view `doc:readme`“ aus `folderA_viewer` herausnehmen und einer Rolle `folderB_viewer` hinzufügen | `doc:readme.folder` ändern; die Regeln bleiben gleich | Ein `parent`-Tupel ersetzen: `doc:readme#parent@folder:A#...` wird zu `@folder:B#...` |
-| Was schwierig ist | Vererbung und Gruppen sind Zusätze; „was kann Chen sehen?“ heißt, die Liste jedes Objekts zu durchsuchen | Rollenexplosion: "thousands of separate roles" (Tausende separater Rollen), und n boolesche Bedingungen können 2ⁿ Rollen erfordern ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)); Rollen pro Objekt wie `readme_owner` verschlimmern das | Auditierung: ABAC "is easy to set up, but analyzing or changing user permissions can be problematic" (ist leicht einzurichten, aber Benutzerberechtigungen zu analysieren oder zu ändern kann problematisch sein) ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)). „Attribute Sprawl“ ist ein Branchenkürzel für dasselbe Problem, kein NIST-Begriff | Graphtraversierung: "Recursive pointer chasing … has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups" (§3.2.4) (Rekursive Zeigerverfolgung … hat Mühe, bei tief verschachtelten Gruppen oder Gruppen mit sehr vielen Untergruppen eine niedrige Latenz zu halten). SpiceDB begrenzt die Tiefe standardmäßig auf [50 Schritte](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), OpenFGAs `resolveNodeLimit` auf [25](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
+| Was schwierig ist | Vererbung und Gruppen sind Zusätze; „was kann Chen sehen?“ heißt, die Liste jedes Objekts zu durchsuchen | Rollenexplosion: "thousands of separate roles" (Tausende separater Rollen), und n boolesche Bedingungen können 2ⁿ Rollen erfordern ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)); Rollen pro Objekt wie `readme_owner` verschlimmern das | Auditierung: ABAC "is easy to set up, but analyzing or changing user permissions can be problematic" (ist leicht einzurichten, aber Benutzerberechtigungen zu analysieren oder zu ändern kann problematisch sein) ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)). „Attribute Sprawl“ ist eine in der Branche gängige Bezeichnung für dasselbe Problem, kein NIST-Begriff | Graphtraversierung: "Recursive pointer chasing … has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups" (§3.2.4) (Rekursive Zeigerverfolgung … hat Mühe, bei tief verschachtelten Gruppen oder Gruppen mit sehr vielen Untergruppen eine niedrige Latenz zu halten). SpiceDB begrenzt die Tiefe standardmäßig auf [50 Schritte](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), OpenFGAs `resolveNodeLimit` auf [25](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
 
-Beachten Sie die beiden mittleren Zeilen. Dass Beto eng verlässt, ist in jedem Modell eine Änderung, weil jedes Modell hier eine Form von Gruppe hat. Beim Verschieben des Ordners trennen sich die Wege: ACL und RBAC haben die Bedeutung des Ordners in die Berechtigungen des Readme kopiert und müssen diese daher neu schreiben; ABAC und ReBAC haben den Ordner als Daten behalten, also ändert sich ein Wert. ReBAC hält außerdem „wer kann sehen?“ aus gespeicherten Daten beantwortbar, was die reine Regelvariante von ABAC nicht kann.
+Beachten Sie die beiden mittleren Zeilen. Dass Beto eng verlässt, ist in jedem Modell eine Änderung, weil jedes Modell hier eine Form von Gruppe hat. Beim Verschieben des Ordners trennen sich die Wege: ACL und RBAC haben die Bedeutung des Ordners in die Berechtigungen des Readmes kopiert und müssen diese daher neu schreiben; ABAC und ReBAC haben den Ordner als Daten behalten, also ändert sich ein Wert. ReBAC hält außerdem „wer kann sehen?“ aus gespeicherten Daten beantwortbar, was die reine Regelvariante von ABAC nicht kann.
 
 ## Wo Zanzibar steht
 
@@ -238,7 +238,7 @@ ABAC ist der Teil, den das Paper nicht abdeckt. Bedingungen an die Anfrage, etwa
 
 <Callout kind="note" title="Reale Systeme mischen Modelle">
 
-Wenige produktive Systeme folgen nur einem Modell. Cloud IAM von Google, das Benutzern Rollen zuweist, "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (§5) (ist als Schicht auf dem ACL-Speicher- und Auswertungssystem von Zanzibar gebaut). Eine Kombination, die die obigen Systeme im Zanzibar-Stil unterstützen, ist ein Beziehungsgraph für Teilen und Hierarchie, Rollen als benannte Relationen darin und einige Attributbedingungen für den Kontext. Das ist die Zusammenfassung dieser Seite, keine Aussage des Papers.
+Nur wenige produktive Systeme folgen einem einzigen Modell. Cloud IAM von Google, das Benutzern Rollen zuweist, "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (§5) (ist als Schicht auf dem ACL-Speicher- und Auswertungssystem von Zanzibar gebaut). Eine Kombination, die die obigen Systeme im Zanzibar-Stil unterstützen, ist ein Beziehungsgraph für Freigaben und Hierarchien, Rollen als benannte Relationen darin und einige Attributbedingungen für den Kontext. Das ist die Zusammenfassung dieser Seite, keine Aussage des Papers.
 
 </Callout>
 

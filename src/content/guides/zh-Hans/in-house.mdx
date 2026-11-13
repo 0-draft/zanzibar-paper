@@ -14,7 +14,7 @@ import Swimlane from "../../../components/diagram/Swimlane.astro";
 有些公司没有采用现成产品：它们读了论文，构建了自己的服务。有两家在 2021 年发表了详细的介绍，即 Airbnb（Himeji）和 Carta（AuthZ）。这两个系统在各自公司之外都无法获得，因此这里的一切都来自其工程师所写的内容，没有比那些文章更新的信息。
 
 <Callout title="这些文章是如何阅读的">
-这些文章发布在 Medium 上，而 Medium 对本站的检查程序返回了 HTTP 403。其全文于 2026-11-13 通过这两个专栏的 Medium RSS 源阅读（[Airbnb Engineering 源](https://medium.com/feed/airbnb-engineering/tagged/authorization)、[Building Carta 源](https://medium.com/feed/building-carta/tagged/authorization)），这些源包含相同的文章。Himeji 的事实与 [InfoQ 的报道](https://www.infoq.com/news/2021/05/airbnb-himeji)（2021-05-12）交叉核对过。存在一段与 Himeji 主要作者的对谈录像（[Authorization in Software](https://www.youtube.com/watch?v=TXZFi6Opbkk)），但未被使用：录像及其说明都无法读取。
+这些文章发布在 Medium 上，而 Medium 对本站的检查程序返回了 HTTP 403。其全文于 2026-11-13 通过这两个专栏的 Medium RSS 源阅读（[Airbnb Engineering 源](https://medium.com/feed/airbnb-engineering/tagged/authorization)、[Building Carta 源](https://medium.com/feed/building-carta/tagged/authorization)），这些源包含相同的文章。Himeji 的事实与 [InfoQ 的报道](https://www.infoq.com/news/2021/05/airbnb-himeji)（2021-05-12）交叉核对过。另有一段与 Himeji 主要作者的对谈录像（[Authorization in Software](https://www.youtube.com/watch?v=TXZFi6Opbkk)），但本页没有使用：录像及其说明都无法读取。
 </Callout>
 
 ## Airbnb Himeji
@@ -77,9 +77,9 @@ Carta 的 Aaron Tainter 发表了两篇文章："AuthZ: Carta's highly scalable 
 
 ### 索引与 ticket
 
-AuthZ 通过预先计算的索引而不是遍历图来回答检查："Traversing the graph is expensive, so AuthZ maintains a custom secondary index."（遍历图的代价很高，因此 AuthZ 维护了一个自定义的二级索引。）该索引维护两种集合：Actor Index Set（"the direct connections from actor leaf nodes"，来自行为者叶节点的直接连接）和 Object Index Set（"the direct and indirect connections to each object node"，到每个对象节点的直接和间接连接）。第二篇补充道："(Google's Zanzibar paper calls them Group2Group and Member2Group)"（（Google 的 Zanzibar 论文称之为 Group2Group 和 Member2Group）），即 Leopard 的两种集合类型（§3.2.4）。
+AuthZ 通过预先计算的索引而不是遍历图来回答检查："Traversing the graph is expensive, so AuthZ maintains a custom secondary index."（遍历图的代价很高，因此 AuthZ 维护了一个自定义的二级索引。）该索引维护两种集合：Actor Index Set（"the direct connections from actor leaf nodes"，来自行为者叶节点的直接连接）和 Object Index Set（"the direct and indirect connections to each object node"，到每个对象节点的直接和间接连接）。第二篇补充道："(Google's Zanzibar paper calls them Group2Group and Member2Group)"（Google 的 Zanzibar 论文称之为 Group2Group 和 Member2Group），即 Leopard 的两种集合类型（§3.2.4）。
 
-索引是异步构建的，因此使用方需要一种方法来得知自己的变更已经生效。这就是 *ticket* 的作用："During an update, AuthZ issues a Ticket (synonymous with a Zookie in Zanzibar) to the consumer."（在更新期间，AuthZ 向使用方签发一个 Ticket（等同于 Zanzibar 中的 Zookie）。）"A Ticket is an opaque token which represents the time at which the change was committed to AuthZ."（Ticket 是一个不透明的令牌，表示变更提交到 AuthZ 的时间。）
+索引是异步构建的，因此使用方需要一种方法来得知自己的变更已经生效。这就是 *ticket* 的作用："During an update, AuthZ issues a Ticket (synonymous with a Zookie in Zanzibar) to the consumer."（在更新期间，AuthZ 向使用方签发一个 Ticket（等同于 Zanzibar 中的 zookie）。）"A Ticket is an opaque token which represents the time at which the change was committed to AuthZ."（Ticket 是一个不透明的令牌，表示变更提交到 AuthZ 的时间。）
 
 当使用方在索引追上之前带着 ticket 进行检查时，会发生什么？
 
@@ -109,7 +109,7 @@ AuthZ 通过预先计算的索引而不是遍历图来回答检查："Traversing
 
 注意 ticket 在哪里被检查："AuthZ rejects requests when there are RelationTuples with commit timestamps less than or equal to the ticket provided by the consumer"（当存在提交时间戳小于或等于使用方所提供 ticket 的 RelationTuple 时，AuthZ 拒绝请求），使用方 "can try again later"（可以稍后重试）。第二篇中的更多细节：
 
-- "Several concurrent workers build the custom index asynchronously to keep API calls fast for our consumers."（多个并发的 worker 异步构建自定义索引，以便为使用方保持 API 调用的快速。）变更 "take a few hundred milliseconds to propagate through the system"（需要几百毫秒才能在系统中传播）。
+- "Several concurrent workers build the custom index asynchronously to keep API calls fast for our consumers."（多个并发的 worker 异步构建自定义索引，以使使用方的 API 调用保持快速。）变更 "take a few hundred milliseconds to propagate through the system"（需要几百毫秒才能在系统中传播）。
 - "AuthZ spawns three workers to build index changes for each commit."（AuthZ 为每次提交派生三个 worker 来构建索引变更。）结果暂存在中间存储中，并在 "when all commits before a timestamp have finished processing"（某个时间戳之前的所有提交都处理完毕时）合并进索引。
 - "AuthZ stores consumer-created RelationTuples in a datastore"（AuthZ 把使用方创建的 RelationTuple 存储在一个数据存储中），并且 "AuthZ maintains the full changelog of commit events in secondary storage"（AuthZ 在二级存储中维护提交事件的完整变更日志），与论文的变更日志类似（§3.1.2）。文章没有点名所用的数据库产品。
 - "Including network latency, the median permission check takes about 7 milliseconds. At the 95th percentile, we check permissions in 12 milliseconds."（包括网络延迟在内，权限检查的中位数约为 7 毫秒。在第 95 百分位，我们在 12 毫秒内完成权限检查。）
@@ -122,7 +122,7 @@ AuthZ 通过预先计算的索引而不是遍历图来回答检查："Traversing
 | --- | --- | --- |
 | 元组 `object#relation@user`（§2.1） | `entity # relation @ principal`，外加不含关系的引用元组 | RelationTuple：行为者、关系、对象 |
 | 带重写的命名空间配置（§2.3.1） | YAML 配置，集合代数 | 一种领域特定语言（未展示） |
-| zookie（§2.2） | 未说明 | Ticket，"synonymous with a Zookie"（等同于 Zookie） |
+| zookie（§2.2） | 未说明 | Ticket，"synonymous with a Zookie"（等同于 zookie） |
 | Leopard（§3.2.4） | 未说明；改为写入时扇出 | Actor 与 Object Index Set，由 worker 构建 |
 | 缓存（§3.2.5） | 分片、复制的内存缓存，目标命中率约 98% | 未说明 |
 | Spanner（§3.1） | Amazon Aurora | 未说明 |

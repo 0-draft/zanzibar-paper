@@ -22,7 +22,7 @@ import Swimlane from "../../../components/diagram/Swimlane.astro";
 
 Warrant ist ein in Go geschriebener Autorisierungsdienst. Sein README beschreibt "a relationship based access control (ReBAC) engine (inspired by Google Zanzibar)" (eine Engine für beziehungsbasierte Zugriffskontrolle (ReBAC), inspiriert von Google Zanzibar), die auch rollen- und attributbasierte Regeln abdeckt, und schreibt eine Beziehung als `[user:1] is an [editor] of [document:docA]` ([README](https://github.com/warrant-dev/warrant)). Eine gespeicherte Beziehung heißt *Warrant*.
 
-WorkOS hat Warrant 2024 übernommen. Das Datum, 2024-04-23, stammt aus einem Beitrag von WorkOS auf X ([Beitrag](https://x.com/WorkOS/status/1782774170146791776)): X lieferte die Seite nicht an den Prüfer dieser Website aus, daher wurde das Datum aus der ID des Beitrags dekodiert, und der Text des Beitrags ("Today, we are excited to announce the acquisition of @warrant_dev", also: Heute freuen wir uns, die Übernahme von @warrant_dev bekanntzugeben) wurde nur in einem Suchergebnis gesehen. Es wurde kein Blogbeitrag von WorkOS aus erster Hand gefunden. Die Warrant-Website zeigt nun "Warrant —> Now WorkOS FGA" ([warrant.dev](https://warrant.dev)), und das README verlinkt auf die Dokumentation von WorkOS FGA.
+WorkOS hat Warrant 2024 übernommen. Das Datum, 2024-04-23, stammt aus einem Beitrag von WorkOS auf X ([Beitrag](https://x.com/WorkOS/status/1782774170146791776)): X lieferte die Seite nicht an den Prüfer dieser Website aus, daher wurde das Datum aus der ID des Beitrags dekodiert, und der Text des Beitrags ("Today, we are excited to announce the acquisition of @warrant_dev", also: Heute freuen wir uns, die Übernahme von @warrant_dev bekanntzugeben) wurde nur in einem Suchergebnis gesehen. Ein Blogbeitrag von WorkOS selbst wurde nicht gefunden. Die Warrant-Website zeigt nun "Warrant —> Now WorkOS FGA" ([warrant.dev](https://warrant.dev)), und das README verlinkt auf die Dokumentation von WorkOS FGA.
 
 ## Paper und Warrant nebeneinander
 
@@ -119,7 +119,7 @@ Welche Datenbank beantwortet eine Anfrage?
 <Graph
   width={600}
   height={240}
-  title="Warrant-Installation, nach dem Open-Source-Code"
+  title="Warrant-Bereitstellung, nach dem Open-Source-Code"
   desc="Ihr Dienst ruft einen Warrant-HTTP-Dienst auf. Schreibvorgänge und Lesevorgänge, die Warrant-Token latest tragen, gehen an die primäre SQL-Datenbank. Andere Lesevorgänge gehen an den Reader-Pool, wenn ein Reader-DSN konfiguriert ist."
   nodes={[
     { id: "app", x: 90, y: 120, label: "Ihr Dienst", kind: "client" },
@@ -169,7 +169,7 @@ Was ändert `Warrant-Token: latest` für eine Prüfung direkt nach einem Schreib
 
 Das README selbst sagt, dass niedrige Latenz bei hohem Durchsatz "requires running Warrant as a distributed service with the use of Warrant-Tokens (also referred to as Zookies in Google Zanzibar)" (erfordert, Warrant als verteilten Dienst mit Warrant-Tokens zu betreiben (in Google Zanzibar auch Zookies genannt)), und dass "this open source version of Warrant is only capable of handling low-to-moderate throughput" (diese Open-Source-Version von Warrant nur niedrigen bis mittleren Durchsatz bewältigen kann) ([README](https://github.com/warrant-dev/warrant), vom Hersteller verfasst). Sein Link zu Warrant-Tokens führt inzwischen zur allgemeinen Übersicht von WorkOS FGA, die sie nicht beschreibt.
 
-Beachten Sie den Unterschied zum Paper. Ein zookie setzt eine Untergrenze, die es Zanzibar erlaubt, "to choose any timestamp fresher than the one encoded in a zookie" (jeden Zeitstempel zu wählen, der aktueller ist als der in einem zookie kodierte) und die meisten Prüfungen "at a default staleness with already replicated data" (mit einer Standard-Veraltung auf bereits replizierten Daten) zu bedienen (§2.2). `latest` enthält keinen Zeitpunkt: Es verlegt den Lesevorgang auf die primäre Datenbank, die die aktuellste Kopie ist, aber das Replikat aufgibt.
+Beachten Sie den Unterschied zum Paper. Ein zookie setzt eine Untergrenze, die es Zanzibar erlaubt, "to choose any timestamp fresher than the one encoded in a zookie" (jeden Zeitstempel zu wählen, der aktueller ist als der in einem zookie kodierte) und die meisten Prüfungen "at a default staleness with already replicated data" (mit einer Standard-Veraltung auf bereits replizierten Daten) zu bedienen (§2.2). `latest` enthält keinen Zeitpunkt: Es verlegt den Lesevorgang auf die primäre Datenbank: Das ist die aktuellste Kopie, verzichtet aber auf das Replikat.
 
 ## Unterschiede zum Paper
 
@@ -186,14 +186,13 @@ Beachten Sie den Unterschied zum Paper. Ein zookie setzt eine Untergrenze, die e
 
 ## Quellen
 
-
-- Warrant repository and README: [github.com/warrant-dev/warrant](https://github.com/warrant-dev/warrant)
-- Object type spec: [pkg/authz/objecttype/spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)
-- Check engine: [pkg/authz/check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go)
+- Repository und README von Warrant: [github.com/warrant-dev/warrant](https://github.com/warrant-dev/warrant)
+- Spezifikation der Objekttypen: [pkg/authz/objecttype/spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)
+- Check-Engine: [pkg/authz/check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go)
 - Tokens: [pkg/wookie](https://github.com/warrant-dev/warrant/tree/main/pkg/wookie)
-- Database pools: [pkg/database/sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go), [pkg/config/config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)
-- Default object types: [000002_create_default_obj_types.up.sql](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql)
-- Test fixtures: [tests/v2/authz.json](https://github.com/warrant-dev/warrant/blob/main/tests/v2/authz.json)
+- Datenbank-Pools: [pkg/database/sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go), [pkg/config/config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)
+- Standard-Objekttypen: [000002_create_default_obj_types.up.sql](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql)
+- Testfixtures: [tests/v2/authz.json](https://github.com/warrant-dev/warrant/blob/main/tests/v2/authz.json)
 - Website: [warrant.dev](https://warrant.dev)
-- WorkOS post on X: [x.com/WorkOS/status/1782774170146791776](https://x.com/WorkOS/status/1782774170146791776)
-- WorkOS FGA docs: [workos.com/docs/fga](https://workos.com/docs/fga)
+- Beitrag von WorkOS auf X: [x.com/WorkOS/status/1782774170146791776](https://x.com/WorkOS/status/1782774170146791776)
+- Dokumentation von WorkOS FGA: [workos.com/docs/fga](https://workos.com/docs/fga)

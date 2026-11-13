@@ -44,7 +44,7 @@ Zanzibar 자체는 살 수 없다. 논문은 "including Calendar, Cloud, Drive, 
 
 ## 그래프 데이터베이스가 필요하다
 
-Zanzibar 자체도 그래프 데이터베이스를 쓰지 않는다. "Zanzibar stores ACLs and their metadata in Spanner databases"(Zanzibar는 ACL과 그 메타데이터를 Spanner 데이터베이스에 저장한다)이며, 튜플은 "(shard ID, object ID, relation, user, commit timestamp)"((샤드 ID, 객체 ID, 관계, 사용자, 커밋 타임스탬프))를 키로 하는 행에 있다(§3, §3.1.1). 그래프는 저장 엔진이 아니라 서버가 쿼리 시점에 순회한다. 오픈 소스 구현들도 관계형 저장소 위에서 동작한다. SpiceDB는 CockroachDB, Cloud Spanner, PostgreSQL, MySQL을 지원하고([SpiceDB datastores](https://authzed.com/docs/spicedb/concepts/datastores)), OpenFGA는 인메모리 저장소 외에 Postgres, MySQL, SQLite를 지원한다([OpenFGA configuration](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)).
+Zanzibar 자체는 그래프 데이터베이스를 쓰지 않는다. "Zanzibar stores ACLs and their metadata in Spanner databases"(Zanzibar는 ACL과 그 메타데이터를 Spanner 데이터베이스에 저장한다)이며, 튜플은 "(shard ID, object ID, relation, user, commit timestamp)"((샤드 ID, 객체 ID, 관계, 사용자, 커밋 타임스탬프))를 키로 하는 행에 있다(§3, §3.1.1). 그래프는 저장 엔진이 아니라 서버가 쿼리 시점에 순회한다. 오픈 소스 구현들도 관계형 저장소 위에서 동작한다. SpiceDB는 CockroachDB, Cloud Spanner, PostgreSQL, MySQL을 지원하고([SpiceDB datastores](https://authzed.com/docs/spicedb/concepts/datastores)), OpenFGA는 인메모리 저장소 외에 Postgres, MySQL, SQLite를 지원한다([OpenFGA configuration](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)).
 
 ## AWS IAM과 같은 것이다
 
@@ -56,7 +56,7 @@ Zanzibar 자체도 그래프 데이터베이스를 쓰지 않는다. "Zanzibar s
 
 ## TrueTime이나 원자 시계가 필요하다
 
-필요한 것은 쓰기의 순서를 정하고 일관된 스냅샷을 읽는 방법이다. TrueTime은 Google이 그것을 얻은 방법이다. 논문은 "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness"(하부 데이터베이스 시스템인 Spanner에 의존하여 외부 일관성과 오래된 정도가 제한된 스냅샷 읽기를 모두 제공한다)(§5). AuthZed는 SpiceDB가 다른 곳에서 같은 순서를 얻는 방법을 기술한다. 겹치는 키에 대해서만 외부 일관성을 제공하는 CockroachDB에서는 기본 전략이 "all relationship writes touch the same row"(모든 관계 쓰기가 같은 행을 건드리게) 하며, PostgreSQL은 외부 일관성을 직접 제공하지만 그 위에 스냅샷 읽기를 추가해야 한다([AuthZed 블로그, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). 어떤 제품이 new enemy 보장을 유지하는지는 시계 하드웨어가 아니라 이러한 세부에 달려 있다. [일관성, 스냅샷, zookie](../consistency/)를 보라.
+필요한 것은 쓰기의 순서를 정하고 일관된 스냅샷을 읽는 방법이다. TrueTime은 Google이 그것을 얻은 방법이다. 논문은 "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness"(하부 데이터베이스 시스템인 Spanner에 의존하여 외부 일관성과 오래된 정도가 제한된 스냅샷 읽기를 모두 제공한다)고 쓴다(§5). AuthZed는 SpiceDB가 다른 곳에서 같은 순서를 얻는 방법을 기술한다. 겹치는 키에 대해서만 외부 일관성을 제공하는 CockroachDB에서는 기본 전략이 "all relationship writes touch the same row"(모든 관계 쓰기가 같은 행을 건드리게) 하며, PostgreSQL은 외부 일관성을 직접 제공하지만 그 위에 스냅샷 읽기를 추가해야 한다([AuthZed 블로그, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). 어떤 제품이 new enemy 보장을 유지하는지는 시계 하드웨어가 아니라 이러한 세부에 달려 있다. [일관성, 스냅샷, zookie](../consistency/)를 보라.
 
 ## 출처
 

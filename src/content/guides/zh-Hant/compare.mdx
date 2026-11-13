@@ -103,7 +103,7 @@ import Callout from "../../../components/diagram/Callout.astro";
     { from: "z", to: "topaz", dashed: true, dir: "none" },
     { from: "z", to: "keto", dashed: true, dir: "none" },
   ]}
-  caption="實線：客戶端從寫入取回、並可隨身攜帶的權杖，與 zookie 相同。虛線：沒有可運作的權杖；Warrant 的開源伺服器有一個只代表「讀取主資料庫」的標頭，而 OpenFGA 改為提供兩種一致性模式。"
+  caption="實線：客戶端從寫入取回、並可攜帶的權杖，與 zookie 相同。虛線：沒有可運作的權杖；Warrant 的開源伺服器有一個只代表「讀取主資料庫」的標頭，而 OpenFGA 改為提供兩種一致性模式。"
 />
 
 請注意，只有兩條實線連結能讓應用程式表達「至少與我的寫入一樣新」，而這正是論文中防止「new enemy」問題的關鍵（§2.2）。

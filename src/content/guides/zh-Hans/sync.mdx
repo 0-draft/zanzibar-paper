@@ -213,7 +213,7 @@ zookie 协议对客户端有两点要求：在保存内容时请求一个 zookie
 
 <Callout kind="paper" title="§2.4.2，读-改-写">
 
-1. Read all relation tuples of an object, including a per-object "lock" tuple.（读取一个对象的所有关系元组，包括每个对象一个的 “lock” 元组。）
+1. Read all relation tuples of an object, including a per-object "lock" tuple.（读取一个对象的所有关系元组，包括每个对象各一个的“lock”元组。）
 2. Generate the tuples to write or delete. Send the writes, along with a touch on the lock tuple, to Zanzibar, with the condition that the writes will be committed only if the lock tuple has not been modified since the read.（生成要写入或删除的元组。将这些写入连同对锁元组的一次 touch 操作发送给 Zanzibar，条件是仅当锁元组自读取以来未被修改时才提交这些写入。）
 3. If the write condition is not met, go back to step 1.（如果写入条件不满足，回到第 1 步。）
 

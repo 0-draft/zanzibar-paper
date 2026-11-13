@@ -80,13 +80,13 @@ Obsérvese que la viñeta de la izquierda es la peligrosa para la seguridad y la
 
 ## Las opciones
 
-La entrada de AuthZed enumera las opciones: no hacer nada, la comprobación de consistencia fuera de banda, hacer del servicio de autorización la fuente de verdad, event sourcing/CQRS, los entornos de ejecución duradera y el outbox transaccional ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). No hacer nada "*is* an option that may be viable in the right context" (*es* una opción que puede ser viable en el contexto adecuado); la comprobación fuera de banda significa que "you can check that the two systems agree on a periodic basis" (puede comprobar periódicamente que los dos sistemas coinciden), lo que detecta la deriva pero no la evita. Las tres siguientes son las que eliminan el intervalo estructuralmente o lo cierran de forma fiable.
+La entrada de AuthZed enumera las opciones: no hacer nada, la comprobación de consistencia fuera de banda, hacer del servicio de autorización la fuente de verdad, event sourcing/CQRS, los entornos de ejecución duradera y el outbox transaccional ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). No hacer nada "*is* an option that may be viable in the right context" (*es* una opción que puede ser viable en el contexto adecuado); la comprobación fuera de banda significa que "you can check that the two systems agree on a periodic basis" (puede comprobar periódicamente que los dos sistemas coinciden), lo que detecta la deriva pero no la evita. Las tres siguientes son las que eliminan la ventana estructuralmente o lo cierran de forma fiable.
 
 ### El servicio de autorización como fuente de verdad
 
 Almacenar cada relación una sola vez, en el servicio de autorización, y en ningún otro sitio. Es la disposición del artículo. AuthZed: "make a single write to SpiceDB and avoid the dual-write problem entirely" (hacer una única escritura en SpiceDB y evitar por completo el problema de la escritura doble) ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)).
 
-El coste es que la aplicación ya no puede consultar esos datos como los suyos propios: con la propiedad solo en SpiceDB, una interfaz de usuario sobre ellos "wouldn't be able to filter, sort, or paginate that table as easily" (no podría filtrar, ordenar ni paginar esa tabla con la misma facilidad), porque SpiceDB "isn't a general-purpose database" (no es una base de datos de propósito general). El problema de los listados de [Listar lo que un usuario puede ver](../listing/) se aplica entonces a cada pantalla que muestre la relación. Oso defiende la dirección opuesta para su propio producto, que permite "apply your application data to authorization decisions without synchronizing it" (aplicar los datos de la aplicación a las decisiones de autorización sin sincronizarlos) ([Oso, Launching Local Authorization](https://www.osohq.com/post/local-authorization), entrada del proveedor), lo que evita la sincronización dejando los datos en la base de datos de la aplicación en lugar de moverlos.
+El coste es que la aplicación ya no puede consultar esos datos como los suyos propios: con la titularidad solo en SpiceDB, una interfaz de usuario sobre ellos "wouldn't be able to filter, sort, or paginate that table as easily" (no podría filtrar, ordenar ni paginar esa tabla con la misma facilidad), porque SpiceDB "isn't a general-purpose database" (no es una base de datos de propósito general). El problema de los listados de [Listar lo que un usuario puede ver](../listing/) se aplica entonces a cada pantalla que muestre la relación. Oso defiende la dirección opuesta para su propio producto, que permite "apply your application data to authorization decisions without synchronizing it" (aplicar los datos de la aplicación a las decisiones de autorización sin sincronizarlos) ([Oso, Launching Local Authorization](https://www.osohq.com/post/local-authorization), entrada del proveedor), lo que evita la sincronización dejando los datos en la base de datos de la aplicación en lugar de moverlos.
 
 ### Outbox transaccional y relé
 
@@ -198,7 +198,7 @@ Las opciones difieren en lo que ese token puede prometer.
 
 | Opción | Cuándo está el cambio de ACL en el servicio de autorización | Qué cubre un token almacenado |
 | --- | --- | --- |
-| Servicio de autorización como fuente de verdad | Cuando vuelve la escritura, antes de avisar al usuario | Todo, como en el artículo: el token de la escritura, o una comprobación de cambio de contenido posterior, es al menos tan reciente como el cambio de ACL |
+| Servicio de autorización como fuente de verdad | Cuando termina la escritura, antes de avisar al usuario | Todo, como en el artículo: el token de la escritura, o una comprobación de cambio de contenido posterior, es al menos tan reciente como el cambio de ACL |
 | Outbox y relé | Cuando el relé tiene éxito, después de la confirmación en la base de datos | Solo los cambios que el relé ya ha aplicado. Una comprobación de cambio de contenido hecha antes ve la ACL antigua |
 | Captura de datos de cambios | Después de que el registro se lea, se publique y se consuma | Igual que el outbox, con más saltos de retraso |
 | Índice alimentado por Watch | Ya está; el retraso está en el índice | Nada directamente: los zookies son opacos, así que el índice no puede saber si está tan al día como un token dado. Volver a comprobar con el token, o comparar la posición guardada del propio índice |
@@ -234,9 +234,9 @@ Un proceso de sincronización a menudo quiere sustituir todas las tuplas de un o
     { lane: 0, t: 0, label: "lee tuplas del\nreadme + bloqueo", kind: "read" },
     { lane: 2, t: 0, label: "bloqueo en\nla versión 7", kind: "note" },
     { lane: 1, t: 1, label: "lee tuplas del\nreadme + bloqueo", kind: "read" },
-    { lane: 0, t: 2, label: "escribe + toque,\nsi no cambió", kind: "write" },
+    { lane: 0, t: 2, label: "escribe + toque,\nsi bloqueo intacto", kind: "write" },
     { lane: 2, t: 2, label: "confirma;\nel bloqueo cambia", kind: "good" },
-    { lane: 1, t: 3, label: "escribe + toque,\nsi no cambió", kind: "write" },
+    { lane: 1, t: 3, label: "escribe + toque,\nsi bloqueo intacto", kind: "write" },
     { lane: 2, t: 3, label: "bloqueo cambiado:\nrechazado", kind: "bad" },
     { lane: 1, t: 4, label: "vuelve al paso 1:\nlee de nuevo", kind: "read" },
   ]}
@@ -268,7 +268,7 @@ Zanzibar como almacén de permisos: §1, §5. El protocolo de zookies y la escri
 - AuthZed (proveedor), [The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem), 2025-01-02.
 - AuthZed (proveedor), [Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch) y [Consistency](https://authzed.com/docs/spicedb/concepts/consistency), documentación de SpiceDB.
 - AuthZed, [Add external support for streaming relationships into and out of SpiceDB](https://github.com/authzed/spicedb/issues/2015), issue #2015 de spicedb, abierto el 2024-08-07, cerrado como no planificado el 2026-10-29.
-- AuthZed, [Watching Relationship Changes More Ergonomically](https://github.com/authzed/spicedb/issues/2285), issue #2285 de spicedb, abierto el 2025-03-19, abierto a 2026-11-13.
+- AuthZed, [Watching Relationship Changes More Ergonomically](https://github.com/authzed/spicedb/issues/2285), issue #2285 de spicedb, abierto el 2025-03-19, sigue abierto a 2026-11-13.
 - AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto), authzed/api.
 - Chris Richardson, [Pattern: Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html), microservices.io.
 - Debezium, [Debezium connector for PostgreSQL](https://debezium.io/documentation/reference/stable/connectors/postgresql.html) y [Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html).

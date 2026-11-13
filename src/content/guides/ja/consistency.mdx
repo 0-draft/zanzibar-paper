@@ -158,7 +158,7 @@ Zanzibar の言葉では (§2.2)、因果的に関連する 2 つの更新 `x �
   caption="任意の T におけるスナップショットは因果的順序の接頭辞である。結果整合性のレプリカは、追いつくまで x なしで y を見せうる。"
 />
 
-2 つのスナップショット読み取りは、見える *量* は異なるが *順序* が異なることはないことに注意されたい。どちらも履歴の接頭辞である。結果整合性のレプリカもいずれは収束するが、それまでは一度も存在しなかった状態を見せうる。論文自身も §5 でこの対比を示している。TAO は "offers eventual global consistency with asynchronous replication" (非同期レプリケーションによる結果的なグローバル一貫性を提供する) のに対し、Zanzibar は "provides external consistency and snapshot reads with bounded staleness" (外部一貫性と、有界な古さを伴うスナップショット読み取りを提供する)。
+2 つのスナップショット読み取りは、見える *量* は異なるが *順序* が異なることはないことに注意されたい。どちらも履歴の接頭辞である。結果整合性のレプリカもいずれは収束するが、それまでは一度も存在しなかった状態を見せうる。論文自身も §5 でこの対比を示している。TAO は "offers eventual global consistency with asynchronous replication" (非同期レプリケーションによってグローバルな結果整合性を提供する) のに対し、Zanzibar は "provides external consistency and snapshot reads with bounded staleness" (外部一貫性と、有界な古さを伴うスナップショット読み取りを提供する)。
 
 ## タイムスタンプの出どころ：TrueTime
 
@@ -256,7 +256,7 @@ zookie は意図的に不透明にされている。論文は "an opaque cookie 
 
 ## 「ちょうどその時点」ではなく「少なくとも同じだけ新しい」理由
 
-zookie は下限である。Zanzibar はチェックを zookie のタイムスタンプで評価してもよいし、それより後の任意のタイムスタンプで評価してもよい。§2.2 はこれをプロトコルの「at-least-as-fresh semantics」(少なくとも同じだけ新しいというセマンティクス) と呼び、それが "allow[s] Zanzibar to choose any timestamp fresher than the one encoded in a zookie" (Zanzibar が zookie にエンコードされたものより新しい任意のタイムスタンプを選択できるようにする) と述べている。この自由は 3 つの形で使われる。
+zookie は下限である。Zanzibar はチェックを zookie のタイムスタンプで評価してもよいし、それより後の任意のタイムスタンプで評価してもよい。§2.2 はこれをプロトコルの"at-least-as-fresh semantics" (少なくとも同じだけ新しいというセマンティクス) と呼び、それが "allow[s] Zanzibar to choose any timestamp fresher than the one encoded in a zookie" (Zanzibar が zookie にエンコードされたものより新しい任意のタイムスタンプを選択できるようにする) と述べている。この自由は 3 つの形で使われる。
 
 - **デフォルトの古さ (§3.2.1)。** zookie がない場合、サーバーは "a default staleness chosen to ensure that all transactions are evaluated at a timestamp that is as recent as possible without impacting latency" (レイテンシに影響を与えずに可能な限り新しいタイムスタンプですべてのトランザクションが評価されるように選ばれたデフォルトの古さ) を選ぶ。各サーバーは、ある古さでの読み取りがゾーンの外に出なければならなかった頻度を追跡し、デフォルトを "the lowest 'safe' value" (最も低い「安全な」値) に動かす。論文は、これが "is purely a performance optimization" (純粋に性能の最適化である) と述べている。"Zanzibar always respects zookies when provided" (zookie が与えられれば、Zanzibar は常にそれを尊重する) からである。
 - **量子化 (§3.2.5)。** 評価タイムスタンプは "rounded up to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies" (リクエストの zookie による古さの制約を尊重しつつ、1 秒や 10 秒といった粗い粒度に切り上げられる)。*切り上げ* が下限を破ることはない。

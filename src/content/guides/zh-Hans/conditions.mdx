@@ -145,7 +145,7 @@ definition folder {
 
 *SpiceDB schema；依照 2026-11-13 时的文档语法编写；未运行验证器。*
 
-[会过期的关系文档](https://authzed.com/docs/spicedb/concepts/expiring-relationships)在 `WriteRelationships` 中用 `OptionalExpiresAt`（RFC 3339）设定时间，并给出了优先使用它而不是 caveat 的两个理由：caveat "requires clients to provide the `now` timestamp"（需要客户端提供 `now` 时间戳），并且 "expired caveats are not automatically garbage collected"（已过期的 caveat 不会被自动垃圾回收）。已过期的关系一旦过期就不再计入，只是在过期之前缓存的子结果仍可能在其缓存窗口内被返回；其行会在之后被垃圾回收移除（据同一页面，默认在 24 小时之后）。该页面一处把版本写作 “v1.40”，另一处写作 “v1.4.0”；博客文章写的是 v1.40。该功能在当前版本中是否仍标记为实验性，未作核实。
+[会过期的关系文档](https://authzed.com/docs/spicedb/concepts/expiring-relationships)在 `WriteRelationships` 中用 `OptionalExpiresAt`（RFC 3339）设定时间，并给出了优先使用它而不是 caveat 的两个理由：caveat "requires clients to provide the `now` timestamp"（需要客户端提供 `now` 时间戳），并且 "expired caveats are not automatically garbage collected"（已过期的 caveat 不会被自动垃圾回收）。已过期的关系一旦过期就不再计入，只是在过期之前缓存的子结果仍可能在其缓存窗口内被返回；其行会在之后被垃圾回收移除（据同一页面，默认在 24 小时之后）。该页面一处把版本写作“v1.40”，另一处写作“v1.4.0”；博客文章写的是 v1.40。该功能在当前版本中是否仍标记为实验性，未作核实。
 
 ## OpenFGA 条件
 
@@ -243,8 +243,8 @@ rule check_ip_range(ip_range string[]) {
 
 | | 论文 | SpiceDB | OpenFGA | Permify |
 | --- | --- | --- | --- | --- |
-| 条件存放在哪里 | 无处可放：元组只有四个部分（§2.1） | 在关系上：schema 中用 `with` 允许的具名 caveat | 在元组上：类型限制中用 `with` 允许的具名条件 | 在被权限调用的 `rule` 中，作用于实体 `attribute` 和请求上下文 |
-| 表达式语言 | 无 | CEL | CEL | “基于” CEL |
+| 条件存放在哪里 | 无处可放：元组只有对象、关系和用户（§2.1） | 在关系上：schema 中用 `with` 允许的具名 caveat | 在元组上：类型限制中用 `with` 允许的具名条件 | 在被权限调用的 `rule` 中，作用于实体 `attribute` 和请求上下文 |
+| 表达式语言 | 无 | CEL | CEL | “基于”CEL |
 | 请求时的事实 | 无；Check 携带用户集、用户和 zookie（§2.4.4） | `CheckPermission` 上的 `context` | Check 上的 `context`；上下文元组 | `context`（`context.data`） |
 | 已存储的值与请求中的值 | 不适用 | 关系中的值优先 | 持久化的上下文优先 | 未核实 |
 | 缺少上下文 | 不适用 | `PERMISSIONSHIP_CONDITIONAL_PERMISSION`，并给出缺失的字段 | 请求以错误失败 | 未核实 |
@@ -256,11 +256,11 @@ rule check_ip_range(ip_range string[]) {
 
 Cedar 是一种策略语言，其论文称它原生支持 RBAC 和 ABAC。该论文（Cutler 等人，"Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)"，[arXiv:2403.04651v2](https://arxiv.org/abs/2403.04651)，2024-03-08）在相关工作（§6）中讨论了 Zanzibar。它称 Zanzibar 为 "a highly scalable, relationship-based access control (ReBAC) system"（一个高度可扩展的、基于关系的访问控制（ReBAC）系统），并说 "Zanzibar supports RBAC and ReBAC with a natural syntax, and with policy validation"（Zanzibar 以自然的语法支持 RBAC 和 ReBAC，并提供策略验证），"forbid-style policies are supported by expressing one relationship in terms of non-membership in some other relation"（通过把一种关系表达为不属于另一种关系，来支持 forbid 风格的策略），以及 "it does not support ABAC, string matching, or search."（它不支持 ABAC、字符串匹配或搜索。）它把 Cedar 描述为相反的情形："Cedar natively supports RBAC and ABAC, can encode ReBAC, and supports forbid policies."（Cedar 原生支持 RBAC 和 ABAC，可以编码 ReBAC，并支持 forbid 策略。）
 
-Cedar 论文描述的是 2019 年的 Zanzibar 论文；它的实验使用 OpenFGA，并把 OpenFGA 介绍为 "a recently developed language for specifying relationship-based access control (ReBAC) [43] policies"（一种最近开发的、用于指定基于关系的访问控制（ReBAC）[43] 策略的语言），其中参考文献 43 就是 Zanzibar 论文（§1）。上文的 caveat 和条件是产品扩展，不在该论文的归类范围之内。其中关于 “forbid 风格”的那句话，就是[建模页面](../modeling/#黑名单排除)上的排除模式。
+Cedar 论文描述的是 2019 年的 Zanzibar 论文；它的实验使用 OpenFGA，并把 OpenFGA 介绍为 "a recently developed language for specifying relationship-based access control (ReBAC) [43] policies"（一种最近开发的、用于指定基于关系的访问控制（ReBAC）[43] 策略的语言），其中参考文献 43 就是 Zanzibar 论文（§1）。上文的 caveat 和条件是产品扩展，不在该论文的归类范围之内。其中关于“forbid 风格”的那句话，就是[建模页面](../modeling/#黑名单排除)上的排除模式。
 
 ## 何时把规则留在应用中
 
-授权服务中的条件并不是免费的。本节是本页的建议，而不是论文或厂商的说法。
+授权服务中的条件并非没有代价。本节是本页的建议，而不是论文或厂商的说法。
 
 - **事实只存在于请求中。** 转账金额或调用方 IP 首先为应用所知。把它作为上下文传入是可行的，但服务只能对它求值；它无法存储、列出或审计它。像“金额不超过 1,000”这样的规则，由应用在关系检查之后进行检查往往更简单，还能保持授权服务的答案可缓存。
 - **列表和索引需要已存储的事实。** 论文中的 Expand 之所以存在，是为了让客户端能够 "build efficient search indices for access-controlled content"（为受访问控制的内容构建高效的搜索索引）（§2.4.5）。取决于请求的授权无法提前建立索引；OpenFGA 的指南关于上下文元组也是这么说的，而 SpiceDB 的检查在调用方提供上下文之前可能一直返回 `CONDITIONAL_PERMISSION`。

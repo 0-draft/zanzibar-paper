@@ -13,7 +13,7 @@ import Callout from "../../../components/diagram/Callout.astro";
 
 Zanzibar speichert Berechtigungen als *Relationstupel*: ein Fakt pro Zeile, gelesen als „dieser Benutzer hat diese Relation zu diesem Objekt“. Alles Weitere auf dieser Seite, Umschreibregeln, Check und Expand, wird aus diesen Zeilen berechnet.
 
-Das durchgehende Beispiel: Anne, Beto und Chen (`user:anne`, `user:beto`, `user:chen`); das Dokument `doc:readme` in `folder:A`; die Gruppe `group:eng`. Anne ist Eigentümerin des Readme, Beto ist in eng, die Mitglieder von eng sehen das Readme, und Chen sieht Ordner A.
+Das durchgehende Beispiel: Anne, Beto und Chen (`user:anne`, `user:beto`, `user:chen`); das Dokument `doc:readme` in `folder:A`; die Gruppe `group:eng`. Anne ist Eigentümerin des Readmes, Beto ist in eng, die Mitglieder von eng sehen das Readme, und Chen sieht Ordner A.
 
 ## Die Grammatik
 
@@ -69,7 +69,7 @@ Wie gibt ein einziges Tupel jedem Mitglied von eng Zugriff auf das Readme?
   caption="Zwei Tupel: group:eng#member@user:beto und doc:readme#viewer@group:eng#member. Der gestrichelte Kasten ist ein Userset, kein einzelner Benutzer."
 />
 
-Keine Zeile nennt Beto und das Readme zusammen. Beto ist Betrachter, weil er in der Menge ist, auf die das zweite Tupel zeigt. Fügt man eng ein Mitglied hinzu, kann dieses Mitglied das Readme sehen, ohne dass sich die ACL des Readme ändert.
+Keine Zeile nennt Beto und das Readme zusammen. Beto ist Betrachter, weil er in der Menge ist, auf die das zweite Tupel zeigt. Fügt man eng ein Mitglied hinzu, kann dieses Mitglied das Readme sehen, ohne dass sich die ACL des Readmes ändert.
 
 Derselbe Kniff lässt sich verschachteln. Ein Mitglied einer Gruppe kann ein weiteres Userset sein, zum Beispiel `group:eng#member@group:sre#member` (ein hypothetisches Unterteam, nicht Teil des durchgehenden Beispiels), und die Mitgliedschaft reicht dann über so viele Ebenen, wie die Tupel beschreiben. Das Paper fasst es in einem Satz: "a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership" (§2.1) (ein ⟨*userset*⟩ erlaubt es ACLs, auf Gruppen zu verweisen, und unterstützt damit die Darstellung verschachtelter Gruppenmitgliedschaften). Es erklärt auch den Gewinn: Die Modellierung mit Tupeln statt mit ACLs pro Objekt "allows us to unify the concepts of ACLs and groups" (§2.1) (erlaubt es uns, die Konzepte von ACLs und Gruppen zu vereinheitlichen). Eine Gruppe ist nur ein Objekt, dessen Relation `member` eine ACL ist.
 
@@ -79,9 +79,9 @@ Tabelle 1 des Papers listet vier Beispieltupel. Mit den Benutzern 10 und 11 umbe
 
 | Tupel | Gelesen als |
 | --- | --- |
-| `doc:readme#owner@user:anne` | Anne ist eine Eigentümerin des Readme |
+| `doc:readme#owner@user:anne` | Anne ist eine Eigentümerin des Readmes |
 | `group:eng#member@user:beto` | Beto ist ein Mitglied von eng |
-| `doc:readme#viewer@group:eng#member` | Mitglieder von eng sind Betrachter des Readme |
+| `doc:readme#viewer@group:eng#member` | Mitglieder von eng sind Betrachter des Readmes |
 | `doc:readme#parent@folder:A#...` | Das Readme liegt in Ordner A |
 | `folder:A#viewer@user:chen` | Chen ist ein Betrachter von Ordner A (nicht in Tabelle 1) |
 
@@ -373,7 +373,7 @@ Was gibt Expand für `doc:readme#viewer` zurück?
   caption="Expand wendet die Umschreibregeln an; Read hätte nur die Zeile group:eng#member zurückgegeben."
 />
 
-Beachten Sie die beiden gestrichelten Blätter. Nach §2.4.5 kann ein Blatt ein Userset sein, das auf anderes verweist; ein Client, der jede einzelne Person (Beto, Chen) will, expandiert diese Blätter seinerseits. Das Paper sagt nicht, wie tief ein einzelner Expand-Aufruf rekursiv absteigt; diese Abbildung endet bei den Usersets, die die eigenen Regeln des Dokuments erreichen. Das Paper nennt den Anwendungsfall: Expand erlaubt es Clients, "reason about the complete set of users and groups that have access to their objects, which allows them to build efficient search indices for access-controlled content" (§2.4.5) (über die vollständige Menge der Benutzer und Gruppen nachzudenken, die Zugriff auf ihre Objekte haben, was es ihnen ermöglicht, effiziente Suchindizes für zugriffskontrollierte Inhalte aufzubauen).
+Beachten Sie die beiden gestrichelten Blätter. Nach §2.4.5 kann ein Blatt ein Userset sein, das auf anderes verweist; ein Client, der jede einzelne Person (Beto, Chen) will, expandiert diese Blätter seinerseits. Das Paper sagt nicht, wie tief ein einzelner Expand-Aufruf rekursiv absteigt; diese Abbildung endet bei den Usersets, die die eigenen Regeln des Dokuments erreichen. Das Paper nennt den Anwendungsfall: Expand erlaubt es Clients, "reason about the complete set of users and groups that have access to their objects, which allows them to build efficient search indices for access-controlled content" (§2.4.5) (die vollständige Menge der Benutzer und Gruppen nachzuvollziehen, die Zugriff auf ihre Objekte haben, was es ihnen ermöglicht, effiziente Suchindizes für zugriffskontrollierte Inhalte aufzubauen).
 
 <Callout kind="paper" title="Im Paper">
 

@@ -116,7 +116,7 @@ folder:A#viewer@user:chen
   caption="Anne ve a través de owner → edit → view, Beto a través del userset del grupo, Chen a través de parent.view. Discontinuo: un userset, no un único usuario."
 />
 
-Obsérvese que la flecha de `folder:A` al readme es una tupla almacenada (`doc:readme#parent@folder:A`), mientras que el paso del acceso de Chen a la carpeta al readme no se almacena en ninguna parte: el `parent.view` del esquema lo calcula en el momento de la comprobación, como hace `tuple_to_userset` en el artículo.
+Obsérvese que la flecha de `folder:A` al readme es una tupla almacenada (`doc:readme#parent@folder:A`), mientras que el paso que va del acceso de Chen a la carpeta hasta el readme no se almacena en ninguna parte: el `parent.view` del esquema lo calcula en el momento de la comprobación, como hace `tuple_to_userset` en el artículo.
 
 ## Arquitectura
 
@@ -156,7 +156,7 @@ Las piezas, cada una según la documentación:
 
 El snap token de Permify cumple el papel del zookie. Un Write lo devuelve; el cliente lo almacena con el recurso y lo devuelve como `snap_token` en las comprobaciones posteriores. La documentación lo describe como "a token that consists of an encoded timestamp" (un token que consiste en una marca de tiempo codificada), que se compara en las comprobaciones de acceso "to ensure that the snapshot of the access control is at least as fresh as the resource timestamp" (para garantizar que la instantánea del control de acceso sea al menos tan reciente como la marca de tiempo del recurso) ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)). Es la garantía del artículo para una comprobación que lleva un zookie: "a consistent snapshot no earlier than" (una instantánea consistente no anterior al) zookie dado (§2.4.4).
 
-¿Cómo ve ese cambio una comprobación hecha después de un cambio de compartición?
+¿Cómo llega a ver un cambio de compartición una comprobación hecha después de él?
 
 <Swimlane
   lanes={["Su servicio", "Permify", "PostgreSQL"]}
@@ -188,7 +188,7 @@ Obsérvese el comportamiento sin token. El artículo permite a Zanzibar "choose 
 - **Atributos y reglas.** El Permify Schema añade `attribute` y `rule` para comprobaciones basadas en atributos, como `permission view = check_ip_range(ip_range) or admin` ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling)). Las reescrituras de Zanzibar solo operan sobre tuplas (§2.3.1).
 - **Tuplas contextuales.** Las relaciones "dynamically added to permission request operations" (añadidas dinámicamente a las operaciones de solicitud de permisos) se evalúan junto con las almacenadas y nunca se escriben ([contextual tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples)).
 - **Inquilinos.** Un servicio `Tenancy` crea, lista y elimina inquilinos ([service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)); el artículo no tiene el concepto de inquilino.
-- **Almacenamiento.** PostgreSQL con instantáneas MVCC, en lugar de Spanner, cuyo mecanismo TrueTime asigna marca de tiempo a cada escritura de ACL (§2.2, §3.1). La caché distribuida funciona "across availability zones (within an AWS region)" (entre zonas de disponibilidad, dentro de una región de AWS) ([cache](https://fusionauth.io/permify-docs/operations/cache)).
+- **Almacenamiento.** PostgreSQL con instantáneas MVCC, en lugar de Spanner, cuyo mecanismo TrueTime asigna una marca de tiempo a cada escritura de ACL (§2.2, §3.1). La caché distribuida funciona "across availability zones (within an AWS region)" (entre zonas de disponibilidad, dentro de una región de AWS) ([cache](https://fusionauth.io/permify-docs/operations/cache)).
 - **Sin índice desnormalizado.** El artículo responde a las comprobaciones de grupos profundamente anidados con Leopard (§3.2.4). Permify documenta caché de resultados y hashing consistente, no un índice de conjuntos.
 - **Búsquedas.** `LookupEntity` y `LookupSubject` responden a preguntas de “qué recursos” y “qué sujetos” que la API del artículo no cubre.
 

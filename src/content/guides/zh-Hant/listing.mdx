@@ -21,7 +21,7 @@ Check 從一個物件出發，沿著元組走訪，直到找到該使用者或�
 
 清單還需要授權服務所沒有的資料。OpenFGA 的指南是這樣說的：該服務 "does not store object metadata (names of files, creation dates, time of last update, etc)"（不儲存物件的中繼資料（檔案名稱、建立日期、最後更新時間等）），因此搜尋 "will require data from your database"（將需要來自你的資料庫的資料）（[OpenFGA, Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。篩選與排序在你的資料庫中進行；授權在另一個服務中進行；答案是兩者的交集。
 
-論文很清楚這個使用情境。它為統一系統所陳述的第一個動機，就包括 "a search index that respects access control and works across applications"（能遵循存取控制並跨應用程式運作的搜尋索引）（§1），而其延遲目標特別點出 "serving search results, which often require tens to hundreds of checks"（提供搜尋結果，這通常需要數十到數百次檢查）（§1）。
+論文很清楚這個使用情境。它為統一系統所列舉的優點之中，就有 "a search index that respects access control and works across applications"（能遵循存取控制並跨應用程式運作的搜尋索引）（§1），而其延遲目標特別點出 "serving search results, which often require tens to hundreds of checks"（提供搜尋結果，這通常需要數十到數百次檢查）（§1）。
 
 ## 論文提供了什麼，又沒有提供什麼
 
@@ -126,7 +126,7 @@ SpiceDB 的指南給出了這個迴圈及其限制："because we don't know how 
     { from: [0, 3], to: [2, 3] },
     { from: [2, 3], to: [0, 4] },
   ]}
-  caption="只有一次授權呼叫，但在第一列之前，它的答案就是整個集合。"
+  caption="只有一次授權呼叫，但它的答案是整個集合，必須在顯示第一列之前全部取回。"
 />
 
 <Swimlane
@@ -187,7 +187,7 @@ SpiceDB 的指南給出了這個迴圈及其限制："because we don't know how 
     { from: "list", to: "authz", label: "重新檢查頁面", dashed: true },
   ]}
   minWidth={520}
-  caption="索引是一份複本。它落後於串流，而重新檢查涵蓋了仍在傳遞中的撤銷。"
+  caption="索引是一份副本。它落後於串流，而重新檢查涵蓋了仍在傳遞中的撤銷。"
 />
 
 請注意索引器這個方框：它做的是 Leopard 在 Zanzibar 內部所做的工作。一筆元組可能改變許多列。新增 `group:eng#member@user:beto`，會為 `group:eng` 能檢視的每一份文件新增一列；為 `folder:A` 新增一位檢視者，會為資料夾中的每一份文件新增一列。論文對 Leopard 也報告了同樣的扇出："a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events"（單一 Zanzibar 元組的新增或刪除，可能產生數萬個獨立的 Leopard 元組事件）（§3.2.4）。
@@ -195,7 +195,7 @@ SpiceDB 的指南給出了這個迴圈及其限制："because we don't know how 
 產品記載了兩種建構方式：
 
 - **自行從變更串流建構。** OpenFGA 的選項 2 消費 `GET /changes`，依所使用的模型版本將變更攤平（其範例："`user:anne, writer, doc:planning` becomes two tuples"，變成兩筆元組），然後對最終結果呼叫 `/check`，"to filter out any resource with permissions revoked but whose authorization data has not made it into your index yet"（以濾除權限已被撤銷、但授權資料尚未進入你的索引的任何資源）（[Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。在 SpiceDB 中，這條串流是 `Watch`；[讓元組與你的資料保持同步](../sync/)說明了為什麼這條串流不是持久的佇列。
-- **由廠商計算。** AuthZed Materialize "takes inspiration from the Leopard index"（從 Leopard 索引汲取靈感），預先計算所設定的權限，而其 Event Streams 功能讓你能 "keep your own copy of it — either colocated alongside the data it protects in your application database, or in a secondary index like a search engine"（保有你自己的一份複本，可以放在你的應用程式資料庫中、與它所保護的資料並置，也可以放在像搜尋引擎這樣的次要索引中）（[AuthZed, What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview)）。這是商業功能：Event Streams "currently in early access for AuthZed Dedicated users"（目前以搶先體驗的形式提供給 AuthZed Dedicated 使用者）（[Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)），其記載的限制包括 "your application must be able to tolerate some lag"（你的應用程式必須能容忍一些延遲）（[Materialize limitations](https://authzed.com/docs/materialize/getting-started/limitations)）。
+- **由廠商計算。** AuthZed Materialize "takes inspiration from the Leopard index"（從 Leopard 索引汲取靈感），預先計算所設定的權限，而其 Event Streams 功能讓你能 "keep your own copy of it — either colocated alongside the data it protects in your application database, or in a secondary index like a search engine"（保有你自己的一份副本，可以放在你的應用程式資料庫中、與它所保護的資料並置，也可以放在像搜尋引擎這樣的次要索引中）（[AuthZed, What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview)）。這是商業功能：Event Streams "currently in early access for AuthZed Dedicated users"（目前以搶先體驗的形式提供給 AuthZed Dedicated 使用者）（[Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)），其記載的限制包括 "your application must be able to tolerate some lag"（你的應用程式必須能容忍一些延遲）（[Materialize limitations](https://authzed.com/docs/materialize/getting-started/limitations)）。
 
 ## 三種做法並列比較
 

@@ -29,7 +29,7 @@ Namespace configs are stored in a database with two tables. One table contains t
 
 </Callout>
 
-したがって、設定のどのバージョンもコミットタイムスタンプを持ち、各サーバーはある範囲のバージョンを保持している。危険なのはファンアウトするリクエストである ([アーキテクチャ](../architecture/) を参照)。リクエストを受けたサーバーが新しい設定を読み込み済みで、委譲先のサーバーがまだ読み込んでいなければ、1 つの Check の 2 つの半分が異なるルールで評価されてしまう。論文はこれを排除している。"Zanzibar chooses a single snapshot timestamp for config metadata when evaluating each client request. All `aclservers` in a cluster use that same timestamp for the same request, including for any subrequests that fan out from the original client request" (Zanzibar は各クライアントリクエストを評価する際に、設定メタデータに対して単一のスナップショットタイムスタンプを選ぶ。クラスタ内のすべての `aclservers` は、元のクライアントリクエストからファンアウトするサブリクエストも含め、同じリクエストに対して同じタイムスタンプを用いる) (§3.2.2)。
+したがって、設定のどのバージョンもコミットタイムスタンプを持ち、各サーバーはある範囲のバージョンを保持している。危険なのはファンアウトするリクエストである ([アーキテクチャ](../architecture/) を参照)。リクエストを受けたサーバーが新しい設定を読み込み済みで、委譲先のサーバーがまだ読み込んでいなければ、1 つの Check の前半と後半が異なるルールで評価されてしまう。論文はこれを排除している。"Zanzibar chooses a single snapshot timestamp for config metadata when evaluating each client request. All `aclservers` in a cluster use that same timestamp for the same request, including for any subrequests that fan out from the original client request" (Zanzibar は各クライアントリクエストを評価する際に、設定メタデータに対して単一のスナップショットタイムスタンプを選ぶ。クラスタ内のすべての `aclservers` は、元のクライアントリクエストからファンアウトするサブリクエストも含め、同じリクエストに対して同じタイムスタンプを用いる) (§3.2.2)。
 
 クラスタ内のサーバーが異なる設定バージョンを読み込んでいるとき、リクエストはどのタイムスタンプを使えるか。
 
@@ -316,7 +316,7 @@ assertions:
   height={300}
   minWidth={520}
   title="デリバリーパイプラインにおけるスキーマのテスト"
-  desc="スキーマの変更とそのテストファイルを含むプルリクエストは CI に送られ、CI はテストファイル内のタプルに対して zed validate または fga model test を実行する。合格すると、デプロイのステップが WriteSchema または WriteAuthorizationModel で稼働中のサービスにスキーマを書き込み、サービスはそれを自身のデータストアに格納する。OpenFGA の場合は、その後新しいモデル ID をアプリケーションの設定に固定する。デプロイのステップの横の注記は、関係を削除する前にタプルを削除するといったデータに依存するステップは CI のテストでは扱えないことを示している。"
+  desc="スキーマの変更とそのテストファイルを含むプルリクエストは CI に送られ、CI はテストファイル内のタプルに対して zed validate または fga model test を実行する。合格すると、デプロイのステップが WriteSchema または WriteAuthorizationModel で稼働中のサービスにスキーマを書き込み、サービスはそれを自身のデータストアに格納する。OpenFGA の場合は、その後新しいモデル ID をアプリケーションの設定に固定する。デプロイのステップの横の注記は、関係を削除する前にタプルを削除するといったデータに依存するステップは CI のテストの対象外であることを示している。"
   nodes={[
     { id: "pr", x: 90, y: 60, label: "プルリクエスト:\nスキーマ + テスト", kind: "client" },
     { id: "ci", x: 310, y: 60, label: "CI: zed validate /\nfga model test", kind: "server", on: true },

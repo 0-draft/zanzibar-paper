@@ -137,7 +137,7 @@ Warrant 的文档网站已经不在了，因此下表依据开源代码整理。
 
 - 一个 Go 服务提供 HTTP API（[router.go](https://github.com/warrant-dev/warrant/blob/main/pkg/service/router.go)）。
 - MySQL 和 PostgreSQL 配置接受一个 `dsn` 和一个可选的 `readerDsn`（[config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)）；也支持 SQLite，"in-memory or file"（内存或文件）（[README](https://github.com/warrant-dev/warrant)）。
-- 选择连接池的规则写在 [sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go) 的一条注释中：如果调用是写入、没有只读库、上下文 "contains 'latest' wookie"（包含 “latest” wookie），或者服务器内部代码设置了写库覆盖，就使用写库；否则使用只读库。
+- 选择连接池的规则写在 [sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go) 的一条注释中：如果调用是写入、没有只读库、上下文 "contains 'latest' wookie"（包含“latest” wookie），或者服务器内部代码设置了写库覆盖，就使用写库；否则使用只读库。
 
 ## 一致性
 
@@ -167,7 +167,7 @@ Warrant 的代码把它的令牌称为 *wookie*（[wookie](https://github.com/wa
   caption="论文的 zookie 指定的是一个快照（§2.4）；latest 只指定一个数据库。"
 />
 
-README 本身说，在高吞吐量下实现低延迟 "requires running Warrant as a distributed service with the use of Warrant-Tokens (also referred to as Zookies in Google Zanzibar)"（需要把 Warrant 作为分布式服务运行并使用 Warrant-Token（在 Google Zanzibar 中也称为 Zookie）），并说 "this open source version of Warrant is only capable of handling low-to-moderate throughput"（这个开源版本的 Warrant 只能处理低到中等的吞吐量）（[README](https://github.com/warrant-dev/warrant)，厂商撰写）。它关于 Warrant-Token 的链接现在指向 WorkOS FGA 的总体概述，而该概述并没有描述这些令牌。
+README 本身说，在高吞吐量下实现低延迟 "requires running Warrant as a distributed service with the use of Warrant-Tokens (also referred to as Zookies in Google Zanzibar)"（需要把 Warrant 作为分布式服务运行并使用 Warrant-Token（在 Google Zanzibar 中也称为 zookie）），并说 "this open source version of Warrant is only capable of handling low-to-moderate throughput"（这个开源版本的 Warrant 只能处理低到中等的吞吐量）（[README](https://github.com/warrant-dev/warrant)，厂商撰写）。它关于 Warrant-Token 的链接现在指向 WorkOS FGA 的总体概述，而该概述并没有描述这些令牌。
 
 注意与论文的区别。zookie 设定的是一个下界，使 Zanzibar 可以 "to choose any timestamp fresher than the one encoded in a zookie"（选择任何比 zookie 中编码的时间戳更新的时间戳），并 "at a default staleness with already replicated data"（以默认陈旧度、使用已复制的数据）处理大多数检查（§2.2）。`latest` 中没有任何时间点：它把读取转移到主库，主库是最新的副本，但放弃了只读副本。
 

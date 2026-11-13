@@ -45,7 +45,7 @@ O site de documentação do Warrant não existe mais, então esta tabela foi mon
 | Leopard (§3.2.4) | Nenhum |
 | Spanner (§3.1) | MySQL, PostgreSQL ou SQLite, com uma réplica de leitura opcional |
 
-## O exemplo em curso como tipos de objeto
+## O exemplo recorrente como tipos de objeto
 
 A Figura 1 do artigo torna os donos editores, os editores visualizadores, e os visualizadores da pasta pai visualizadores do documento (§2.3.1). No Warrant, cada tipo de objeto lista suas relações; um objeto vazio `{}` significa “apenas warrants diretos”, e `inheritIf` acrescenta uma regra.
 
@@ -77,7 +77,7 @@ Não há entrada `user`: o servidor cria um tipo de objeto `user` embutido em su
 Estes tipos de objeto seguem a estrutura aceita pelo servidor de código aberto em 2026-11-13: o tipo `RelationRule` em [spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go) e os fixtures de teste dos mantenedores, como [tests/v2/authz.json](https://github.com/warrant-dev/warrant/blob/main/tests/v2/authz.json). Eles não foram enviados a um servidor Warrant. O WorkOS FGA, o produto que dá continuidade ao Warrant, é configurado de outra forma (ver Situação).
 </Callout>
 
-Os cinco warrants do exemplo em curso, como corpos de `POST /v2/warrants`:
+Os cinco warrants do exemplo recorrente, como corpos de `POST /v2/warrants`:
 
 ```json
 { "objectType": "doc", "objectId": "readme", "relation": "owner", "subject": { "objectType": "user", "objectId": "anne" } }
@@ -92,7 +92,7 @@ Qual warrant e qual regra decidem a relação `viewer` de cada pessoa com o read
 <Graph
   width={600}
   height={260}
-  title="O exemplo em curso como warrants do Warrant"
+  title="O exemplo recorrente como warrants do Warrant"
   desc="Cinco warrants. O user anne é owner do doc readme. O user beto é member do group eng. group eng#member é viewer do doc readme. A folder A é parent do doc readme. O user chen é viewer da folder A. O caminho de Chen pela folder A está destacado: ele é resolvido pela regra com ofType folder e withRelation parent."
   nodes={[
     { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
@@ -154,9 +154,9 @@ O que `Warrant-Token: latest` muda para uma verificação logo após uma escrita
   events={[
     { lane: 0, t: 0, label: "POST\n/v2/warrants", kind: "write" },
     { lane: 2, t: 0, label: "warrant\nescrito", kind: "write" },
-    { lane: 0, t: 1, label: "check sem\ncabeçalho", kind: "read" },
+    { lane: 0, t: 1, label: "verificação\nsem cabeçalho", kind: "read" },
     { lane: 3, t: 1, label: "lido do pool\nde leitura", kind: "note" },
-    { lane: 0, t: 2, label: "check com\nlatest", kind: "read" },
+    { lane: 0, t: 2, label: "verificação\ncom latest", kind: "read" },
     { lane: 2, t: 2, label: "lido do\nprimário", kind: "good" },
   ]}
   arrows={[

@@ -1,6 +1,6 @@
 ---
 title: "Topaz"
-description: "Un autorizador de código abierto que combina políticas de Open Policy Agent con un directorio de estilo Zanzibar en una base de datos embebida, mantenido por sus mantenedores tras el cierre de Aserto en 2025."
+description: "Un autorizador de código abierto que combina políticas de Open Policy Agent con un directorio de estilo Zanzibar en una base de datos embebida, al que sus mantenedores siguen dando soporte tras el cierre de Aserto en 2025."
 section: ecosystem
 order: 5
 checked: "2026-11-13"
@@ -19,7 +19,7 @@ product:
 import Callout from "../../../components/diagram/Callout.astro";
 import Graph from "../../../components/diagram/Graph.astro";
 
-Topaz es un servicio de autorización escrito en Go. "uses the Open Policy Agent (OPA) as its decision engine, and provides a built-in directory that is inspired by the Google Zanzibar data model" (usa Open Policy Agent, OPA, como motor de decisión y proporciona un directorio integrado inspirado en el modelo de datos de Google Zanzibar) ([README](https://github.com/aserto-dev/topaz)). Una decisión la toma una política en Rego; la política puede preguntar al directorio si se cumple una relación o un permiso entre un sujeto y un objeto, que es la parte que se parece a Zanzibar. Los datos del directorio se "modeled and stored locally in an embedded database" (modelan y almacenan localmente en una base de datos embebida) (mismo README).
+Topaz es un servicio de autorización escrito en Go que "uses the Open Policy Agent (OPA) as its decision engine, and provides a built-in directory that is inspired by the Google Zanzibar data model" (usa Open Policy Agent, OPA, como motor de decisión y proporciona un directorio integrado inspirado en el modelo de datos de Google Zanzibar) ([README](https://github.com/aserto-dev/topaz)). Una decisión la toma una política en Rego; la política puede preguntar al directorio si se cumple una relación o un permiso entre un sujeto y un objeto, que es la parte que se parece a Zanzibar. Los datos del directorio están "modeled and stored locally in an embedded database" (modelados y almacenados localmente en una base de datos embebida) (mismo README).
 
 Topaz lo construyó Aserto. El 2025-04-27, Aserto anunció que estaba "sunsetting the Aserto SaaS control plane and will shut it down by May 31, 2025" (retirando el plano de control SaaS de Aserto, que se cerraría a más tardar el 31 de mayo de 2025), que iba a "wind down Aserto as a commercial entity" (liquidar Aserto como entidad comercial) y que "we have a set of maintainers that will continue to support Topaz" (tenemos un grupo de mantenedores que seguirán dando soporte a Topaz) ([blog de Aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto), escrito por el proveedor). Desde entonces se han seguido publicando versiones. Los 30 commits más recientes de la rama predeterminada, a 2026-11-13, son todos de un único autor, Gert Drapers, que también firmó la entrada sobre el cierre ([commits](https://github.com/aserto-dev/topaz/commits/main)).
 
@@ -147,7 +147,7 @@ Obsérvese que el directorio responde a esta pregunta por sí solo, mediante `Re
 - "The Authorizer exposes three APIs to the calling application" (el autorizador expone tres API a la aplicación que lo llama): `authz/is`, `authz/query` y `authz/decisiontree`, cada una "a POST or gRPC API" (una API POST o gRPC) ([arquitectura](https://www.topaz.sh/docs/architecture)).
 - Las políticas llegan al directorio mediante funciones integradas de OPA, entre ellas `ds.check`, `ds.check_relation` y `ds.check_permission` (misma página).
 - "The directory is implemented as a BoltDB instance" (el directorio está implementado como una instancia de BoltDB) (misma página). "Directory objects are loaded on-demand, in contrast to `data.json` files" (los objetos del directorio se cargan bajo demanda, a diferencia de los archivos `data.json`), que se cargan con la política.
-- "The authorizer captures and stores decision logs for every decision that it evaluates" (el autorizador captura y almacena logs de decisión de cada decisión que evalúa) (misma página).
+- "The authorizer captures and stores decision logs for every decision that it evaluates" (el autorizador captura y almacena logs de decisiones de cada decisión que evalúa) (misma página).
 - Topaz puede desplegarse "as a sidecar or a microservice in your cloud" (como sidecar o como microservicio en su nube) ([introducción](https://www.topaz.sh/docs/intro)).
 
 ## Consistencia

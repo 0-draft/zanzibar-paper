@@ -4,7 +4,7 @@ description: "Die von Zanzibar inspirierte Autorisierungs-Engine der CNCF, geles
 section: ecosystem
 order: 2
 checked: "2026-11-13"
-paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.4"]
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.1.3", "3.2.2", "3.2.4"]
 product:
   name: OpenFGA
   maintainer: CNCF project (Okta core maintainer)
@@ -141,7 +141,7 @@ Woraus besteht eine OpenFGA-Installation? Die Dokumentation beschreibt Server au
     { from: "s2", to: "rep", label: "andere Lesevorgänge", dashed: true },
     { from: "pri", to: "rep", label: "Replikation", dashed: true },
   ]}
-  caption="Gelb: Server. Grün: Datenspeicher. Blau: Clients. Gestrichelt: optional. Die Dokumentation beschreibt keine Verteilung von Server zu Server."
+  caption="Gelb: Server. Grün: Datenspeicher. Blau: Clients. Gestrichelt: optional. Die Dokumentation beschreibt keinen Dispatch von Server zu Server."
 />
 
 Zum Vergleich Abbildung 2 des Papers (§3): `aclservers` fächern Arbeit untereinander auf, `watchservers` liefern einen Stream, und Leopard hält einen denormalisierten Index. Die hier zitierte OpenFGA-Dokumentation beschreibt keines der drei; Server antworten aus dem Datenspeicher und ihren eigenen Caches.
@@ -153,7 +153,7 @@ OpenFGA hat keinen zookie. Die Dokumentation sagt das unter "Future work" (zukü
 | Modus | Verhalten ([Konsistenz-Dokumentation](https://openfga.dev/docs/interacting/consistency)) | Entsprechung im Paper |
 | --- | --- | --- |
 | `MINIMIZE_LATENCY` (Standard) | "will serve queries from the cache when possible" (bedient Abfragen nach Möglichkeit aus dem Cache) | Eine Anfrage ohne zookie: "a reasonably recent snapshot" (ein hinreichend aktueller Snapshot) (§2.4.1) |
-| `HIGHER_CONSISTENCY` | "will skip the cache and query the database directly" (umgeht den Cache und fragt die Datenbank direkt ab) | Keine genaue; am nächsten kommt die Auswertung auf dem neuesten Snapshot |
+| `HIGHER_CONSISTENCY` | "will skip the cache and query the database directly" (umgeht den Cache und fragt die Datenbank direkt ab) | Keine genaue Entsprechung; am nächsten kommt die Auswertung auf dem neuesten Snapshot |
 
 Caching ist "disabled by default" (standardmäßig deaktiviert), und dann gilt: "all queries will have strong consistency regardless of the consistency mode specified" (alle Abfragen haben starke Konsistenz, unabhängig vom angegebenen Konsistenzmodus) ([Konsistenz](https://openfga.dev/docs/interacting/consistency)). Der Modus spielt erst eine Rolle, wenn ein Cache eingeschaltet ist.
 
@@ -183,7 +183,7 @@ Kann Chen mit eingeschaltetem Cache das Readme noch sehen, direkt nachdem er aus
     { from: [0, 3], to: [2, 3], label: "HIGHER_CONSISTENCY" },
     { from: [2, 3], to: [1, 4], dashed: true },
   ]}
-  caption="Zeile 2 ist das, wovor die Dokumentation warnt: Die Tupeländerung wird „might not be taken in consideration“ (möglicherweise nicht berücksichtigt), wenn das Ergebnis aus dem Cache kommt. Ein zookie würde der Anwendung erlauben, „mindestens so aktuell wie mein Schreibvorgang“ zu verlangen (§2.2); hier heißt die Wahl alles oder nichts."
+  caption="Zeile 2 ist das, wovor die Dokumentation warnt: Die Tupeländerung „might not be taken in consideration“ (wird möglicherweise nicht berücksichtigt), wenn das Ergebnis aus dem Cache kommt. Ein zookie würde der Anwendung erlauben, „mindestens so aktuell wie mein Schreibvorgang“ zu verlangen (§2.2); hier heißt die Wahl alles oder nichts."
 />
 
 Die Dokumentation schlägt vor, pro Anfrage zu entscheiden: Speichert die Anwendung, wann eine Ressource zuletzt geändert wurde, kann sie diesen Zeitpunkt mit der Cache-TTL vergleichen, um zwischen den beiden Modi zu wählen ([Konsistenz](https://openfga.dev/docs/interacting/consistency)). Dieser Zeitstempel übernimmt einen Teil der Rolle eines zookie, gehalten von der Anwendung. Außerdem gibt es Flags zur Cache-Invalidierung (`cache-controller-enabled`), die auf kürzliche Schreibvorgänge in den Store prüfen.
@@ -191,12 +191,12 @@ Die Dokumentation schlägt vor, pro Anfrage zu entscheiden: Speichert die Anwend
 ## Unterschiede zum Paper
 
 - **Kein zookie.** Es wird kein Konsistenztoken zurückgegeben oder angenommen; zwei Modi plus ein standardmäßig ausgeschalteter Cache ersetzen es ([Konsistenz](https://openfga.dev/docs/interacting/consistency)). Das Konsistenzmodell des Papers beruht auf zookies (§2.2).
-- **Änderungen werden abgefragt.** `ReadChanges` gibt eine Seite von Tupeländerungen "sorted by ascending time" (aufsteigend nach Zeit sortiert) mit einem Fortsetzungstoken zurück ([`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)). Watch ist im Paper ein Stream mit Heartbeat-zookies (§2.4.3).
+- **Änderungen werden per Polling abgefragt.** `ReadChanges` gibt eine Seite von Tupeländerungen "sorted by ascending time" (aufsteigend nach Zeit sortiert) mit einem Fortsetzungstoken zurück ([`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)). Watch ist im Paper ein Stream mit Heartbeat-zookies (§2.4.3).
 - **Speicherung.** Das Paper verwendet Spanner (§3.1). OpenFGA bietet `memory` (Standard, "Data is lost between server restarts", also: Daten gehen zwischen Serverneustarts verloren), PostgreSQL (mit optionaler Read Replica), MySQL und SQLite ([OpenFGA konfigurieren](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)).
 - **Conditions.** Eine Typbeschränkung wie `[user with non_expired_grant]` lässt ein Tupel nur zählen, wenn eine CEL-Bedingung gilt ([Conditions](https://openfga.dev/docs/modeling/conditions)). Das Tupel des Papers (§2.1) hat keine Bedingung.
-- **Kontextuelle Tupel.** Tupel, die mit einer einzelnen Check-, ListObjects-, ListUsers- oder Expand-Anfrage gesendet werden, "not persisted in the datastore" (nicht im Datenspeicher persistiert) ([Konzepte](https://openfga.dev/docs/concepts), [kontextuelle Tupel](https://openfga.dev/docs/interacting/contextual-tuples)).
-- **Wildcards.** `[user, user:*]` erlaubt eine öffentliche Berechtigung ([Konfigurationssprache](https://openfga.dev/docs/configuration-language)); die Tupelgrammatik des Papers hat keine Wildcard (§2.1).
-- **Stores und Modellversionen.** Ein Store enthält "one or more versions of an authorization model" (eine oder mehrere Versionen eines Autorisierungsmodells) und seine Tupel; "Store data cannot be shared across stores" (Store-Daten können nicht zwischen Stores geteilt werden) ([Konzepte](https://openfga.dev/docs/concepts)). Im Paper werden Konfigurationen in einer nach Namespace-ID verschlüsselten Tabelle gespeichert, neben einem changelog der Konfigurationsänderungen, und jede Anfrage wird zu einem Konfigurations-Snapshot-Zeitstempel ausgewertet (§3.1.3, §3.2.2). Eine Prüfung in OpenFGA kann die Modellversion nennen, die sie verwendet.
+- **Kontextuelle Tupel.** Tupel, die mit einer einzelnen Check-, ListObjects-, ListUsers- oder Expand-Anfrage gesendet und "not persisted in the datastore" (nicht im Datenspeicher persistiert) werden ([Konzepte](https://openfga.dev/docs/concepts), [kontextuelle Tupel](https://openfga.dev/docs/interacting/contextual-tuples)).
+- **Wildcards.** `[user, user:*]` erlaubt eine öffentliche Freigabe ([Konfigurationssprache](https://openfga.dev/docs/configuration-language)); die Tupelgrammatik des Papers hat keine Wildcard (§2.1).
+- **Stores und Modellversionen.** Ein Store enthält "one or more versions of an authorization model" (eine oder mehrere Versionen eines Autorisierungsmodells) und seine Tupel; "Store data cannot be shared across stores" (Store-Daten können nicht zwischen Stores geteilt werden) ([Konzepte](https://openfga.dev/docs/concepts)). Im Paper werden Konfigurationen in einer Tabelle mit der Namespace-ID als Schlüssel gespeichert, neben einem Changelog der Konfigurationsänderungen, und jede Anfrage wird zu einem Konfigurations-Snapshot-Zeitstempel ausgewertet (§3.1.3, §3.2.2). Eine Prüfung in OpenFGA kann die Modellversion nennen, die sie verwendet.
 - **Kein Leopard.** Die hier zitierte Dokumentation beschreibt Check-Caches und Iterator-Caches, keinen vorberechneten Mengenindex wie Leopard (§3.2.4).
 - **Listen-APIs.** `ListObjects`, `StreamedListObjects` und `ListUsers` liegen außerhalb der API des Papers (§2.4).
 
@@ -206,12 +206,11 @@ Stand 2026-11-13: aktiv. Neuestes Release v1.22.1 am 2026-10-28; erstes Release 
 
 - Juni 2022: als Open Source veröffentlicht ([Projektbeitrag, 2026-01-07](https://openfga.dev/blog/incubation-announcement)).
 - 2022: als CNCF-Sandbox-Projekt aufgenommen. Die Quellen widersprechen sich beim Datum: Die CNCF-Projektseite sagt, OpenFGA "was accepted to CNCF on September 14, 2022" (wurde am 14. September 2022 in die CNCF aufgenommen), und ihre Ankündigung nennt September 2022; der eigene Beitrag des Projekts nennt Dezember 2022 ([CNCF-Projektseite](https://www.cncf.io/projects/openfga/), [CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/), [Projektbeitrag](https://openfga.dev/blog/incubation-announcement)).
-- 2025-10-28: laut CNCF-Projektseite auf die Reifestufe Incubating verschoben.
+- 2025-10-28: laut CNCF-Projektseite in die Reifestufe Incubating gewechselt.
 - 2025-11-11: Die CNCF gibt bekannt, dass ihr Technical Oversight Committee "has voted to accept OpenFGA as a CNCF incubating project" (dafür gestimmt hat, OpenFGA als CNCF-Incubating-Projekt aufzunehmen) ([CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)).
 - Der verwaltete Dienst ist Auth0 FGA ([Dokumentation](https://docs.fga.dev/fga)).
 
 ## Quellen
-
 
 - [https://github.com/openfga/openfga](https://github.com/openfga/openfga)
 - [https://github.com/openfga/openfga/releases](https://github.com/openfga/openfga/releases)

@@ -85,7 +85,7 @@ Beto と readme の両方に言及する行が 1 つもないことに注意さ�
 | `doc:readme#parent@folder:A#...` | readme はフォルダ A の中にある |
 | `folder:A#viewer@user:chen` | Chen はフォルダ A の閲覧者である (表 1 にはない) |
 
-4 行目の `#...` は、「タプルのセマンティクスに影響しない関係」(表 1 のキャプション) を表す論文の記法である。このタプルはフォルダの利用者の集合ではなく、フォルダそのものを指している。
+4 行目の `#...` は、"a relation that does not affect the semantics of the tuple" (タプルのセマンティクスに影響しない関係) を表す論文の記法である (表 1 のキャプション)。このタプルはフォルダのユーザーの集合ではなく、フォルダそのものを指している。
 
 5 行すべてをまとめるとどうなるか。
 
@@ -151,7 +151,7 @@ relation {
 } } }
 ```
 
-> 図 1: ドキュメントに対する同心円状の関係を持つ単純な名前空間設定。すべての所有者は編集者であり、すべての編集者は閲覧者である。さらに、親フォルダの閲覧者はそのドキュメントの閲覧者でもある。
+> Figure 1: Simple namespace configuration with concentric relations on documents. All owners are editors, and all editors are viewers. Further, viewers of the parent folder are also viewers of the document. (図 1: ドキュメントに対する同心円状の関係を持つ単純な名前空間設定。すべての所有者は編集者であり、すべての編集者は閲覧者である。さらに、親フォルダの閲覧者はそのドキュメントの閲覧者でもある。)
 
 書き換え木の葉には 3 種類がある (§2.3.1)。
 
@@ -333,7 +333,7 @@ Chen はフォルダ A の閲覧者か。
 
 ## Read と Expand
 
-2 つの API 呼び出しは、同じデータを異なる高さから見る。
+2 つの API 呼び出しは、同じデータを異なる抽象度で見る。
 
 **Read** (§2.4.1) は格納されたタプルだけを返す。リクエストは 1 つ以上の *タプルセット* を指定する。タプルセットは単一のタプルキーか、名前空間内のあるオブジェクト ID またはユーザーセットを持つすべてのタプルであり、任意で 1 つの関係に絞り込める。論文は "Read results only depend on contents of relation tuples and do not reflect userset rewrite rules" (Read の結果はリレーションタプルの内容のみに依存し、ユーザーセット書き換えルールを反映しない) (§2.4.1) と明言している。共通の例で `doc:readme` を関係 `viewer` で Read すると、1 行が返る。
 
@@ -368,7 +368,7 @@ doc:readme#viewer@group:eng#member
     { from: "u1", to: "fold", label: "parent → viewer" },
     { from: "ed", to: "anne", label: "owner" },
   ]}
-  caption="Expand は書き換えルールを適用する。Read であれば group:eng#member の行だけを返していた。"
+  caption="Expand は書き換えルールを適用する。Read なら group:eng#member の行だけを返す。"
 />
 
 破線の葉が 2 つあることに注意されたい。§2.4.5 によれば、葉は他所を指すユーザーセットでありうるので、個々のユーザー (Beto、Chen) をすべて知りたいクライアントは、それらの葉をさらに Expand する。1 回の Expand 呼び出しがどの深さまで再帰するかは論文に書かれていない。この図は、ドキュメント自身のルールが到達するユーザーセットで止めている。論文はユースケースを挙げている。Expand によってクライアントは "reason about the complete set of users and groups that have access to their objects, which allows them to build efficient search indices for access-controlled content" (自身のオブジェクトにアクセスできるユーザーとグループの完全な集合を把握でき、それによってアクセス制御されたコンテンツのための効率的な検索インデックスを構築できる) (§2.4.5)。

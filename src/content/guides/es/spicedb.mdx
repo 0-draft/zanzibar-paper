@@ -4,7 +4,7 @@ description: "La base de datos de código abierto de AuthZed para relaciones de 
 section: ecosystem
 order: 1
 checked: "2026-11-13"
-paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4"]
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4", "3.2.5"]
 product:
   name: SpiceDB
   maintainer: AuthZed, Inc.
@@ -151,7 +151,7 @@ Compárese con la Figura 2 del artículo (§3): allí los `aclservers` también 
 
 ## Consistencia: ZedTokens y zookies
 
-AuthZed llama al ZedToken "the SpiceDB equivalent of Google Zanzibar's Zookie concept which protects users from the New Enemy Problem" (el equivalente en SpiceDB del concepto de Zookie de Google Zanzibar, que protege a los usuarios frente al problema del nuevo enemigo) ([documentación de consistencia](https://authzed.com/docs/spicedb/concepts/consistency)). Las escrituras devuelven uno (`written_at`), y las comprobaciones también (`checked_at`). Una solicitud puede elegir uno de cuatro modos:
+AuthZed llama al ZedToken "the SpiceDB equivalent of Google Zanzibar's Zookie concept which protects users from the New Enemy Problem" (el equivalente en SpiceDB del concepto de Zookie de Google Zanzibar, que protege a los usuarios frente al problema del “nuevo enemigo”) ([documentación de consistencia](https://authzed.com/docs/spicedb/concepts/consistency)). Las escrituras devuelven uno (`written_at`), y las comprobaciones también (`checked_at`). Una solicitud puede elegir uno de cuatro modos:
 
 | Modo | Qué pide | Equivalente en el artículo |
 | --- | --- | --- |
@@ -160,7 +160,7 @@ AuthZed llama al ZedToken "the SpiceDB equivalent of Google Zanzibar's Zookie co
 | `at_exact_snapshot` + ZedToken | Exactamente la instantánea del token | Un zookie de lectura reutilizado para obtener "the same snapshot as a previous read" (la misma instantánea que una lectura previa) (§2.4.1) |
 | `fully_consistent` | Los datos más recientes | Sin equivalente directo; la comprobación de cambio de contenido del artículo se evalúa en la instantánea más reciente (§2.4.4) |
 
-Sobre CockroachDB, la documentación advierte que `fully_consistent` "does not guarantee read-after-write consistency" (no garantiza la consistencia de lectura tras escritura), porque los relojes de los nodos pueden diferir hasta el `max_offset` del clúster; en su lugar, recomienda un ZedToken con `at_least_as_fresh` ([documentación de consistencia](https://authzed.com/docs/spicedb/concepts/consistency)).
+Con CockroachDB, la documentación advierte que `fully_consistent` "does not guarantee read-after-write consistency" (no garantiza la consistencia de lectura tras escritura), porque los relojes de los nodos pueden diferir hasta el `max_offset` del clúster; en su lugar, recomienda un ZedToken con `at_least_as_fresh` ([documentación de consistencia](https://authzed.com/docs/spicedb/concepts/consistency)).
 
 `fully_consistent` es el valor predeterminado para `WriteRelationships`, `DeleteRelationships`, `ReadSchema` y `WriteSchema`; `minimize_latency` es el predeterminado para todas las demás API ([documentación de consistencia](https://authzed.com/docs/spicedb/concepts/consistency)).
 
@@ -171,13 +171,13 @@ Sobre CockroachDB, la documentación advierte que `fully_consistent` "does not g
   laneWidth={190}
   timeLabel="tiempo"
   title="Usar un ZedToken como un zookie"
-  desc="La aplicación retira a Chen la vista de la carpeta A con WriteRelationships. SpiceDB lo confirma y devuelve un ZedToken Z1 como written_at. La aplicación guarda el contenido nuevo del readme junto con Z1. Más tarde, se envía una comprobación de Chen sobre el readme con at_least_as_fresh Z1. SpiceDB la evalúa en una instantánea no más antigua que Z1, así que se ve la eliminación y a Chen se le deniega el acceso."
+  desc="La aplicación retira a Chen el permiso de ver la carpeta A con WriteRelationships. SpiceDB lo confirma y devuelve un ZedToken Z1 como written_at. La aplicación guarda el contenido nuevo del readme junto con Z1. Más tarde, se envía una comprobación de Chen sobre el readme con at_least_as_fresh Z1. SpiceDB la evalúa en una instantánea no más antigua que Z1, así que se ve la eliminación y a Chen se le deniega el acceso."
   events={[
     { lane: 0, t: 0, label: "quita a Chen de A", kind: "write" },
     { lane: 1, t: 0, label: "confirma", kind: "write" },
-    { lane: 0, t: 1, label: "guarda Z1", kind: "note", mono: true },
+    { lane: 0, t: 1, label: "conserva Z1", kind: "note", mono: true },
     { lane: 0, t: 2, label: "guarda readme + Z1", kind: "write" },
-    { lane: 2, t: 2, label: "content, Z1", kind: "write", mono: true },
+    { lane: 2, t: 2, label: "contenido, Z1", kind: "write", mono: true },
     { lane: 0, t: 3, label: "¿puede Chen ver?", kind: "read" },
     { lane: 1, t: 3, label: "instantánea ≥ Z1", kind: "read" },
     { lane: 1, t: 4, label: "denegado", kind: "good" },

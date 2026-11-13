@@ -98,7 +98,7 @@ O Exemplo B difere em um detalhe: a segunda alteração é no *conteúdo* do doc
   events={[
     { lane: 0, t: 0, label: "B1: remove Bob\nda ACL do doc", kind: "write" },
     { lane: 1, t: 1, label: "B2: adiciona\nnovo conteúdo", kind: "write" },
-    { lane: 2, t: 2, label: "verificação em\nT < T_B1 antigo", kind: "bad", mono: true },
+    { lane: 2, t: 2, label: "verificação defasada\nem T < T_B1", kind: "bad", mono: true },
     { lane: 2, t: 3, label: "Bob vê o\nnovo conteúdo", kind: "bad" },
   ]}
   arrows={[{ from: [0, 0], to: [1, 1], label: "pede" }]}
@@ -166,7 +166,7 @@ O Zanzibar não calcula esses timestamps por conta própria. Ele armazena as ACL
 
 - `TT.now()` retorna um intervalo `[earliest, latest]` que garantidamente contém o tempo absoluto em que foi chamado. A incerteza `ε` é metade da largura do intervalo; no ambiente de produção do Google, ela era "typically a sawtooth function of time, varying from about 1 to 7 ms over each poll interval" (tipicamente uma função dente de serra do tempo, variando de cerca de 1 a 7 ms ao longo de cada intervalo de consulta).
 - **Início**: o líder atribui a uma escrita um timestamp de commit `s` não menor que `TT.now().latest`.
-- **Espera de commit** (commit wait): os clientes não podem ver a escrita até que `TT.after(s)` seja verdadeiro, ou seja, até que `s` tenha definitivamente passado em todos os lugares. O Spanner observa que "the expected wait is at least 2 ∗ ε̄" (a espera esperada é de pelo menos 2 ∗ ε̄), em que `ε̄` é o limite médio de erro (§4.2.1).
+- **Espera de commit** (commit wait): os clientes não podem ver a escrita até que `TT.after(s)` seja verdadeiro, ou seja, até que `s` tenha definitivamente passado em todos os lugares. O Spanner observa que "the expected wait is at least 2 ∗ ε̄" (a espera prevista é de pelo menos 2 ∗ ε̄), em que `ε̄` é o limite médio de erro (§4.2.1).
 
 Como a espera torna os timestamps causais?
 
@@ -270,9 +270,9 @@ O que o arredondamento para cima traz quando três verificações chegam com zoo
   title="Arredondar para cima os timestamps de avaliação"
   desc="Três verificações, de Anne, Beto e Chen sobre doc:readme, carregam zookies com timestamps diferentes, em microssegundos, dentro do mesmo segundo. O Zanzibar arredonda cada um para cima para o mesmo timestamp grosso T_q, que é maior ou igual a todos os zookies, de modo que as três são avaliadas em um único snapshot e compartilham entradas de cache indexadas por T_q. Qualquer timestamp posterior, até os dados mais recentes no líder, também seria permitido."
   nodes={[
-    { id: "a", x: 90, y: 50, label: "verificação de Anne\nzookie 12.104 s", kind: "client" },
-    { id: "b", x: 90, y: 125, label: "verificação de Beto\nzookie 12.380 s", kind: "client" },
-    { id: "c", x: 90, y: 200, label: "verificação de Chen\nzookie 12.911 s", kind: "client" },
+    { id: "a", x: 90, y: 50, label: "verificação de Anne\nzookie 12,104 s", kind: "client" },
+    { id: "b", x: 90, y: 125, label: "verificação de Beto\nzookie 12,380 s", kind: "client" },
+    { id: "c", x: 90, y: 200, label: "verificação de Chen\nzookie 12,911 s", kind: "client" },
     { id: "q", x: 330, y: 125, label: "avalia em\nT_q = 13 s", kind: "server", on: true },
     { id: "cache", x: 330, y: 220, label: "chave de cache\ninclui T_q", kind: "server" },
     { id: "now", x: 530, y: 125, label: "dados mais\nrecentes (líder)", kind: "store" },
@@ -303,15 +303,15 @@ A Tabela 2 do artigo (§4.2) dá a latência de cada tipo, em milissegundos, com
 
 | | API | percentil 50 | percentil 95 | percentil 99 |
 | --- | --- | --- | --- | --- |
-| Safe | Check | 3.0 (0.091) | 9.46 (0.3) | 15.0 (1.19) |
-| Safe | Read | 2.18 (0.031) | 3.71 (0.094) | 8.03 (3.28) |
-| Safe | Expand | 4.27 (0.313) | 8.84 (0.586) | 34.1 (4.35) |
-| Recent | Check | 2.86 (0.087) | 60.0 (2.1) | 76.3 (2.59) |
-| Recent | Read | 2.21 (0.054) | 40.1 (2.03) | 86.2 (3.84) |
-| Recent | Expand | 5.79 (0.224) | 45.6 (3.44) | 121.0 (2.38) |
-| Recent | Write | 127.0 (3.65) | 233.0 (23.0) | 401.0 (133.0) |
+| Safe | Check | 3,0 (0,091) | 9,46 (0,3) | 15,0 (1,19) |
+| Safe | Read | 2,18 (0,031) | 3,71 (0,094) | 8,03 (3,28) |
+| Safe | Expand | 4,27 (0,313) | 8,84 (0,586) | 34,1 (4,35) |
+| Recent | Check | 2,86 (0,087) | 60,0 (2,1) | 76,3 (2,59) |
+| Recent | Read | 2,21 (0,054) | 40,1 (2,03) | 86,2 (3,84) |
+| Recent | Expand | 5,79 (0,224) | 45,6 (3,44) | 121,0 (2,38) |
+| Recent | Write | 127,0 (3,65) | 233,0 (23,0) | 401,0 (133,0) |
 
-As medianas são próximas; as caudas não. O percentil 95 de um Check Recent é 60.0 ms, contra 9.46 ms de um Safe, o custo da viagem entre regiões. As escritas são as mais lentas porque "always require distributed coordination among Spanner servers" (sempre exigem coordenação distribuída entre servidores do Spanner) (§4.2); no Spanner, essa coordenação inclui a espera de commit. Segundo a §4.1 e a Figura 3, as requisições Safe superam as Recent em "about two orders of magnitude" (cerca de duas ordens de grandeza), "which allows Zanzibar to serve the vast majority of ACL checks locally" (o que permite ao Zanzibar servir a grande maioria das verificações de ACL localmente). A maioria das requisições pode ser Safe porque um zookie é apenas um limite inferior: uma verificação de conteúdo mais antigo pode usar dados mais antigos, já replicados.
+As medianas são próximas; as caudas não. O percentil 95 de um Check Recent é 60,0 ms, contra 9,46 ms de um Safe, o custo da viagem entre regiões. As escritas são as mais lentas porque "always require distributed coordination among Spanner servers" (sempre exigem coordenação distribuída entre servidores do Spanner) (§4.2); no Spanner, essa coordenação inclui a espera de commit. Segundo a §4.1 e a Figura 3, as requisições Safe superam as Recent em "about two orders of magnitude" (cerca de duas ordens de grandeza), "which allows Zanzibar to serve the vast majority of ACL checks locally" (o que permite ao Zanzibar servir a grande maioria das verificações de ACL localmente). A maioria das requisições pode ser Safe porque um zookie é apenas um limite inferior: uma verificação de conteúdo mais antigo pode usar dados mais antigos, já replicados.
 
 <Callout kind="note" title="Não verificado">
 

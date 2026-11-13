@@ -28,7 +28,7 @@ Keto begann nicht als Zanzibar-System. Das Zanzibar-Design kam mit v0.6.0-alpha.
 
 | Im Paper | In Ory Keto |
 | --- | --- |
-| Namespace-Konfiguration (§2.3) | Eine `class`, die `implements Namespace` in der Ory Permission Language (OPL), einer Teilmenge von TypeScript ([OPL-Referenz](https://www.ory.com/docs/keto/reference/ory-permission-language)) |
+| Namespace-Konfiguration (§2.3) | Eine `class` mit `implements Namespace` in der Ory Permission Language (OPL), einer Teilmenge von TypeScript ([OPL-Referenz](https://www.ory.com/docs/keto/reference/ory-permission-language)) |
 | Relationstupel `object#relation@user` (§2.1) | `namespace:object#relation@subject`, zum Beispiel `Group:eng#members@User:beto` ([Relation Tuples](https://www.ory.com/docs/keto/concepts/relation-tuples), [Parser](https://github.com/ory/keto/blob/master/ketoapi/enc_string.go)) |
 | `_this` | `this.related.viewers.includes(ctx.subject)` |
 | `computed_userset` | `this.permits.edit(ctx)`: "A permission can call another permission defined on the same namespace" (Eine Berechtigung kann eine andere im selben Namespace definierte Berechtigung aufrufen) |
@@ -134,12 +134,12 @@ Nur die Pfeile sind gespeichert. Jeder Schritt, der einen Eigentümer zum Betrac
 
 ## Architektur
 
-Welche Teile einer Keto-Installation sprechen mit welchen?
+Welche Teile einer Keto-Bereitstellung sprechen mit welchen?
 
 <Graph
   width={620}
   height={270}
-  title="Ory-Keto-Installation, wie in der Dokumentation beschrieben"
+  title="Ory-Keto-Bereitstellung, wie in der Dokumentation beschrieben"
   desc="Keto-Container bedienen jeweils standardmäßig eine Read-API auf Port 4466 und eine Write-API auf Port 4467. Öffentliche Clients erreichen nur die Read-API, hinter einem Gateway. Ihr Backend verwendet die Write-API. Alle Container teilen eine SQL-Datenbank. Skalieren heißt, Container hinzuzufügen."
   nodes={[
     { id: "pub", x: 95, y: 55, label: "Clients über\nAPI-Gateway", kind: "client" },
@@ -154,7 +154,7 @@ Welche Teile einer Keto-Installation sprechen mit welchen?
     { from: "k1", to: "db", label: "SQL" },
     { from: "k2", to: "db", label: "SQL" },
   ]}
-  caption="Gelb: Keto-Container. Grün: die gemeinsame Datenbank. Blau: Clients. Kein Verkehr zwischen den Containern ist dokumentiert."
+  caption="Gelb: Keto-Container. Grün: die gemeinsame Datenbank. Blau: Clients. Verkehr zwischen den Containern ist nicht dokumentiert."
 />
 
 - Jeder Container bedient eine Read-API (Standardport 4466), eine Write-API (4467) und eine OPL-Syntax-API (4469), jeweils über HTTP und gRPC ([Konfigurationsschema](https://github.com/ory/keto/blob/master/embedx/config.schema.json)).
@@ -193,7 +193,7 @@ Die Garantie, die das Paper auf zookies aufbaut, nämlich der Schutz von Inhalte
 
 - **Keine zookies.** Die Felder existieren; das Verhalten nicht (siehe oben).
 - **Kein Watch.** Die v1alpha2-API hat die Dienste Check, Expand, Read, Write, Namespaces und Version sowie einen separaten OPL-Syntax-Dienst (`opl/v1alpha1`), aber keinen Änderungsstream ([Proto-Verzeichnis](https://github.com/ory/keto/tree/master/proto/ory/keto)). Watch speist im Paper sekundäre Indizes und Leopard (§2.4.3, §3.2.4).
-- **Kein Leopard.** Kein denormalisierter Mengenindex ist dokumentiert.
+- **Kein Leopard.** Ein denormalisierter Mengenindex ist nicht dokumentiert.
 - **Eine Programmiersprachen-Syntax.** OPL ist eine Teilmenge von TypeScript, damit "users can get context help from their IDE" (Benutzer kontextbezogene Hilfe von ihrer IDE erhalten können) ([OPL-Spezifikation](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md)). Abbildung 1 des Papers schreibt eine Konfiguration in einer Textsyntax im Stil von Protocol Buffers (§2.3.1); das Paper benennt das Format nicht.
 - **SQL-Speicher.** Eine gemeinsame SQL-Datenbank statt Spanner (§3.1).
 - **Prüftiefe.** Check-Anfragen tragen ein `max_depth`, "The maximum depth to search for a relation" (die maximale Tiefe, bis zu der nach einer Relation gesucht wird) ([check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)).
@@ -212,7 +212,7 @@ Die Garantie, die das Paper auf zookies aufbaut, nämlich der Schutz von Inhalte
 - Ory-Keto-Dokumentation: [ory.com/docs/keto](https://www.ory.com/docs/keto)
 - OPL-Referenz: [ory.com/docs/keto/reference/ory-permission-language](https://www.ory.com/docs/keto/reference/ory-permission-language)
 - OPL-Spezifikation: [github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md)
-- Relation tuples: [ory.com/docs/keto/concepts/relation-tuples](https://www.ory.com/docs/keto/concepts/relation-tuples)
+- Relationstupel: [ory.com/docs/keto/concepts/relation-tuples](https://www.ory.com/docs/keto/concepts/relation-tuples)
 - String-Format der Tupel: [github.com/ory/keto/blob/master/ketoapi/enc_string.go](https://github.com/ory/keto/blob/master/ketoapi/enc_string.go)
 - Beispiel-Namespaces und -Tupel: [namespaces.keto.ts](https://github.com/ory/keto/blob/master/contrib/rewrites-example/namespaces.keto.ts), [tuples.json](https://github.com/ory/keto/blob/master/contrib/rewrites-example/relation-tuples/tuples.json)
 - gRPC-Dienste: [github.com/ory/keto/tree/master/proto/ory/keto](https://github.com/ory/keto/tree/master/proto/ory/keto)

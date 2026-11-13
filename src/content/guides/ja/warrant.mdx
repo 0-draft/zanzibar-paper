@@ -169,11 +169,11 @@ Warrant のコードはそのトークンを *wookie* と呼ぶ ([wookie](https:
 
 README 自身が、高スループットでの低レイテンシは "requires running Warrant as a distributed service with the use of Warrant-Tokens (also referred to as Zookies in Google Zanzibar)" (Warrant-Token (Google Zanzibar では Zookie とも呼ばれる) を用いて、Warrant を分散サービスとして動かす必要がある) と述べ、"this open source version of Warrant is only capable of handling low-to-moderate throughput" (このオープンソース版の Warrant が処理できるのは低から中程度のスループットだけである) としている ([README](https://github.com/warrant-dev/warrant)、ベンダー自身による記述)。Warrant-Token についてのリンクは、現在は WorkOS FGA の一般的な概要ページにつながっており、そこには Warrant-Token の説明はない。
 
-論文との違いに注意してほしい。zookie は下限を定めるものであり、それによって Zanzibar は "to choose any timestamp fresher than the one encoded in a zookie" (zookie にエンコードされたものより新しい任意のタイムスタンプを選択) でき、ほとんどのチェックを "at a default staleness with already replicated data" (既に複製済みのデータを用いてデフォルトの古さで) 処理できる (§2.2)。`latest` には時点が含まれていない。読み取りをプライマリに移すだけであり、プライマリは最も新しいコピーではあるが、レプリカの利点を手放すことになる。
+論文との違いに注意されたい。zookie は下限を定めるものであり、それによって Zanzibar は "to choose any timestamp fresher than the one encoded in a zookie" (zookie にエンコードされたものより新しい任意のタイムスタンプを選択) でき、ほとんどのチェックを "at a default staleness with already replicated data" (既に複製済みのデータを用いてデフォルトの古さで) 処理できる (§2.2)。`latest` には時点が含まれていない。読み取りをプライマリに移すだけであり、プライマリは最も新しいコピーではあるが、レプリカの利点を手放すことになる。
 
 ## 論文との違い
 
-- **スナップショットトークンがない。** オープンソースのサーバーには、上で述べたとおりない。
+- **スナップショットトークンがない。** 上で述べたとおり、オープンソースのサーバーにはない。
 - **RBAC と ABAC が組み込まれている。** ロール、権限、テナント、料金プラン、機能のための組み込みオブジェクト型と、warrant に付けるポリシー条件がある ([README](https://github.com/warrant-dev/warrant)、[マイグレーション](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql))。
 - **クエリ言語。** `GET /v2/query` は、論文の Read と Expand が答えない一覧の問いに答える ([query handlers](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/query/handlers.go))。
 - **Watch、Expand、Leopard がない。** また Spanner (§3.1) ではなく、単一の SQL プライマリを使う。

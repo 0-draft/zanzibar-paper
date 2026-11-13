@@ -4,7 +4,7 @@ description: "AuthZed 的開源授權關係資料庫，對照 Zanzibar 論文閱
 section: ecosystem
 order: 1
 checked: "2026-11-13"
-paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4"]
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4", "3.2.5"]
 product:
   name: SpiceDB
   maintainer: AuthZed, Inc.
@@ -71,7 +71,7 @@ definition doc {
 }
 ```
 
-<Callout kind="note" title="未經驗證器執行">
+<Callout kind="note" title="未經驗證器檢查">
 
 此 schema 只使用截至 2026-11-13 出現在 SpiceDB [schema language 頁面](https://authzed.com/docs/spicedb/concepts/schema)上的語法：`definition`、含 `user | group#member` 的 `relation`、含 `+` 與 `->` 的 `permission`。它尚未經過 `zed` 或 SpiceDB Playground 執行。
 
