@@ -110,8 +110,8 @@ Folder:A#viewers@User:chen
 <Graph
   width={600}
   height={260}
-  title="El ejemplo de referencia como relation tuples de Keto"
-  desc="Cinco relation tuples. User:anne está en owners de Doc:readme. User:beto está en members de Group:eng. Group:eng#members está en viewers de Doc:readme. Folder:A está en parents de Doc:readme. User:chen está en viewers de Folder:A. El camino de Chen a través de Folder:A está resaltado: lo resuelve traverse sobre parents."
+  title="El ejemplo de referencia como tuplas de relación de Keto"
+  desc="Cinco tuplas de relación. User:anne está en owners de Doc:readme. User:beto está en members de Group:eng. Group:eng#members está en viewers de Doc:readme. Folder:A está en parents de Doc:readme. User:chen está en viewers de Folder:A. El camino de Chen a través de Folder:A está resaltado: lo resuelve traverse sobre parents."
   nodes={[
     { id: "anne", x: 80, y: 50, label: "User:anne", kind: "subject", mono: true },
     { id: "beto", x: 80, y: 130, label: "User:beto", kind: "subject", mono: true },
@@ -140,7 +140,7 @@ Obsérvese que solo se almacenan las flechas. Cada paso que convierte a un propi
   width={620}
   height={270}
   title="Despliegue de Ory Keto, según la documentación"
-  desc="Cada contenedor de Keto sirve por defecto una Read API en el puerto 4466 y una Write API en el puerto 4467. Los clientes expuestos al público solo llegan a la Read API, detrás de una pasarela. El backend propio usa la Write API. Todos los contenedores comparten una base de datos SQL. Escalar significa añadir contenedores."
+  desc="Cada contenedor de Keto sirve por defecto una Read API en el puerto 4466 y una Write API en el puerto 4467. Los clientes expuestos al público solo llegan a la Read API, detrás de una pasarela. Su backend usa la Write API. Todos los contenedores comparten una base de datos SQL. Escalar significa añadir contenedores."
   nodes={[
     { id: "pub", x: 95, y: 55, label: "Clientes vía\npasarela de API", kind: "client" },
     { id: "be", x: 95, y: 215, label: "Su backend", kind: "client" },

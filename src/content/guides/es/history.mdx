@@ -18,7 +18,7 @@ El artículo de Zanzibar describe su propia genealogía en [§5, Trabajos relaci
 
 Los primeros sistemas multiusuario tuvieron que decidir quién podía tocar qué. En 1966, Dennis y Van Horn dieron a cada cómputo una lista de *capacidades* (capabilities), tokens infalsificables que nombran un objeto y conceden derechos sobre él ([Dennis y Van Horn](https://doi.org/10.1145/365230.365252)). La matriz de acceso de Lampson de 1971 mostró que las capacidades y las listas de control de acceso son dos formas de almacenar la misma tabla, por filas o por columnas ([Lampson](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)). Multics adoptó la vista por columnas: cada segmento y cada directorio llevaba una ACL ([Saltzer](https://dl.acm.org/doi/10.1145/361011.361067)). Zanzibar también está del lado de las ACL: responde a “¿quién puede tocar este objeto?”.
 
-Después, los sistemas operativos hicieron las listas más baratas y más gruesas, y más tarde de nuevo más ricas. El propio artículo traza este recorrido: en la primera edición de UNIX, los indicadores de archivo dicen "whether owner and non-owner can read or write the file" (si el propietario y quien no lo es pueden leer o escribir el archivo); en la cuarta edición hay bits de lectura, escritura y ejecución "for owner, group, and others" (para el propietario, el grupo y los demás); las ACL de POSIX añaden "an arbitrary list of users and groups" (una lista arbitraria de usuarios y grupos); VMS "supports ACL inheritance for files created within a directory tree" (admite la herencia de ACL para los archivos creados dentro de un árbol de directorios) (§5). Esas cuatro palabras, permisos, usuarios, grupos y herencia, son lo que el modelo de datos de Zanzibar se propone admitir.
+Después, los sistemas operativos hicieron las listas más baratas y de grano más grueso, y más tarde de nuevo más ricas. El propio artículo traza este recorrido: en la primera edición de UNIX, los indicadores de archivo dicen "whether owner and non-owner can read or write the file" (si el propietario y quien no lo es pueden leer o escribir el archivo); en la cuarta edición hay bits de lectura, escritura y ejecución "for owner, group, and others" (para el propietario, el grupo y los demás); las ACL de POSIX añaden "an arbitrary list of users and groups" (una lista arbitraria de usuarios y grupos); VMS "supports ACL inheritance for files created within a directory tree" (admite la herencia de ACL para los archivos creados dentro de un árbol de directorios) (§5). Esas cuatro palabras, permisos, usuarios, grupos y herencia, son lo que el modelo de datos de Zanzibar se propone admitir.
 
 Desde la década de 1970, los modelos se alejaron de las listas por objeto. Bell–LaPadula y Biba dejan que decida el sistema, no el propietario, mediante etiquetas; Zanzibar es discrecional, así que son un contraste y no un antecedente. El control de acceso basado en roles (1992) puso los roles entre los usuarios y los permisos; el artículo dice que los roles "are similar to Zanzibar relations" (son similares a las relaciones de Zanzibar) (§5). El control basado en atributos, definido en la guía del NIST SP 800-162 de 2014, calcula las decisiones a partir de atributos en el momento de la solicitud. El control basado en relaciones, bautizado por Gates en 2007 y formalizado por Fong en 2011, decide a partir de relaciones como “miembro de” o “carpeta padre de”, que se componen ([Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)). El artículo nunca usa la palabra ReBAC, pero sus tuplas de relación forman un grafo de ese tipo.
 
@@ -84,7 +84,7 @@ Tras el artículo, otros reconstruyeron el diseño en abierto. Ory Keto se reesc
       era: "Modelos y estándares",
       year: "1975–1977",
       title: "Modelo de integridad de Biba",
-      body: "El dual de integridad de Bell–LaPadula. MITRE MTR-3153 (junio de 1975), citado habitualmente como ESD-TR-76-372 (abril de 1977).",
+      body: "El dual de integridad de Bell–LaPadula. MITRE MTR-3153 (junio de 1975); el informe revisado, MTR-3153 Rev. 1, se publicó como ESD-TR-76-372 en abril de 1977 (DTIC AD-A039324).",
       href: "https://seclab.cs.ucdavis.edu/projects/history/CD/index.html",
     },
     {
@@ -152,7 +152,7 @@ Tras el artículo, otros reconstruyeron el diseño en abierto. Ory Keto se reesc
     },
     {
       era: "Escala planetaria",
-      year: "hacia 2014",
+      year: "a más tardar 2014",
       title: "Zanzibar en producción",
       body: "El artículo dice que \"has been in production use for more than 5 years\" (lleva más de 5 años en uso en producción) (§4). Eso sitúa el inicio antes de mediados de 2014; ninguna fuente pública da el año.",
       href: "https://www.usenix.org/conference/atc19/presentation/pang",
@@ -197,7 +197,7 @@ Tras el artículo, otros reconstruyeron el diseño en abierto. Ory Keto se reesc
       era: "Código abierto y estándares",
       year: "2022",
       title: "Primera versión de OpenFGA",
-      body: "10 de junio de 2022. Desarrollado por empleados de Okta; proyecto CNCF Incubating desde noviembre de 2025 (blog de la CNCF, 11 de noviembre de 2025).",
+      body: "10 de junio de 2022. Desarrollado por empleados de Okta; proyecto CNCF Incubating desde el 28 de octubre de 2025, anunciado en el blog de la CNCF el 11 de noviembre de 2025.",
       href: "https://github.com/openfga/openfga",
     },
     {
@@ -239,7 +239,7 @@ Tras el artículo, otros reconstruyeron el diseño en abierto. Ory Keto se reesc
       era: "Código abierto y estándares",
       year: "2026",
       title: "AuthZEN Authorization API 1.0 Final",
-      body: "Aprobada como OpenID Final Specification, anunciado el 12 de enero de 2026 (81 a favor, 1 objeción, 25 abstenciones). La API permite a los puntos de aplicación de políticas (PEP) pedir decisiones a los puntos de decisión de políticas (PDP).",
+      body: "Aprobada como OpenID Final Specification, anunciada el 12 de enero de 2026 (81 a favor, 1 objeción, 25 abstenciones). La API permite a los puntos de aplicación de políticas (PEP) pedir decisiones a los puntos de decisión de políticas (PDP).",
       href: "https://openid.net/authorization-api-1-0-final-specification-approved/",
     },
   ]}
@@ -282,7 +282,7 @@ Obsérvese la división. El modelo de datos de la mitad superior es una recombin
 
 <Callout kind="note" title="IAM por encima">
 
-El artículo señala además que el sistema Cloud IAM de Google "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (está construido como una capa sobre el sistema de almacenamiento y evaluación de ACL de Zanzibar) (§5): un producto basado en roles que funciona sobre el almacén de relaciones. Véase [ACL, RBAC, ABAC, ReBAC](../access-control-models/) para ver cómo encajan los modelos entre sí.
+El artículo señala además que el sistema Cloud IAM de Google "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (está construido como una capa sobre el sistema de almacenamiento y evaluación de ACL de Zanzibar) (§5): un producto basado en roles que funciona sobre el almacén de relaciones. Véase [ACL, RBAC, ABAC, ReBAC](../access-control-models/) sobre cómo encajan los modelos entre sí.
 
 </Callout>
 
@@ -302,6 +302,7 @@ Trabajos relacionados, con todos los sistemas nombrados en esta página: §5. Hi
 - J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
 - A. Grünbacher, "POSIX Access Control Lists on Linux", USENIX ATC 2003 FREENIX, [usenix.org](https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html)
 - D. E. Bell, "Looking Back at the Bell-La Padula Model", ACSAC 2005, [PDF](https://www.acsac.org/2005/papers/Bell.pdf)
+- K. J. Biba, "Integrity Considerations for Secure Computer Systems", MTR-3153 Rev. 1 / ESD-TR-76-372, abril de 1977, [DTIC AD-A039324](https://apps.dtic.mil/sti/html/tr/ADA039324/index.html)
 - Archivo histórico del Computer Security Lab de UC Davis (Biba), [seclab.cs.ucdavis.edu/projects/history/CD](https://seclab.cs.ucdavis.edu/projects/history/CD/index.html)
 - NIST, proyecto Role Based Access Control, [csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
 - OASIS, especificación principal de XACML 3.0, [docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html)

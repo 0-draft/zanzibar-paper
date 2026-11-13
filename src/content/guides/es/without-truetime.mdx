@@ -31,7 +31,7 @@ Nada en esta lista dice “marca de tiempo” en el sentido de hora de reloj. El
   height={300}
   minWidth={540}
   title="Las dos propiedades en las que se apoya un zookie"
-  desc="La escritura x quita a Chen de folder:A. La escritura y, hecha después de que se confirmara x, mueve doc:readme a folder:A. La propiedad 1 dice que la posición de confirmación de x es menor que la de y. El token devuelto para y nombra la posición de y. Una comprobación posterior lleva el token. La propiedad 2 dice que la comprobación lee una instantánea en el token o posterior, que por tanto contiene y y, por la propiedad 1, también x. A Chen se le deniega el acceso."
+  desc="La escritura x quita a Chen de folder:A. La escritura y, hecha después del acuse de recibo de x, mueve doc:readme a folder:A. La propiedad 1 dice que la posición de confirmación de x es menor que la de y. El token devuelto para y nombra la posición de y. Una comprobación posterior lleva el token. La propiedad 2 dice que la comprobación lee una instantánea en el token o posterior, que por tanto contiene y y, por la propiedad 1, también x. A Chen se le deniega el acceso."
   nodes={[
     { id: "x", x: 100, y: 60, label: "x: quita a Chen\nde folder:A", kind: "store" },
     { id: "y", x: 100, y: 200, label: "y: mueve el readme\na folder:A", kind: "store" },
@@ -82,7 +82,7 @@ Obsérvese que las bases de datos con un único primario obtienen la propiedad �
 
 CockroachDB no tiene TrueTime. Sus nodos mantienen relojes sincronizados de forma aproximada, y el clúster tiene un desfase de reloj máximo, `--max-offset`, con un valor predeterminado de `500ms`; "If observed clock offsets exceed this limit, servers will crash to minimize the likelihood of reading inconsistent data" (si los desfases de reloj observados superan este límite, los servidores se caerán para minimizar la probabilidad de leer datos inconsistentes) ([`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start)). La propia comparación de Cockroach Labs con Spanner dice que "CockroachDB only goes as far as to claim serializability" (CockroachDB solo llega a afirmar serializabilidad), y nombra la anomalía que permite, "causal reverse" (inversión causal): transacciones causalmente relacionadas pueden confirmarse con marcas de tiempo en el orden equivocado ([Living without atomic clocks, 2022-01-27](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/)).
 
-AuthZed reprodujo el problema del “nuevo enemigo” en CockroachDB con SpiceDB en 2021 ([The One Crucial Difference Between Spanner and CockroachDB, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). El resumen del hueco en la entrada: "Cockroach does not provide external consistency for transactions involving _non-overlapping keys_." (Cockroach no proporciona consistencia externa para transacciones que implican _claves que no se solapan_.) Su prueba usó dos escrituras y una comprobación, ejecutadas "in sequence (not parallel)" (en secuencia, no en paralelo): escribir una tupla `excluded`, escribir una tupla `direct` y después comprobar `allowed = direct - excluded` en la revisión de la segunda escritura; "the check in 3 will succeed" (la comprobación de 3 tendrá éxito).
+AuthZed reprodujo el problema del “nuevo enemigo” en CockroachDB con SpiceDB en 2021 ([The One Crucial Difference Between Spanner and CockroachDB, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). El resumen del hueco en la entrada: "Cockroach does not provide external consistency for transactions involving _non-overlapping keys_." (Cockroach no proporciona consistencia externa para transacciones que implican _claves que no se solapan_.) Su prueba usó dos escrituras y una comprobación, ejecutadas "in sequence (not parallel)" (en secuencia, no en paralelo): escribir una tupla `excluded`, escribir una tupla `direct` y después comprobar `allowed = direct - excluded` en la revisión de la segunda escritura; "the check in 3 will succeed" (la comprobación del paso 3 tendrá éxito).
 
 ¿Qué aspecto tiene eso con el ejemplo de referencia, si el reloj de un nodo va adelantado?
 
@@ -95,7 +95,7 @@ AuthZed reprodujo el problema del “nuevo enemigo” en CockroachDB con SpiceDB
   timeLabel="tiempo real"
   ticks={["10.000", "10.100"]}
   title="Desfase de reloj sin claves solapadas"
-  desc="En el tiempo real 10.000, la app de Anne quita a Chen de folder:A. El nodo 1, cuyo reloj va 250 ms adelantado, lo confirma con la marca de tiempo 10.250. Tras la confirmación, en el tiempo real 10.100, la app mueve el readme a folder:A. El nodo 2, cuyo reloj es correcto, lo confirma en 10.100 y lo devuelve como token. La comprobación de Chen se ejecuta en la instantánea 10.100. Ve el movimiento pero no la eliminación, que tiene la marca de tiempo mayor, así que a Chen se le permite el acceso. Este es el problema del nuevo enemigo."
+  desc="En el tiempo real 10.000, la app de Anne quita a Chen de folder:A. El nodo 1, cuyo reloj va 250 ms adelantado, lo confirma con la marca de tiempo 10.250. Tras el acuse de recibo, en el tiempo real 10.100, la app mueve el readme a folder:A. El nodo 2, cuyo reloj es correcto, lo confirma en 10.100 y lo devuelve como token. La comprobación de Chen se ejecuta en la instantánea 10.100. Ve el movimiento pero no la eliminación, que tiene la marca de tiempo mayor, así que a Chen se le permite el acceso. Este es el problema del “nuevo enemigo”."
   events={[
     { lane: 0, t: 0, label: "x: quita a Chen", kind: "write" },
     { lane: 1, t: 0, label: "confirma x\nen 10.250", kind: "write", mono: true },
@@ -210,7 +210,7 @@ Eso da “tan reciente como el primario”, no “al menos tan reciente como mi 
 Otros productos:
 
 - **Ory Keto** tiene campos `snaptoken` y `latest` en su API Check, cada uno marcado como "This field is not implemented yet and has no effect" (este campo aún no está implementado y no tiene efecto) ([`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)).
-- **Warrant** lee una cabecera `Warrant-Token` y solo actúa ante el valor `latest`, que envía la lectura a la primaria; cualquier otro valor se ignora, y el servidor de código abierto no devuelve ningún token ([`wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go), [Warrant](../../ecosystem/warrant/)).
+- **Warrant** lee una cabecera `Warrant-Token` y solo actúa ante el valor `latest`, que envía la lectura al primario; cualquier otro valor se ignora, y el servidor de código abierto no devuelve ningún token ([`wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go), [Warrant](../../ecosystem/warrant/)).
 - **Topaz** no documenta ningún token; véase la [página de comparación](../../ecosystem/compare/#token-de-consistencia-y-modos).
 
 Las notas de lectura de Tom MacWright sobre el artículo hacen la misma observación desde fuera: OpenFGA no tiene nada parecido a los zookies, y "neither does Ory Keto" (Ory Keto tampoco) ([Reading Zanzibar, 2025-05-02](https://macwright.com/2025/05/02/reading-zanzibar.html)).
