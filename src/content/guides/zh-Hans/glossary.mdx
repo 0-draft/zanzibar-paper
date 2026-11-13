@@ -1,0 +1,165 @@
+---
+title: "术语表"
+description: "读者在 Zanzibar 论文中会遇到的每个术语，用平实的语言解释，并指向讲解它的指南页面和论文章节。"
+section: guide
+part: reference
+order: 16
+checked: "2026-11-13"
+paper: []
+---
+
+术语按英文字母顺序排列。论文配置语言中的代码名称（`_this`、`computed_userset`、`tuple_to_userset`）排序时忽略下划线。示例沿用贯穿示例：Anne、Beto 和 Chen；位于 `folder:A` 中的 `doc:readme`；`group:eng`。
+
+## A–C
+
+<dl>
+  <dt id="acl">ACL</dt>
+  <dd>访问控制列表（access control list）：被允许对某个对象做某件事的用户集合。在 Zanzibar 中，ACL 不是作为一份列表存储，而是作为许多关系元组存储。详见：<a href="../access-control-models/">访问控制模型</a>，§1、§2.1。</dd>
+  <dt id="aclserver">aclserver</dt>
+  <dd>Zanzibar 的主要服务器类型。回答 Check、Read、Expand 和 Write，并把工作扇出到其所在集群中的其他 aclserver。详见：<a href="../architecture/">架构</a>，§3。</dd>
+  <dt id="at-least-as-fresh">至少一样新（at-least-as-fresh）</dt>
+  <dd>zookie 的规则：Zanzibar 可以在任何不早于 zookie 时间戳的快照上进行评估，而不仅限于恰好在该时间戳上。正是这种自由让它能够用本地副本处理大多数请求。详见：<a href="../consistency/">一致性</a>，§2.2。</dd>
+  <dt id="bounded-staleness">有界陈旧度（bounded staleness）</dt>
+  <dd>快照读可以比“现在”旧，但不能旧于某个界限。在 Zanzibar 中，这个界限就是客户端发送的 zookie。Spanner 直接提供这一能力：客户端给出陈旧度的上界，由 Spanner 选择时间戳（<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner 论文</a>，§4.1）。详见：<a href="../consistency/">一致性</a>，§2.2。</dd>
+  <dt id="cache-stampede">缓存踩踏（cache stampede）</dt>
+  <dd>对同一个未缓存结果的许多并发请求，在缓存填充之前同时全部发往存储。Zanzibar 用锁表来防止这种情况。论文为这一术语引用了 <a href="https://en.wikipedia.org/wiki/Cache_stampede">Wikipedia 条目</a>（参考文献 [3]）。详见：<a href="../architecture/">架构</a>，§3.2.5。</dd>
+  <dt id="changelog">变更日志（changelog）</dt>
+  <dd>一个存放元组更新历史的 Spanner 数据库，与每次元组写入在同一事务中写入。Watch 从中读取。详见：<a href="../architecture/">架构</a>，§3.1.2。</dd>
+  <dt id="check">Check</dt>
+  <dd>询问某个用户是否属于用户集 ⟨<em>object#relation</em>⟩ 的 API 调用，例如“Chen 是 <code>doc:readme</code> 的查看者吗？”。在不早于给定 zookie 的快照上进行评估。详见：<a href="../relation-tuples/#把-check-看作图搜索">关系元组</a>，§2.4.4、§3.2.3。</dd>
+  <dt id="computed-userset"><code>computed_userset</code></dt>
+  <dd>重写规则的一种叶节点，取同一对象上另一个关系的用户集，例如“每个编辑者都是查看者”。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.3.1。</dd>
+  <dt id="consistent-hashing">一致性哈希（consistent hashing）</dt>
+  <dd>一种把键分配给服务器的方法，使增加或移除一台服务器时只需移动一小部分键。Zanzibar 用它把缓存条目分布到集群的各台服务器上。由 <a href="https://people.csail.mit.edu/karger/Papers/web.pdf">Karger 等人（STOC 1997）</a>为 Web 缓存提出。详见：<a href="../architecture/">架构</a>，§3.2.5。</dd>
+  <dt id="content-change-check">内容变更检查（content-change check）</dt>
+  <dd>在用户即将保存新内容时发送的 Check。它不携带 zookie，在最新快照上评估，并返回一个 zookie，由客户端与新的内容版本一起存储。详见：<a href="../consistency/">一致性</a>，§2.2、§2.4.4。</dd>
+</dl>
+
+## D–H
+
+<dl>
+  <dt id="denormalization">反规范化（denormalization）</dt>
+  <dd>存储派生数据的预先计算的副本，例如扁平化的组到组成员关系，而不是根据原始行计算。Zanzibar 在存储中避免这样做，只在 Leopard 中使用。详见：<a href="../leopard/">Leopard</a>，§3.2.4、§3.2.5。</dd>
+  <dt id="exclusion">排除（exclusion）</dt>
+  <dd>重写规则的一种运算符：属于一个用户集但不属于另一个用户集的用户。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.3.1。</dd>
+  <dt id="expand">Expand</dt>
+  <dd>按照重写规则，以树的形式返回 ⟨<em>object#relation</em>⟩ 的有效用户集的 API 调用。叶节点是用户 ID 或用户集；中间节点是并集、交集或排除。详见：<a href="../relation-tuples/#read-与-expand">关系元组</a>，§2.4.5。</dd>
+  <dt id="external-consistency">外部一致性（external consistency）</dt>
+  <dd>如果更新 x 发生在更新 y 之前，那么 x 获得的时间戳小于 y，即使两者是在系统之外协调的。Zanzibar 从 Spanner 获得这一性质。论文为这一术语引用了 Gifford 1981 年的斯坦福博士论文（参考文献 [18]）；<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner</a> 的表述是：如果 T1 在 T2 开始之前提交，则 T1 的提交时间戳小于 T2 的。详见：<a href="../consistency/">一致性</a>，§2.2。</dd>
+  <dt id="fan-out">扇出（fan-out）</dt>
+  <dd>一个请求变成许多子请求，例如一台 aclserver 把一次 Check 的各部分发往其集群中的其他服务器。详见：<a href="../architecture/">架构</a>，§3、§3.2.5。</dd>
+  <dt id="heartbeat-zookie">心跳 zookie（heartbeat zookie）</dt>
+  <dd>每个 Watch 响应中的一个 zookie，标记流已经推进到哪里，以便客户端从那里继续。详见：§2.4.3。</dd>
+  <dt id="hedging">对冲（hedging）</dt>
+  <dd>在确知第一台服务器较慢之后，把同一请求发送到第二台服务器，使用最先到达的回复并取消另一个。Zanzibar 对发往 Spanner 和 Leopard 的调用进行对冲，但不对其自身服务器之间的调用进行对冲。该技术见 Dean 和 Barroso 的 <a href="https://research.google/pubs/the-tail-at-scale/">“The Tail at Scale”</a>（CACM，2013）。详见：<a href="../architecture/">架构</a>，§3.2.7。</dd>
+  <dt id="hot-spot">热点（hot spot）</dt>
+  <dd>流量远高于其他的键、对象或组，可能使存储它的服务器过载，例如被许多 ACL 共享的热门组。详见：<a href="../architecture/">架构</a>，§3.2.5。</dd>
+</dl>
+
+## I–N
+
+<dl>
+  <dt id="intersection">交集（intersection）</dt>
+  <dd>重写规则的一种运算符：同时属于若干用户集中每一个的用户。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.3.1。</dd>
+  <dt id="leopard">Leopard</dt>
+  <dd>一个面向深度嵌套或非常宽的组的索引系统。它把组成员关系扁平化为整数集合，使成员关系检查变成集合求交，并通过 Watch 保持更新。详见：<a href="../leopard/">Leopard</a>，§3.2.4。</dd>
+  <dt id="lock-table">锁表（lock table）</dt>
+  <dd>每台服务器上记录进行中的读取和检查的表。共享同一缓存键的请求中只有一个会执行；其余请求等待它的结果。详见：<a href="../architecture/">架构</a>，§3.2.5。</dd>
+  <dt id="lock-tuple">锁元组（lock tuple）</dt>
+  <dd>一个普通的关系元组，客户端在每次写入某个对象时都会 touch 它，从而使写入可以以“自读取以来没有其他人写入过”为条件。详见：§2.4.2。</dd>
+  <dt id="namespace">命名空间（namespace）</dt>
+  <dd>客户端定义的一类对象，例如 <code>doc</code> 或 <code>folder</code>，即 <code>doc:readme</code> 中冒号之前的部分。每个命名空间的元组存放在各自的数据库中。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.1、§2.3、§3.1.1。</dd>
+  <dt id="namespace-config">命名空间配置（namespace config）</dt>
+  <dd>一个命名空间的配置：它的各个关系，每个关系可带一条用户集重写规则，此外还有分片等存储参数。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.3、§3.1.3。</dd>
+  <dt id="new-enemy-problem">“new enemy”问题（new enemy problem）</dt>
+  <dd>把内容展示给一个已被从其 ACL 中移除的人，原因是检查忽略了两次 ACL 变更的顺序，或者把比内容更旧的 ACL 应用于内容。详见：<a href="../consistency/">一致性</a>，§2.2。</dd>
+</dl>
+
+## O–R
+
+<dl>
+  <dt id="object">对象（object）</dt>
+  <dd>被保护的东西，写作 ⟨<em>namespace</em>⟩:⟨<em>object_id</em>⟩，例如 <code>doc:readme</code>。详见：<a href="../relation-tuples/#语法">关系元组</a>，§2.1。</dd>
+  <dt id="paxos">Paxos</dt>
+  <dd>一种共识协议，使一组副本即使其中一些发生故障，也能就每次写入达成一致。论文把 Zanzibar 存储的五个投票副本放在彼此 25 毫秒以内，以便 Paxos 事务能够快速提交。见 Lamport 的 <a href="https://lamport.azurewebsites.net/pubs/paxos-simple.pdf">“Paxos Made Simple”</a>（2001）。详见：<a href="../architecture/">架构</a>，§3.1.4。</dd>
+  <dt id="pointer-chasing">指针追逐（pointer chasing）</dt>
+  <dd>通过一次一跳地沿着用户集前进来回答 Check：从 readme 的查看者到 <code>group:eng#member</code>，再到该组的成员，依此类推。组很深或很宽时会很慢。详见：<a href="../relation-tuples/#把-check-看作图搜索">关系元组</a>、<a href="../leopard/">Leopard</a>，§3.2.3、§3.2.4。</dd>
+  <dt id="read">Read</dt>
+  <dd>返回与一个或多个元组集匹配的已存储元组的 API 调用。它不应用重写规则。详见：<a href="../relation-tuples/#read-与-expand">关系元组</a>，§2.4.1。</dd>
+  <dt id="recent-request">Recent 请求（Recent request）</dt>
+  <dd>见 <a href="#safe-and-recent-requests">Safe / Recent 请求</a>。详见：<a href="../consistency/">一致性</a>，§4.1。</dd>
+  <dt id="relation">关系（relation）</dt>
+  <dd>对象与用户之间，或两个对象之间（如 <code>parent</code> 把文档与其文件夹联系起来）的具名关系，例如 <code>owner</code>、<code>viewer</code>、<code>member</code> 或 <code>parent</code>。在命名空间配置中定义。详见：<a href="../relation-tuples/#语法">关系元组</a>，§2.1、§2.3。</dd>
+  <dt id="relation-tuple">关系元组（relation tuple）</dt>
+  <dd>一条已存储的事实 ⟨<em>object</em>⟩#⟨<em>relation</em>⟩@⟨<em>user</em>⟩，例如 <code>doc:readme#owner@user:anne</code>。这是 Zanzibar 存储的唯一一种权限数据。详见：<a href="../relation-tuples/">关系元组</a>，§2.1。</dd>
+  <dt id="replica">副本（replica）</dt>
+  <dd>数据在某个地点的一份拷贝。Zanzibar 的数据被复制到数十个地点，以便大多数读取可以就近处理。详见：<a href="../architecture/">架构</a>，§3.1.4。</dd>
+</dl>
+
+## S
+
+<dl>
+  <dt id="safe-and-recent-requests">Safe / Recent 请求（Safe / Recent requests）</dt>
+  <dd>论文按 zookie 时龄对请求的划分。Safe 请求携带时龄超过 10 秒的 zookie，通常可以在区域内处理；Recent 请求携带更新的 zookie，往往需要一次跨区域往返。详见：<a href="../consistency/">一致性</a>，§4.1。</dd>
+  <dt id="shard">分片（shard）</dt>
+  <dd>数据库或索引中被单独存储和服务的一部分。元组的分片 ID 通常来自其对象 ID，对于非常大的组则来自对象 ID 和用户。详见：<a href="../architecture/">架构</a>，§3.1.1、§3.2.4。</dd>
+  <dt id="snapshot-read">快照读（snapshot read）</dt>
+  <dd>恰好看到数据库在某个时间戳时状态的读取：包含该时间戳及之前的所有写入，不包含之后的任何写入。Zanzibar 在单个快照上评估每一次 Check。Spanner 把它定义为 "a read in the past that executes without locking"（一种在过去的时间点上、无需加锁执行的读取）（<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner 论文</a>，§4.1）。详见：<a href="../consistency/">一致性</a>，§2.2。</dd>
+  <dt id="spanner">Spanner</dt>
+  <dd>Google 的全球分布式数据库。Zanzibar 把元组、命名空间配置和变更日志存储在其中，并依靠其时间戳实现一致性。见 <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Corbett 等人，OSDI 2012</a>。详见：<a href="../consistency/">一致性</a>、<a href="../architecture/">架构</a>，§2.2、§3。</dd>
+</dl>
+
+## T
+
+<dl>
+  <dt id="tail-latency">尾部延迟（tail latency）</dt>
+  <dd>最慢那部分请求的延迟，例如第 99 或第 99.9 百分位。它很重要，因为一页搜索结果可能需要数十到数百次检查。见 Dean 和 Barroso 的 <a href="https://research.google/pubs/the-tail-at-scale/">“The Tail at Scale”</a>（CACM，2013）。详见：<a href="../architecture/#对缓慢的-spanner-读取进行对冲">架构</a>，§1、§3.2.7、§4.2、§4.5。</dd>
+  <dt id="this"><code>_this</code></dt>
+  <dd>重写规则的一种叶节点，返回针对该对象和关系所存储的元组中的用户，包括这些元组所指向的用户集。关系没有规则时的默认行为。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.3.1。</dd>
+  <dt id="timestamp-quantization">时间戳量化（timestamp quantization）</dt>
+  <dd>把评估时间戳向上取整到较粗的步长，例如 1 秒或 10 秒，使许多请求共享同一时间戳，从而共享缓存条目。它不会削弱一致性：zookie 只设定下界，而在未来时间戳上的 Spanner 快照读会等待，直到 TrueTime 越过该时间戳（§3.2.5）。详见：<a href="../architecture/">架构</a>、<a href="../consistency/">一致性</a>，§2.2、§3.2.5。</dd>
+  <dt id="truetime">TrueTime</dt>
+  <dd>Spanner 的时钟机制，为每次写入提供一个反映因果顺序的微秒级精度时间戳。正是它让 Zanzibar 的时间戳具有意义。<code>TT.now()</code> 返回一个保证包含真实时间的区间；见 <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner 论文</a>（OSDI 2012）§3。详见：<a href="../consistency/">一致性</a>，§2.2、§3.2.5。</dd>
+  <dt id="tupleset">元组集（tupleset）</dt>
+  <dd>已存储元组的选择器：单个元组键，或某个对象 ID 或用户集的所有元组，并可选地限定为一个关系。供 Read 和 <code>tuple_to_userset</code> 使用。详见：<a href="../relation-tuples/#read-与-expand">关系元组</a>，§2.4.1。</dd>
+  <dt id="tuple-to-userset"><code>tuple_to_userset</code></dt>
+  <dd>重写规则的一种叶节点，读取对象的某些元组，并根据每个元组计算出一个用户集，例如“查找 readme 的父文件夹并取其查看者”。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.3.1。</dd>
+</dl>
+
+## U–W
+
+<dl>
+  <dt id="union">并集（union）</dt>
+  <dd>重写规则的一种运算符：属于若干用户集中任意一个的用户。论文图 1 中 <code>viewer</code> 的三个分支都通过并集组合。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.3.1。</dd>
+  <dt id="user">用户（user）</dt>
+  <dd>元组的第三部分：要么是单个用户 ID，要么是一个用户集。详见：<a href="../relation-tuples/#语法">关系元组</a>，§2.1。</dd>
+  <dt id="userset">用户集（userset）</dt>
+  <dd>一个 ⟨<em>object</em>⟩#⟨<em>relation</em>⟩ 对，代表与该对象具有该关系的所有用户，例如 <code>group:eng#member</code>。它让一个元组可以把访问权授予一个组，也让组可以包含组。详见：<a href="../relation-tuples/#用户集指向一个组的元组">关系元组</a>，§2.1。</dd>
+  <dt id="userset-rewrite-rule">用户集重写规则（userset rewrite rule）</dt>
+  <dd>关系配置的一部分：一个从对象 ID 到用户集表达式树的函数，由 <code>_this</code>、<code>computed_userset</code> 和 <code>tuple_to_userset</code> 通过并集、交集和排除组合而成。详见：<a href="../relation-tuples/#命名空间配置">关系元组</a>，§2.3.1。</dd>
+  <dt id="userset-tree">用户集树（userset tree）</dt>
+  <dd>Expand 的结果：叶节点是用户 ID 或用户集，中间节点是集合运算符。详见：<a href="../relation-tuples/#read-与-expand">关系元组</a>，§2.4.5。</dd>
+  <dt id="watch">Watch</dt>
+  <dd>从某个 zookie 开始，按时间戳顺序以流的形式发送一个或多个命名空间的元组变更的 API 调用。用于保持二级索引（例如 Leopard）的更新。详见：<a href="../architecture/#watch-路径">架构</a>，§2.4.3。</dd>
+  <dt id="watchserver">watchserver</dt>
+  <dd>通过跟踪变更日志来回答 Watch 的服务器类型。详见：<a href="../architecture/">架构</a>，§3。</dd>
+  <dt id="write">Write</dt>
+  <dd>添加或删除元组的 API 调用。需要重写一个对象全部元组的客户端，先读取，再以锁元组未改变为条件进行写入。详见：<a href="../architecture/#watch-路径">架构</a>（一次写入涉及哪些部分），§2.4.2。</dd>
+</dl>
+
+## Z
+
+<dl>
+  <dt id="zookie">zookie</dt>
+  <dd>一个编码了时间戳的不透明令牌。客户端从内容变更检查中获得它（Read 和 Write 的响应也携带 zookie），把它与内容一起存储，并在之后的检查中发送它，使这些检查在至少同样新的快照上评估。详见：<a href="../consistency/">一致性</a>，§2.2、§2.4。</dd>
+</dl>
+
+## 来源
+
+- J. C. Corbett et al., "Spanner: Google's Globally-Distributed Database", OSDI '12, [PDF](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
+- D. Karger et al., "Consistent Hashing and Random Trees", STOC '97, [PDF](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- J. Dean and L. A. Barroso, "The Tail at Scale", CACM 56(2), 2013, [research.google](https://research.google/pubs/the-tail-at-scale/)
+- L. Lamport, "Paxos Made Simple", ACM SIGACT News 32(4), 2001, [PDF](https://lamport.azurewebsites.net/pubs/paxos-simple.pdf)
+- D. K. Gifford, "Information Storage in a Decentralized Computer System", PhD thesis, Stanford University, 1981（论文参考文献 [18]；未核对任何在线副本）
+- "Cache stampede", Wikipedia, [en.wikipedia.org](https://en.wikipedia.org/wiki/Cache_stampede)（论文所引用的来源）
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

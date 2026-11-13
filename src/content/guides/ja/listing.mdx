@@ -1,0 +1,237 @@
+---
+title: "ユーザーが見られるものの一覧"
+description: "「Anne が見られるすべてのドキュメント」が Check とは別の問いである理由、論文がそれに対して提供するもの、実際に使われている 3 つの手法。"
+section: guide
+part: practice
+order: 8
+checked: "2026-11-13"
+paper: ["1", "2.4.1", "2.4.3", "2.4.5", "3.2.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Check が答えるのは 1 つの問い、すなわちこのユーザーはこのオブジェクトにこの操作を行ってよいか、である。一覧ページは別の問いを投げる。このユーザーはどのオブジェクトを見てよいか、それを絞り込み、並べ替え、1 ページずつ返す、という問いである。本ページでは、2 つ目の問いがなぜ難しいのか、論文がそれに対して何を提供しているのか、そして Zanzibar 系の製品が文書化している 3 つの手法を説明する。
+
+## Check とは別の問い
+
+Check は 1 つのオブジェクトから出発し、ユーザーが見つかるか経路が尽きるまでタプルをたどる (§2.4.4、§3.2.3)。作業量は、そのオブジェクトにぶら下がっているものによって上限が決まる。「Anne が見られるすべてのドキュメント」には出発点となるオブジェクトがない。これを Check で答えるには、システム内のドキュメントごとに 1 回ずつ Check を行うことになり、その大半は「no」と答えられる。
+
+一覧には、認可サービスが保持していないデータも必要である。OpenFGA のガイドはこう述べている。認可サービスは "does not store object metadata (names of files, creation dates, time of last update, etc)" (オブジェクトのメタデータ (ファイル名、作成日、最終更新時刻など) を格納しない) ので、検索は "will require data from your database" (あなたのデータベースのデータを必要とする) ([OpenFGA, Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions))。絞り込みと並べ替えは自分のデータベースで行われ、認可は別のサービスで行われ、答えはその 2 つの共通部分である。
+
+論文はこのユースケースをよく知っている。統一されたシステムの動機として最初に挙げたものの中に "a search index that respects access control and works across applications" (アクセス制御を尊重し、アプリケーションをまたいで機能する検索インデックス) が含まれ (§1)、レイテンシの目標では "serving search results, which often require tens to hundreds of checks" (しばしば数十から数百のチェックを必要とする検索結果の提供) を特に取り上げている (§1)。
+
+## 論文が提供するもの、しないもの
+
+論文の API には Read、Write、Watch、Check、Expand の 5 つの呼び出しがある (§2.4)。そのどれも「ユーザー U が見られるすべてのオブジェクト」を返さない。
+
+- **Read** は格納されたタプルだけを返す。ユーザーをキーとするタプルセットを使えば、クライアントは "look up all groups with a given user as a direct member" (特定のユーザーを直接のメンバーとするすべてのグループを調べる) ことができる (§2.4.1)。*直接* である。Read は書き換えルールを適用しないので、`editor` から `viewer` へ、あるいはフォルダからその中のドキュメントへとたどることはない。
+- **Expand** は書き換えルールをたどるが、方向が逆である。⟨*object#relation*⟩ ペアを受け取り、その "effective userset" (実効的なユーザーセット) を *ユーザーセット木* として返す。その葉は "are user IDs or usersets pointing to other ⟨*object#relation*⟩ pairs" (ユーザー ID、または他の ⟨*object#relation*⟩ ペアを指すユーザーセットである) (§2.4.5)。論文はその目的を明記している。Expand によりクライアントは "build efficient search indices for access-controlled content" (アクセス制御されたコンテンツのための効率的な検索インデックスを構築する) ことができる (§2.4.5)。インデックスを構築するのはクライアントの仕事である。
+- **Watch** はタプルの変更をストリームで返し、"clients maintain secondary indices of relation tuples" (クライアントがリレーションタプルのセカンダリインデックスを維持する) ことを可能にする (§2.4.3)。
+- **Leopard** (§3.2.4) は入れ子の *グループ* を平坦化する。ユーザーがグループに属するかどうかを 1 回の集合の積で答える。Zanzibar の内部で "selected namespaces" (選ばれた名前空間) の Check を高速化するために使われており、論文はこれを一覧取得の API としては説明していない。[Leopard、グループのインデックス](../leopard/) を参照。
+
+readme の閲覧者について Expand が返すものは、クライアントが実際に欲しい平坦な一覧と比べてどう違うか。
+
+<Frames>
+
+<Graph
+  width={480}
+  height={300}
+  title="Expand: ユーザーセット木"
+  desc="doc:readme#viewer の Expand は木を返す。根は doc:readme#viewer で、その下に 3 つの子を持つ union ノードがある。子はユーザーセットの葉 group:eng#member、editor の union、ユーザーセットの葉 folder:A#viewer である。editor の union には owner に由来する葉 user:anne がある。2 つのユーザーセットの葉から user:beto (group:eng#member 経由) と user:chen (folder:A#viewer 経由) にたどり着くには、さらに Expand 呼び出しが必要で、その段階は破線で示す。"
+  nodes={[
+    { id: "root", x: 240, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u", x: 240, y: 95, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 85, y: 170, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 240, y: 170, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 395, y: 170, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "beto", x: 85, y: 265, label: "user:beto", kind: "subject", mono: true },
+    { id: "anne", x: 240, y: 265, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 395, y: 265, label: "user:chen", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u" },
+    { from: "u", to: "eng" },
+    { from: "u", to: "ed" },
+    { from: "u", to: "fold" },
+    { from: "eng", to: "beto", label: "次の Expand", dashed: true },
+    { from: "ed", to: "anne", label: "owner" },
+    { from: "fold", to: "chen", label: "次の Expand", dashed: true },
+  ]}
+  minWidth={420}
+  caption="木は構造を保つ。ユーザーセットの葉は他のオブジェクトを指し、クライアントはそれを順に展開する。"
+/>
+
+<Graph
+  width={300}
+  height={300}
+  title="ルックアップ API: 平坦な一覧"
+  desc="doc:readme に対して view を持つ主体を求めるルックアップ呼び出しは、user:anne、user:beto、user:chen の 3 つのユーザー ID を、木構造のない平坦な一覧として返す。"
+  nodes={[
+    { id: "q", x: 150, y: 40, label: "doc:readme を\n見られるのは誰?", kind: "server" },
+    { id: "anne", x: 150, y: 130, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 150, y: 195, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "chen", x: 150, y: 260, label: "user:chen", kind: "subject", mono: true, on: true },
+  ]}
+  edges={[{ from: "q", to: "anne", label: "ID をストリーム" }]}
+  caption="LookupSubjects (SpiceDB) や ListUsers (OpenFGA): 同じ答えが、最初から平坦化されている。"
+/>
+
+</Frames>
+
+木が答えているのは「このドキュメントを誰が見られるか」であって、「Anne が何を見られるか」ではないことに注意したい。Expand だけで Anne のドキュメントを一覧するには、クライアントはすべてのドキュメントを展開するか、§2.4.5 が示唆するように、前もって展開して結果を自前のインデックスに保持することになる。SpiceDB のドキュメントも同じ欠落を説明している。Expand は "responds with a tree structure that can be awkward for applications to consume" (アプリケーションが扱いにくい木構造で応答する) ので、SpiceDB は `LookupResources` と `LookupSubjects` を追加した。これらは "return a flattened list of results" (平坦化された結果の一覧を返す) ([SpiceDB, Google Zanzibar](https://authzed.com/docs/spicedb/concepts/zanzibar))。
+
+## 手法 1: ルックアップ API のあとにデータベースで絞り込む
+
+認可サービスが逆向きの問いを直接計算する。SpiceDB の `LookupResources` と OpenFGA の `ListObjects` は、ユーザーが権限を持つ、ある型のすべてのオブジェクトの ID を返す。アプリケーションはそれらの ID をデータベースのクエリ (`WHERE id = ANY(…)`) に渡し、データベースは通常どおり絞り込み、並べ替え、ページ分割を行う。SpiceDB はこれを "the simplest approach from a bookkeeping perspective and is a good place to start" (管理の観点では最も単純な手法であり、出発点として適している) と呼んでいる ([SpiceDB, Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint))。
+
+代償は、最初の行が表示される前に ID の全集合が返ってくることであり、その計算はユーザーからグラフを逆向きにたどる。
+
+- SpiceDB: "it's a heavy request that can cause performance problems when more than 10k results are involved" (重いリクエストであり、結果が 1 万件を超えると性能問題を起こしうる) ([SpiceDB, Querying Data](https://authzed.com/docs/spicedb/concepts/querying-data))。また "can get slow quickly: with a sufficiently large relation dataset, a sufficiently complex schema, or a sufficiently large set of accessible results" (十分に大きな関係のデータセット、十分に複雑なスキーマ、あるいは十分に大きなアクセス可能な結果の集合があると、すぐに遅くなりうる) ([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint))。このリクエストは結果をストリームで返し、カーソルをサポートする。
+- OpenFGA: `ListObjects` は "will return the results found within the time allotted (`listObjectsDeadline`, default: `3s`) up to the maximum number of results configured (`listObjectsMaxResults`, default: `1000`)" (割り当てられた時間 (`listObjectsDeadline`、デフォルト `3s`) 内に見つかった結果を、設定された最大件数 (`listObjectsMaxResults`、デフォルト `1000`) まで返す)、そして "access-aware filtering on small object collections" (小さなオブジェクト集合に対するアクセスを考慮した絞り込み) 向けと位置付けられている ([OpenFGA, Relationship Queries](https://openfga.dev/docs/interacting/relationship-queries))。その性能は "drastically depending on the model complexity, number of tuples, and the relations it needs to evaluate" (モデルの複雑さ、タプルの数、評価する必要のある関係によって大きく) 変わり、`and` や `but not` を含む関係は "are more expensive to evaluate than relations with `or`" (`or` を含む関係より評価のコストが高い) ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions))。
+
+部分的な一覧では並べ替えには足りない。OpenFGA は、一覧全体が手元にそろうまでは "you won't be able to sort using it" (それを使って並べ替えることはできない) と注記している ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions))。
+
+## 手法 2: データベースに問い合わせたあとにまとめてチェックする
+
+逆の方向である。データベースに候補のページを作らせ (ユーザーのクエリで絞り込み、並べ替えたもの)、そのページを 1 回の一括呼び出し (SpiceDB の `CheckBulkPermissions`、OpenFGA の `/batch-check`) でチェックし、拒否された行を落とし、ページが埋まるまで繰り返す。これは、§1 が検索結果について述べているとおりの、一度に数十から数百件という Check の使い方である。
+
+SpiceDB のガイドはこのループとその制約を示している。"because we don't know how many results are going to be accessible beforehand, we need to iterate until we have a full page of accessible results" (アクセス可能な結果がいくつになるか事前にはわからないので、アクセス可能な結果でページが埋まるまで繰り返す必要がある)。性能は "will depend in part on choosing the size of the page of candidate results" (候補の結果のページサイズの選び方に部分的に依存する)。そして "works better with an API backed by cursor-based pagination than limit-offset pagination, since the database doesn't know the offset associated with the last accessible result" (データベースは最後のアクセス可能な結果に対応するオフセットを知らないので、limit-offset 方式のページ分割よりカーソル方式のページ分割に基づく API のほうがうまく機能する) ([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint))。さらに、すべての一括呼び出しを "at the same revision" (同じリビジョンで) 実行することを推奨している。最初の呼び出しから ZedToken (SpiceDB における zookie) を取り、残りの呼び出しにそれを送ることで、1 つのページが 2 つのスナップショットから組み立てられないようにする。
+
+Anne が自分のドキュメント一覧を開いたとき、2 つの手法はそれぞれどの順で呼び出しを行うか。
+
+<Frames>
+
+<Swimlane
+  lanes={["アプリ", "認可サービス", "アプリの DB"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="時間"
+  title="事前絞り込み: ルックアップのあとにクエリ"
+  desc="Anne が自分のドキュメントを求める。アプリは Anne が閲覧できるドキュメントを求めてルックアップ API を呼ぶ。認可サービスは Anne からグラフをたどり、該当するすべての ID を返す。続いてアプリはそれらの ID を絞り込み条件としてデータベースに問い合わせ、データベースは絞り込み、並べ替え、1 ページを返す。"
+  events={[
+    { lane: 0, t: 0, label: "Anne: 自分の\nドキュメント一覧", kind: "note" },
+    { lane: 0, t: 1, label: "anne が見られる\ndoc をルックアップ", kind: "read" },
+    { lane: 1, t: 1, label: "anne から\nグラフをたどる", kind: "read" },
+    { lane: 1, t: 2, label: "全 ID:\nreadme, …", kind: "good", mono: true },
+    { lane: 0, t: 3, label: "query with\nid IN (IDs)", kind: "read", mono: true },
+    { lane: 2, t: 3, label: "絞り込み、\n並べ替え、1 ページ", kind: "read" },
+    { lane: 0, t: 4, label: "ページを表示", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [1, 1] },
+    { from: [1, 2], to: [0, 3], label: "すべての ID" },
+    { from: [0, 3], to: [2, 3] },
+    { from: [2, 3], to: [0, 4] },
+  ]}
+  caption="認可の呼び出しは 1 回だが、その答えは最初の行より前に全集合となる。"
+/>
+
+<Swimlane
+  lanes={["アプリ", "認可サービス", "アプリの DB"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="時間"
+  title="事後絞り込み: クエリのあとに一括チェック"
+  desc="Anne が自分のドキュメントを求める。アプリはデータベースから、絞り込み・並べ替え済みの次の 20 件の候補をカーソル付きで取得する。その 20 件について 1 つのスナップショットで一括チェックを 1 回送り、認可サービスは許可されたもの、たとえば 7 件を返す。ページが埋まっていなければ、アプリは次の候補を取得して繰り返し、それからページを表示する。"
+  events={[
+    { lane: 0, t: 0, label: "Anne: 自分の\nドキュメント一覧", kind: "note" },
+    { lane: 0, t: 1, label: "次の 20 件\nの候補", kind: "read" },
+    { lane: 2, t: 1, label: "絞り込み、\n並べ替え、カーソル", kind: "read" },
+    { lane: 0, t: 2, label: "20 件の ID を\n一括チェック", kind: "read" },
+    { lane: 1, t: 2, label: "20 件のチェック、\n1 スナップショット", kind: "read" },
+    { lane: 1, t: 3, label: "7 件を許可", kind: "good" },
+    { lane: 0, t: 4, label: "ページ未充足:\n繰り返す", kind: "note" },
+    { lane: 0, t: 5, label: "ページを表示", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [2, 1] },
+    { from: [2, 1], to: [0, 2] },
+    { from: [0, 2], to: [1, 2] },
+    { from: [1, 3], to: [0, 4] },
+  ]}
+  caption="答えは小さいが、往復の回数は Anne が見てよい候補の数に左右される。"
+/>
+
+</Frames>
+
+コストがどこに移るかに注意したい。事前絞り込みは、Anne が見られるものすべてに比例するコストを 1 回払う。事後絞り込みは、彼女が見られない候補の数に比例するコストを往復ごとに払う。OpenFGA のガイドはこれを規則にしている。検索してからチェックする方式は、データベースのクエリが返す行が少ないか、ユーザーがその行の高い割合を見られる場合に適している。ユーザーが多くのオブジェクトを見られるが、それが全体のごく一部にすぎない場合 (同ガイドの「Google Drive」のケース) には適さない。"you will be retrieving and checking against a lot of items and discarding most of them" (大量の項目を取得してチェックし、その大半を捨てることになる) からである ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions))。
+
+## 手法 3: Watch で更新する非正規化インデックス
+
+3 つ目の手法は §2.4.3 と §2.4.5 が述べているものである。誰が何を見られるかのインデックスを、それが保護するデータの隣に自前で持ち、変更ストリームから最新に保つ。すると一覧のクエリは自分のデータベース内の結合になる。
+
+各部品はどこにあり、何がインデックスを最新に保つのか。
+
+<Graph
+  width={640}
+  height={260}
+  title="Watch で更新するインデックス"
+  desc="アプリは認可サービスにタプルを書き込む。インデクサーは Watch ストリームを消費し、グループとフォルダの継承をユーザーとドキュメントのペアに平坦化して、アプリ自身のデータベースの doc_viewers テーブルに書き込み、再開できるよう最後のストリームトークンを保存する。一覧エンドポイントは doc_viewers をドキュメントのテーブルと結合する。インデックスにまだ届いていない取り消しの行を落とすため、最終ページを認可サービスで再チェックすることがある (破線)。"
+  nodes={[
+    { id: "app", x: 80, y: 50, label: "アプリ\nタプルを書き込む", kind: "client" },
+    { id: "authz", x: 300, y: 50, label: "認可サービス", kind: "server" },
+    { id: "idx", x: 530, y: 50, label: "インデクサー:\nグループ、フォルダ\nを平坦化", kind: "server", on: true },
+    { id: "tok", x: 530, y: 200, label: "last token", kind: "store", mono: true },
+    { id: "dv", x: 300, y: 200, label: "doc_viewers\n(user, doc)", kind: "store", mono: true, on: true },
+    { id: "list", x: 80, y: 200, label: "一覧エンドポイント", kind: "client" },
+  ]}
+  edges={[
+    { from: "app", to: "authz", label: "Write" },
+    { from: "authz", to: "idx", label: "Watch", on: true },
+    { from: "idx", to: "tok", label: "保存" },
+    { from: "idx", to: "dv", label: "upsert / delete", on: true },
+    { from: "list", to: "dv", label: "docs と JOIN" },
+    { from: "list", to: "authz", label: "ページを再チェック", dashed: true },
+  ]}
+  minWidth={520}
+  caption="インデックスはコピーである。ストリームより遅れ、再チェックはまだ伝わっていない取り消しを補う。"
+/>
+
+インデクサーの箱に注意したい。これは Zanzibar の内部で Leopard が行っている仕事を担っている。1 つのタプルが多くの行を変えうる。`group:eng#member@user:beto` を追加すると、`group:eng` が閲覧できるすべてのドキュメントについて行が 1 つずつ増える。`folder:A` に閲覧者を追加すると、そのフォルダ内のすべてのドキュメントについて行が 1 つずつ増える。論文は Leopard について同じファンアウトを報告している。"a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events" (Zanzibar のタプル 1 つの追加または削除が、数万もの個別の Leopard タプルイベントを生じうる) (§3.2.4)。
+
+製品はこれを構築する方法を 2 つ文書化している。
+
+- **変更ストリームから自分で構築する。** OpenFGA のオプション 2 は `GET /changes` を消費し、使用中のモデルバージョンに合わせて変更を平坦化し (同ドキュメントの例: "`user:anne, writer, doc:planning` becomes two tuples" (`user:anne, writer, doc:planning` は 2 つのタプルになる))、最終結果に対して `/check` を呼んで "to filter out any resource with permissions revoked but whose authorization data has not made it into your index yet" (権限が取り消されたが、その認可データがまだインデックスに反映されていないリソースを除外する) ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions))。SpiceDB ではストリームは `Watch` である。そのストリームが永続的なキューではない理由は [タプルをデータと同期させる](../sync/) で扱う。
+- **ベンダーに計算させる。** AuthZed Materialize は "takes inspiration from the Leopard index" (Leopard インデックスに着想を得ており)、設定された権限を事前計算する。その Event Streams 機能により "keep your own copy of it — either colocated alongside the data it protects in your application database, or in a secondary index like a search engine" (その自分用のコピーを、保護対象のデータと並べてアプリケーションのデータベースに置くか、検索エンジンのようなセカンダリインデックスに置いて保持する) ことができる ([AuthZed, What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview))。これは商用機能である。Event Streams は "currently in early access for AuthZed Dedicated users" (現在 AuthZed Dedicated のユーザー向けにアーリーアクセス中) であり ([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint))、文書化された制限には "your application must be able to tolerate some lag" (アプリケーションはある程度の遅延を許容できなければならない) が含まれる ([Materialize limitations](https://authzed.com/docs/materialize/getting-started/limitations))。
+
+## 3 つの比較
+
+規模の上限は各製品のドキュメントからの引用である。レイテンシと手間は相対的なものであり、計測値ではない。
+
+| | ルックアップ API のあとにクエリ | クエリのあとに一括チェック | Watch で更新するインデックス |
+| --- | --- | --- | --- |
+| レイテンシ | アクセス可能なオブジェクトの数とスキーマの深さに応じて増える。最初の行より前に全集合 | 往復の回数、すなわち拒否される候補の割合に応じて増える | データベースの結合。グラフの深さに依存しない |
+| 鮮度 | Check と同じ一貫性オプション (SpiceDB では ZedToken、OpenFGA では `MINIMIZE_LATENCY` / `HIGHER_CONSISTENCY`) | Check と同じ。1 ページのすべての往復で 1 つのトークンを使う | ストリームより遅れる。ページを再チェックして取り消された行を落とす |
+| ドキュメント上の規模の上限 | SpiceDB: "performance problems when more than 10k results are involved"。OpenFGA: デフォルト `3s` と `1000` 件、"small object collections" | SpiceDB: "the size of the page of candidate results" に依存。OpenFGA: ユーザーが多数のオブジェクトのごく一部しか見られない場合は不向き | SpiceDB: "the greatest scalability of the three options" (Materialize 経由) |
+| 手間 | 1 回の呼び出しと `IN` 句 | ループ、カーソル方式のページ分割、ページサイズの選択 | インデクサー、平坦化のロジック、保存したストリーム位置、再構築。または商用サービス |
+
+<Callout kind="note" title="計測された数値は 1 つだけ、2021 年のもの">
+
+ルックアップ API について見つかった唯一のレイテンシの数値は、2021 年の SpiceDB の設計提案にある脚注である。"approximately ~100ms for a LookupResources call on a SpiceDB with 100-250K relationships, and a graph nesting of 3-5 deep" (10 万から 25 万の関係を持ち、グラフの入れ子の深さが 3 から 5 の SpiceDB で、LookupResources 呼び出し 1 回あたり約 100ms) ([spicedb#207](https://github.com/authzed/spicedb/issues/207))。これは古いバージョンでのテスト結果であり、ベンチマークではない。
+
+</Callout>
+
+OpenFGA のガイドは、ユーザーが多数のうち少数のオブジェクトしか見られない場合に事後絞り込みを実用的にする方法を 2 つ追加している。データベースのクエリでテナントによって絞り込む ("Duplicating logic from the authorization model is not ideal, but it can be a reasonable trade-off" (認可モデルのロジックを重複させるのは理想的ではないが、妥当なトレードオフになりうる))、あるいはより粗いリソース、たとえばユーザーが見られるフォルダを先に一覧し、ドキュメントをフォルダで絞り込む、という方法である ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions))。通しの例では、Chen のアクセスは `folder:A` に由来するので、「Chen が閲覧できるフォルダ内のドキュメント」は 1 つのフォルダからなる一覧で彼をカバーする。
+
+空の一覧についても判断が必要である。SpiceDB のガイドは、きめ細かいシステムでは 403 を返すのではなく "often makes sense to treat 'there is no data' and 'there is nothing you're authorized to see' as the same, by returning a successful response with an empty result set" (「データがない」と「見る権限のあるものがない」を、空の結果集合を持つ成功レスポンスを返すことで同じものとして扱うのが理にかなうことが多い) と示唆している ([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint))。
+
+<Callout kind="paper" title="論文では">
+
+動機としての検索: §1。Read と直接メンバーシップのルックアップ: §2.4.1。Watch とセカンダリインデックス: §2.4.3。Expand とユーザーセット木: §2.4.5。Leopard: §3.2.4。用語: [Expand](../glossary/#expand)、[ユーザーセット木](../glossary/#userset-tree)、[Watch](../glossary/#watch)、[Leopard](../glossary/#leopard)。
+
+</Callout>
+
+## 出典
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §1, §2.4.1, §2.4.3, §2.4.5, §3.2.4.
+- AuthZed (ベンダー), [Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint), SpiceDB ドキュメント。
+- AuthZed (ベンダー), [Querying Data](https://authzed.com/docs/spicedb/concepts/querying-data), SpiceDB ドキュメント。
+- AuthZed (ベンダー), [Google Zanzibar](https://authzed.com/docs/spicedb/concepts/zanzibar), SpiceDB ドキュメント, 「Reverse Indices」の節。
+- AuthZed (ベンダー), [What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview) および [Limitations](https://authzed.com/docs/materialize/getting-started/limitations)。
+- AuthZed, [Proposal: Lookup Watch API and Tiger Cache for fast ACL-aware filtering](https://github.com/authzed/spicedb/issues/207), spicedb issue #207, 2021-10-22 起票。
+- OpenFGA, [Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)。
+- OpenFGA, [Relationship Queries: Check, Read, Expand, ListObjects and ListUsers](https://openfga.dev/docs/interacting/relationship-queries)。
+- OpenFGA, [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency)。

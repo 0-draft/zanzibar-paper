@@ -1,0 +1,55 @@
+---
+// A vertical history timeline grouped by era. Each entry links its source.
+import { renderInline } from "../../lib/inline.ts";
+
+export interface TimelineItem {
+  /** "1971", "1992", "2019-07" … */
+  year: string;
+  title: string;
+  /** Inline markup allowed */
+  body?: string;
+  /** The primary source */
+  href?: string;
+  era?: string;
+  /** Mark the paper itself */
+  on?: boolean;
+}
+interface Props {
+  items: TimelineItem[];
+  /** Label of the source link in the page language */
+  sourceLabel: string;
+}
+const { items, sourceLabel } = Astro.props;
+const eras: { era: string; items: TimelineItem[] }[] = [];
+for (const it of items) {
+  const last = eras.at(-1);
+  if (last && last.era === (it.era ?? "")) last.items.push(it);
+  else eras.push({ era: it.era ?? "", items: [it] });
+}
+---
+
+<div class="tl">
+  {
+    eras.map((e) => (
+      <section class="tl-era">
+        {e.era && <h3 class="tl-era-title">{e.era}</h3>}
+        <ol>
+          {e.items.map((it) => (
+            <li class:list={[it.on && "on"]}>
+              <span class="tl-year">{it.year}</span>
+              <div class="tl-body">
+                <p class="tl-title" set:html={renderInline(it.title)} />
+                {it.body && <p set:html={renderInline(it.body)} />}
+                {it.href && (
+                  <a class="tl-src" href={it.href} rel="noopener" target="_blank">
+                    {sourceLabel}
+                  </a>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+    ))
+  }
+</div>

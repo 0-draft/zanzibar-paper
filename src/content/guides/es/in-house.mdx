@@ -1,0 +1,137 @@
+---
+title: "Sistemas internos"
+description: "Himeji de Airbnb y AuthZ de Carta, dos sistemas de autorización internos de empresa construidos a partir del artículo de Zanzibar, tal como los describieron sus ingenieros en 2021."
+section: ecosystem
+order: 7
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "3.1", "3.2.4"]
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+Algunas empresas no adoptaron un producto: leyeron el artículo y construyeron su propio servicio. Dos publicaron descripciones detalladas en 2021, Airbnb (Himeji) y Carta (AuthZ). Ninguno de los dos sistemas está disponible fuera de su empresa, así que todo lo que aparece aquí procede de lo que escribieron sus ingenieros, y nada es posterior a esas entradas.
+
+<Callout title="Cómo se leyeron estas entradas">
+Las entradas están en Medium, que devolvió HTTP 403 al verificador de este sitio. Su texto completo se leyó el 2026-11-13 a través de los feeds RSS de Medium de las dos publicaciones ([feed de Airbnb Engineering](https://medium.com/feed/airbnb-engineering/tagged/authorization), [feed de Building Carta](https://medium.com/feed/building-carta/tagged/authorization)), que contienen los mismos artículos. Los datos de Himeji se contrastaron con el [informe de InfoQ](https://www.infoq.com/news/2021/05/airbnb-himeji) (2021-05-12). Existe una conversación grabada con el autor principal de Himeji ([Authorization in Software](https://www.youtube.com/watch?v=TXZFi6Opbkk)), pero no se ha utilizado: no se pudo leer ni la grabación ni su descripción.
+</Callout>
+
+## Airbnb Himeji
+
+"Himeji: A Scalable Centralized System for Authorization at Airbnb", de Alan Yao, con Dipak Pawar, Blair Wu y Abhishek Parmar, se publicó el 2021-04-20 ([entrada](https://medium.com/airbnb-engineering/himeji-a-scalable-centralized-system-for-authorization-at-airbnb-341664924574)). Airbnb había pasado de un monolito de Rails a servicios y quería las comprobaciones de autorización en la capa de datos; la entrada llama a Himeji "a centralized authorization system based on Zanzibar, which is called from the data layer" (un sistema de autorización centralizado basado en Zanzibar, al que se llama desde la capa de datos). "exposes a check API for data services to perform authorization checks" (expone una API de comprobación para que los servicios de datos realicen comprobaciones de autorización).
+
+### Modelo
+
+- "Similar to Zanzibar, the basic unit of storage for Himeji is a tuple in the form entity # relation @ principal." (Al igual que en Zanzibar, la unidad básica de almacenamiento de Himeji es una tupla de la forma entity # relation @ principal.) Una entidad es la terna "(entity type : entity id : entity part)" (tipo de entidad : ID de entidad : parte de la entidad).
+- La tupla de ejemplo de la entrada: "LISTING : 10 # OWNER @ User(123)". En esa notación, que Anne sea propietaria del readme se leería `DOC : readme # OWNER @ User(anne)`; esta línea es una ilustración, no procede de la entrada.
+- Las reglas se escriben en "a YAML-based configuration language that allows for the resolution of permissions checks via set algebra" (un lenguaje de configuración basado en YAML que permite resolver las comprobaciones de permisos mediante álgebra de conjuntos). El ejemplo de la entrada resuelve una comprobación `WRITE` de un anuncio como la unión de `WRITE` y `OWNER`, y `READ` como la unión de `READ` y `WRITE`: las relaciones concéntricas del artículo (§2.3.1, Figura 1).
+- Una *tupla de referencia* enlaza dos entidades sin nombrar una relación; la relación que se debe seguir procede de la configuración. "Where this approach differs from Zanzibar is that such a tuple does not contain a relation." (En lo que este enfoque difiere de Zanzibar es en que una tupla así no contiene una relación.) Como las relaciones entre dos tipos de entidad rara vez varían, la entrada dice que así se almacenan unas N tuplas en lugar de N×M.
+- Himeji reparte el trabajo en la escritura: "Instead of fanning out at read time, we write all permissions data when resources are mutated" (en lugar de repartir en el momento de la lectura, escribimos todos los datos de permisos cuando se modifican los recursos), "given our read-heavy workload" (dada nuestra carga de trabajo dominada por las lecturas).
+
+### Arquitectura
+
+¿Cómo viaja una comprobación a través de Himeji?
+
+<Graph
+  width={620}
+  height={280}
+  title="Las tres capas de Himeji, según la entrada de Airbnb"
+  desc="Los servicios de datos llaman a la API de comprobación de la capa de orquestación. La capa de orquestación obtiene datos según la configuración y encamina cada búsqueda a un fragmento de caché mediante hashing consistente. Cada fragmento de caché está replicado, con una instancia por zona de disponibilidad, y carga desde la capa de datos cuando hay un fallo de caché. La capa de datos son bases de datos Amazon Aurora fragmentadas lógicamente; las modificaciones publicadas desde las bases de datos invalidan los fragmentos de caché."
+  nodes={[
+    { id: "svc", x: 90, y: 60, label: "Servicios de datos", kind: "client" },
+    { id: "orch", x: 310, y: 60, label: "Capa de\norquestación", kind: "server" },
+    { id: "cache", x: 310, y: 215, label: "Fragmentos de caché\n1 réplica por AZ", kind: "server" },
+    { id: "db", x: 535, y: 215, label: "Amazon Aurora\nfragmentada", kind: "store" },
+  ]}
+  edges={[
+    { from: "svc", to: "orch", label: "comprobación" },
+    { from: "orch", to: "cache", label: "hashing consistente" },
+    { from: "cache", to: "db", label: "carga si hay fallo" },
+    { from: "db", to: "orch", label: "las modificaciones\ninvalidan", dashed: true, labelOffset: 12 },
+  ]}
+  caption="Amarillo: servidores de Himeji. Verde: almacenamiento. Azul: llamantes. Discontinuo: eventos de invalidación, dibujados hacia la capa de Himeji porque la entrada no muestra el camino en detalle."
+/>
+
+Obsérvese la separación que la entrada considera su cambio más significativo: Himeji va a "Separate the request orchestration tier from the caching tier" (separar la capa de orquestación de solicitudes de la capa de caché), para que el código de orquestación pueda cambiar sin reiniciar las cachés. El resto, según la entrada:
+
+- La capa de caché está "sharded and replicated (one instance per AZ per shard)" (fragmentada y replicada, con una instancia por AZ y por fragmento); "Each shard is assigned a set of data to own via consistent hashing" (a cada fragmento se le asigna mediante hashing consistente un conjunto de datos del que es responsable); "We target a ~98% hit rate on the cache." (Nuestro objetivo es una tasa de aciertos de ~98% en la caché.)
+- Los fragmentos de caché se invalidan "based on published mutations from the databases" (a partir de las modificaciones publicadas desde las bases de datos). InfoQ nombra la herramienta de captura de datos de cambios como SpinalTap, de Airbnb, que publica a través de Apache Kafka ([InfoQ](https://www.infoq.com/news/2021/05/airbnb-himeji)); la entrada enlaza un artículo aparte en lugar de nombrarla.
+- Almacenamiento: "Use Amazon Aurora for database storage as part of our cloud journey, which differs from Zanzibar's usage of Spanner." (Usar Amazon Aurora como almacenamiento de base de datos como parte de nuestra migración a la nube, lo que difiere del uso de Spanner en Zanzibar.)
+- "We implement the same reliability (hedging, tiered caching) and load shedding features as Zanzibar for availability." (Implementamos las mismas funciones de fiabilidad, hedging y caché por niveles, y de descarte de carga que Zanzibar para la disponibilidad.) El artículo las describe en §3.2.5 a §3.2.7.
+- Resultados comunicados tras aproximadamente un año en producción: en torno al 99.999% de disponibilidad, P50 1.8 ms, P95 7 ms, P99 12 ms, y un rendimiento que pasó de 0 en marzo de 2020 a 850k entidades por segundo en marzo de 2021. InfoQ da las mismas cifras de disponibilidad, P99 y rendimiento.
+
+La entrada no describe ningún token de consistencia. Las fuentes consultadas no indican si Himeji tiene algo parecido a un zookie.
+
+## Carta AuthZ
+
+Aaron Tainter, de Carta, publicó dos entradas: "AuthZ: Carta's highly scalable permissions system" el 2021-06-11 ([primera parte](https://medium.com/building-carta/authz-cartas-highly-scalable-permissions-system-782a7f2c840f)) y "User authorization in less than 10 milliseconds" el 2021-09-03 ([segunda parte](https://medium.com/building-carta/user-authorization-in-less-than-10-milliseconds-f20d277fec47)). La segunda parte llama al sistema "AuthZ, based on Google's Zanzibar" (AuthZ, basado en Zanzibar de Google).
+
+### Modelo y API
+
+- "A RelationTuple is a tuple consisting of an actor, relation, and object." (Una RelationTuple es una tupla formada por un actor, una relación y un objeto.) Que Anne sea propietaria del readme es una RelationTuple. La segunda parte escribe una comprobación como `AuthZ.Check("Employee:1", "View", "Grade:X")`.
+- "Consumers combine RelationTuples using a domain-specific language." (Los consumidores combinan RelationTuples mediante un lenguaje específico de dominio.) Las entradas no muestran el lenguaje.
+- "We introduced namespaces to separate domain-level permissions." (Introdujimos espacios de nombres para separar los permisos a nivel de dominio.) Un servicio solo puede escribir en los espacios de nombres a los que tiene acceso de escritura; de lo contrario, "AuthZ rejects the update and throws an error" (AuthZ rechaza la actualización y lanza un error). Estos espacios de nombres son una frontera de acceso entre equipos, no las configuraciones por tipo de objeto del artículo (§2.3).
+- Al principio "There were only three endpoints" (solo había tres endpoints): Add, Remove y Check. Las API de consulta que listan los recursos de un actor llegaron más tarde.
+- Los cambios masivos se escriben como plantillas en el lenguaje Mustache, en las que "AuthZ injects data into" (AuthZ inyecta datos) antes de ejecutar "a bulk update event" (un evento de actualización masiva).
+
+### El índice y los tickets
+
+AuthZ responde a las comprobaciones a partir de un índice precalculado, en lugar de recorrer el grafo: "Traversing the graph is expensive, so AuthZ maintains a custom secondary index." (Recorrer el grafo es costoso, así que AuthZ mantiene un índice secundario a medida.) El índice mantiene dos conjuntos: el Actor Index Set ("the direct connections from actor leaf nodes", las conexiones directas desde los nodos hoja de actor) y el Object Index Set ("the direct and indirect connections to each object node", las conexiones directas e indirectas con cada nodo de objeto). La segunda parte añade: "(Google's Zanzibar paper calls them Group2Group and Member2Group)" (el artículo de Zanzibar de Google los llama Group2Group y Member2Group), los dos tipos de conjunto de Leopard (§3.2.4).
+
+El índice se construye de forma asíncrona, así que un consumidor necesita una forma de saber que su cambio ha llegado. Esa es la función del *ticket*: "During an update, AuthZ issues a Ticket (synonymous with a Zookie in Zanzibar) to the consumer." (Durante una actualización, AuthZ emite un Ticket, sinónimo de un Zookie en Zanzibar, para el consumidor.) "A Ticket is an opaque token which represents the time at which the change was committed to AuthZ." (Un Ticket es un token opaco que representa el momento en que el cambio se confirmó en AuthZ.)
+
+¿Qué ocurre cuando un consumidor hace una comprobación con un ticket antes de que el índice se haya puesto al día?
+
+<Swimlane
+  lanes={["Consumidor", "AuthZ", "Workers del índice"]}
+  timeLabel="tiempo"
+  title="Los tickets de Carta AuthZ"
+  desc="El consumidor añade una RelationTuple. AuthZ la confirma y devuelve un ticket. Los workers empiezan a construir el cambio del índice. El consumidor hace una comprobación con el ticket mientras una RelationTuple con una marca de tiempo de confirmación igual o anterior al ticket sigue sin procesar, así que AuthZ rechaza la solicitud. Una vez combinados en el índice los resultados de los workers, el consumidor reintenta y obtiene una respuesta del índice actualizado."
+  events={[
+    { lane: 0, t: 0, label: "Add\nRelationTuple", kind: "write" },
+    { lane: 1, t: 0, label: "confirma,\nemite Ticket", kind: "write" },
+    { lane: 2, t: 1, label: "construye el\ncambio del índice", kind: "note" },
+    { lane: 0, t: 1, label: "Check\n+ Ticket", kind: "read" },
+    { lane: 1, t: 1, label: "tupla sin procesar\n≤ ticket: rechaza", kind: "bad" },
+    { lane: 2, t: 2, label: "combina en\nel índice", kind: "write" },
+    { lane: 0, t: 3, label: "reintenta Check\n+ Ticket", kind: "read" },
+    { lane: 1, t: 3, label: "respuesta del\níndice actualizado", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 1], dashed: true },
+    { from: [0, 1], to: [1, 1] },
+    { from: [0, 3], to: [1, 3] },
+  ]}
+  caption="AuthZ rechaza en lugar de esperar; el consumidor reintenta. El Check del artículo, en cambio, evalúa en una instantánea no anterior al zookie (§2.4.4)."
+/>
+
+Obsérvese dónde se comprueba el ticket: "AuthZ rejects requests when there are RelationTuples with commit timestamps less than or equal to the ticket provided by the consumer" (AuthZ rechaza las solicitudes cuando hay RelationTuples con marcas de tiempo de confirmación menores o iguales que el ticket proporcionado por el consumidor), y el consumidor "can try again later" (puede volver a intentarlo más tarde). Otros detalles de la segunda parte:
+
+- "Several concurrent workers build the custom index asynchronously to keep API calls fast for our consumers." (Varios workers concurrentes construyen el índice a medida de forma asíncrona para que las llamadas a la API sean rápidas para nuestros consumidores.) Los cambios "take a few hundred milliseconds to propagate through the system" (tardan unos cientos de milisegundos en propagarse por el sistema).
+- "AuthZ spawns three workers to build index changes for each commit." (AuthZ lanza tres workers para construir los cambios del índice de cada confirmación.) Los resultados esperan en un almacenamiento intermedio y se combinan en el índice "when all commits before a timestamp have finished processing" (cuando todas las confirmaciones anteriores a una marca de tiempo han terminado de procesarse).
+- "AuthZ stores consumer-created RelationTuples in a datastore" (AuthZ almacena en un almacén de datos las RelationTuples creadas por los consumidores), y "AuthZ maintains the full changelog of commit events in secondary storage" (AuthZ mantiene el registro de cambios completo de los eventos de confirmación en un almacenamiento secundario), como el registro de cambios del artículo (§3.1.2). Las entradas no nombran el producto de base de datos.
+- "Including network latency, the median permission check takes about 7 milliseconds. At the 95th percentile, we check permissions in 12 milliseconds." (Incluida la latencia de red, la comprobación de permisos mediana tarda unos 7 milisegundos. En el percentil 95, comprobamos los permisos en 12 milisegundos.)
+
+## Comparación
+
+Las celdas dicen “no se indica” cuando las entradas leídas aquí no lo dicen.
+
+| En el artículo | Airbnb Himeji (2021) | Carta AuthZ (2021) |
+| --- | --- | --- |
+| Tupla `object#relation@user` (§2.1) | `entity # relation @ principal`, más tuplas de referencia sin relación | RelationTuple: actor, relación, objeto |
+| Configuración de espacios de nombres con reescrituras (§2.3.1) | Configuración en YAML, álgebra de conjuntos | Un lenguaje específico de dominio (no se muestra) |
+| Zookie (§2.2) | No se indica | Ticket, "synonymous with a Zookie" (sinónimo de un Zookie) |
+| Leopard (§3.2.4) | No se indica; en su lugar, reparto en la escritura | Actor Index Set y Object Index Set, construidos por workers |
+| Caché (§3.2.5) | Caché en memoria fragmentada y replicada, objetivo de ~98% de aciertos | No se indica |
+| Spanner (§3.1) | Amazon Aurora | No se indica |
+| Latencia comunicada | P95 7 ms, P99 12 ms | Mediana 7 ms, P95 12 ms |
+
+## Fuentes
+
+- Airbnb, "Himeji: A Scalable Centralized System for Authorization at Airbnb" (2021-04-20): [medium.com/airbnb-engineering/…341664924574](https://medium.com/airbnb-engineering/himeji-a-scalable-centralized-system-for-authorization-at-airbnb-341664924574), leído a través del [feed de autorización de Airbnb Engineering](https://medium.com/feed/airbnb-engineering/tagged/authorization)
+- InfoQ, "Airbnb Builds Himeji - a Scalable Centralized Authorization System" (2021-05-12): [infoq.com/news/2021/05/airbnb-himeji](https://www.infoq.com/news/2021/05/airbnb-himeji)
+- Carta, "AuthZ: Carta's highly scalable permissions system" (2021-06-11): [medium.com/building-carta/…782a7f2c840f](https://medium.com/building-carta/authz-cartas-highly-scalable-permissions-system-782a7f2c840f)
+- Carta, "User authorization in less than 10 milliseconds" (2021-09-03): [medium.com/building-carta/…f20d277fec47](https://medium.com/building-carta/user-authorization-in-less-than-10-milliseconds-f20d277fec47), ambos leídos a través del [feed de autorización de Building Carta](https://medium.com/feed/building-carta/tagged/authorization)
+- Authorization in Software, conversación con Alan Yao (no utilizada): [youtube.com/watch?v=TXZFi6Opbkk](https://www.youtube.com/watch?v=TXZFi6Opbkk)

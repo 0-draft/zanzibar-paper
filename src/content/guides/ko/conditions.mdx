@@ -1,0 +1,290 @@
+---
+title: "관계만으로 부족할 때"
+description: "논문의 튜플이 표현하지 못하는 것(시간, 네트워크, 금액, 만료), 그리고 SpiceDB caveat, OpenFGA의 조건과 컨텍스트 튜플, Permify의 속성이 이를 어떻게 되살리는지."
+section: guide
+part: practice
+order: 11
+checked: "2026-11-13"
+paper: ["2.1", "2.4.4", "2.4.5", "3.1.1"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+어떤 규칙은 누가 무엇과 관계되어 있는지에 관한 것이 아니다. "사무실 네트워크에서만", "업무 시간에만", "1,000 미만의 이체에만", "금요일까지만". 이들은 각각 요청이나 시계에 관한 사실에 의존한다. 논문에는 이를 쓸 방법이 없다. 논문의 아이디어를 바탕으로 만들어진 제품들은 각자 다른 방식으로 그 방법을 추가한다. 이 페이지는 이 공백이 왜 존재하는지, 세 제품이 무엇을 추가하는지, 그리고 언제 규칙을 애플리케이션에 두는 편이 나은지를 설명한다.
+
+예제: Anne, Beto, Chen(`user:anne`, `user:beto`, `user:chen`), `folder:A`에 있는 문서 `doc:readme`, 그룹 `group:eng`. Anne은 readme를 소유하고, Beto는 eng에 속하며, eng 멤버는 readme를 열람하고, Chen은 폴더 A를 열람한다. 이 페이지가 바탕으로 삼는 관계 패턴은 [모델링 페이지](../modeling/)에 있다.
+
+## 튜플이 말할 수 없는 것
+
+논문의 튜플은 네 가지로 이루어지며 그 밖에는 아무것도 없다. 문법은 ⟨*object*⟩ ‘#’ ⟨*relation*⟩ ‘@’ ⟨*user*⟩이고, "the primary keys required to identify a relation tuple are ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, and ⟨*user*⟩"(관계 튜플을 식별하는 데 필요한 기본 키는 ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, ⟨*user*⟩다)(§2.1). 저장소에서는 "each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*"(각 행은 기본 키 <em>(샤드 ID, 객체 ID, 관계, 사용자, 커밋 타임스탬프)</em>로 식별된다)(§3.1.1). 논문은 다른 열을 기술하지 않는다. 만료도, 조건도, 사용자나 객체의 속성도 없다.
+
+요청 쪽도 마찬가지로 좁다. "A check request specifies a userset, represented by ⟨*object#relation*⟩, a putative user, often represented by an authentication token, and a zookie corresponding to the desired object version"(검사 요청은 ⟨*object#relation*⟩으로 표현되는 유저셋, 흔히 인증 토큰으로 표현되는 추정 사용자, 그리고 원하는 객체 버전에 대응하는 zookie를 지정한다)(§2.4.4). 호출자의 IP 주소, 시각, 거래 금액을 위한 필드는 없다.
+
+Check는 무엇을 담고 있으며, 무엇이 빠져 있는가?
+
+<Graph
+  width={620}
+  height={250}
+  minWidth={520}
+  title="논문의 Check 요청이 담는 것"
+  desc="클라이언트 상자가 Zanzibar 서버 상자에 Check 요청을 보낸다. 요청은 왼쪽에 상자로 그린 세 가지를 담는다. 유저셋 doc:readme#view, 사용자 user:chen, zookie. 오른쪽에는 논문의 요청에 없음이라는 점선 그룹이 메모 세 개를 담는다. 호출자의 IP 주소, 현재 시각, 거래 금액. 서버는 저장소에서 관계 튜플만 읽는다."
+  groups={[{ x: 400, y: 10, w: 210, h: 140, label: "논문의 요청에 없음" }]}
+  nodes={[
+    { id: "client", x: 90, y: 200, label: "클라이언트", kind: "client" },
+    { id: "srv", x: 310, y: 200, label: "Zanzibar 서버", kind: "server" },
+    { id: "store", x: 520, y: 200, label: "관계 튜플", kind: "store" },
+    { id: "us", x: 90, y: 40, label: "유저셋\ndoc:readme#view", kind: "object", mono: true, on: true },
+    { id: "u", x: 90, y: 120, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "z", x: 250, y: 40, label: "zookie", kind: "object", on: true },
+    { id: "ip", x: 505, y: 55, label: "호출자의 IP 주소", kind: "note" },
+    { id: "time", x: 505, y: 85, label: "현재 시각", kind: "note" },
+    { id: "amt", x: 505, y: 115, label: "거래 금액", kind: "note" },
+  ]}
+  edges={[
+    { from: "client", to: "srv", label: "Check", on: true },
+    { from: "srv", to: "store", label: "읽기" },
+  ]}
+  caption="강조된 세 입력이 요청의 전부다(§2.4.4). 점선 프레임 안의 사실은 요청에 들어갈 자리가 없고, 어떤 튜플도 이를 담을 수 없다(§2.1)."
+/>
+
+답은 저장된 튜플과 zookie가 선택하는 스냅샷에만 의존할 수 있다는 점에 주목하라. 이것이 답을 캐시할 수 있고 일관되게 만드는 이유이며, 동시에 요청에 대한 조건을 배제하는 이유이기도 하다.
+
+어떤 요구 사항은 관계로 바꿔 표현할 수 있다. 만료는 시간이 되면 튜플을 삭제하는 작업으로 처리할 수 있지만, 그 작업이 실행될 때까지 접근이 지속되는 대가를 치른다. 허용된 네트워크의 집합은 애플리케이션이 호출자를 관계시키는 객체로 만들 수 있다. 이체 한도는 불가능하다. 금액은 누군가가 관계를 맺는 객체가 아니기 때문이다. 논문은 이러한 우회책을 하나도 다루지 않는다.
+
+## SpiceDB caveat
+
+SpiceDB는 관계(relationship)에 조건을 붙인다. "Caveats are expressions that can return true or false, and they can be attached (by name) to relationships"(caveat는 true나 false를 반환할 수 있는 표현식이며, 이름으로 관계에 붙일 수 있다). "a caveat definition includes a name, one or more well-typed parameters, and a CEL expression returning a boolean value"(caveat 정의는 이름, 타입이 정해진 하나 이상의 매개변수, 그리고 불리언 값을 반환하는 CEL 표현식을 포함한다)([caveat 문서](https://authzed.com/docs/spicedb/concepts/caveats)). CEL은 Google의 [Common Expression Language](https://github.com/google/cel-spec)다. 매개변수 타입에는 `int`, `string`, `duration`, `timestamp`, `list<T>`, `map<T>`, 그리고 SpiceDB 고유의 `ipaddress`가 있다.
+
+Chen이 사무실 네트워크에서만 폴더 A를, 그리고 그것을 통해 readme를 열람할 수 있다고 하자. caveat 페이지의 예를 따른 caveat와, 이를 가질 수 있는 관계는 다음과 같다.
+
+```text
+definition user {}
+
+caveat has_valid_ip(user_ip ipaddress, allowed_range string) {
+  user_ip.in_cidr(allowed_range)
+}
+
+definition folder {
+    relation viewer: user | user with has_valid_ip
+    permission view = viewer
+}
+```
+
+*SpiceDB 스키마. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+`user | user with has_valid_ip`는 같은 관계가 일반 관계와 caveat가 붙은 관계를 모두 가질 수 있게 한다. "to make the caveat **required**, the `user |` can be removed"(caveat를 **필수**로 만들려면 `user |`를 제거하면 된다)(caveat 문서). 관계 `folder:A#viewer@user:chen`은 caveat 이름 `has_valid_ip`와 컨텍스트의 일부, 여기서는 `allowed_range` = `10.20.30.0/24`와 함께 기록된다. 나머지인 `user_ip`는 각 `CheckPermission` 호출의 `context` 필드로 전달된다. 양쪽 모두 값을 제공하면 "the values in the Relationship take precedence over those in the CheckPermissionRequest"(Relationship의 값이 CheckPermissionRequest의 값보다 우선한다)(caveat 문서).
+
+어느 간선이 조건을 가지는가?
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="예제에서 caveat가 붙은 관계"
+  desc="user:chen에서 folder:A로 강조된 viewer 간선이 가며, has_valid_ip와 allowed_range 10.20.30.0/24라는 레이블이 붙어 있다. folder:A에서 doc:readme로 parent 간선이 간다. user:anne에서 doc:readme로 조건 없는 owner 간선이 간다."
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 155, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "folder", x: 330, y: 155, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 520, y: 100, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "chen", to: "folder", label: "viewer\nwith has_valid_ip\n10.20.30.0/24", on: true },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="조건이 붙은 간선은 하나뿐이다. Anne의 경로에는 caveat가 없으므로 Anne의 검사에는 컨텍스트가 전혀 필요 없다."
+/>
+
+### 두 가지가 아닌 세 가지 답
+
+caveat가 붙은 검사는 예도 아니요도 아닌 채로 끝날 수 있다. API는 세 가지 결과를 정의한다. `PERMISSIONSHIP_NO_PERMISSION`, `PERMISSIONSHIP_HAS_PERMISSION`, 그리고 `PERMISSIONSHIP_CONDITIONAL_PERMISSION`이다. 마지막 것은 "indicates that the subject has the requested permission on the resource, but only if a caveat condition is met. The `partial_caveat_info` field in the response should contain the missing context fields that must be provided to fully evaluate the caveat"(주체가 리소스에 대해 요청된 권한을 가지지만, caveat 조건이 충족될 때에만 그렇다는 것을 나타낸다. 응답의 `partial_caveat_info` 필드에는 caveat를 완전히 평가하기 위해 제공해야 하는 누락된 컨텍스트 필드가 들어 있어야 한다)([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). caveat 페이지는 이를 "required context is missing to determine permissionship"(권한 여부를 결정하는 데 필요한 컨텍스트가 누락되었다)라고 표현한다. SpiceDB 내부에서 노드 사이에 디스패치되는 하위 문제도 `MEMBER`, `NOT_MEMBER`와 나란히 같은 세 번째 상태 `CAVEATED_MEMBER`를 가진다([`dispatch.proto`](https://github.com/authzed/spicedb/blob/main/proto/internal/dispatch/v1/dispatch.proto)).
+
+애플리케이션이 IP 주소를 빠뜨리면 어떻게 되는가?
+
+<Swimlane
+  lanes={["애플리케이션", "SpiceDB", "저장된 관계"]}
+  title="컨텍스트가 필요한 caveat 검사"
+  desc="1행: 애플리케이션이 user:chen, view, doc:readme에 대한 CheckPermission을 컨텍스트 없이 보낸다. 2행: SpiceDB가 parent->view를 따라 folder:A로 가서, caveat has_valid_ip와 allowed_range 10.20.30.0/24를 가진 관계 folder:A#viewer@user:chen을 찾는다. 3행: user_ip가 없으므로 SpiceDB는 PERMISSIONSHIP_CONDITIONAL_PERMISSION으로 답하고 user_ip를 누락된 것으로 명시한다. 4행: 애플리케이션이 컨텍스트 user_ip 10.20.30.7과 함께 다시 검사한다. 5행: in_cidr가 true이고 SpiceDB는 PERMISSIONSHIP_HAS_PERMISSION으로 답한다."
+  timeLabel="시간"
+  laneWidth={190}
+  rowHeight={84}
+  events={[
+    { lane: 0, t: 0, label: "CheckPermission\nchen · view · readme\n컨텍스트: 없음", kind: "read" },
+    { lane: 1, t: 1, label: "parent->view로\nfolder:A에 도달", kind: "read" },
+    { lane: 2, t: 1, label: "folder:A#viewer\n@user:chen\nhas_valid_ip", kind: "note", mono: true },
+    { lane: 1, t: 2, label: "user_ip 누락\nCONDITIONAL_PERMISSION\n누락: user_ip", kind: "bad" },
+    { lane: 0, t: 3, label: "CheckPermission\n재요청, 컨텍스트:\nuser_ip 10.20.30.7", kind: "read" },
+    { lane: 1, t: 4, label: "in_cidr → true\nHAS_PERMISSION", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "검사" },
+    { from: [1, 1], to: [2, 1], label: "읽기" },
+    { from: [1, 2], to: [0, 3], label: "조건부", dashed: true },
+    { from: [0, 3], to: [1, 4], label: "재검사" },
+  ]}
+  caption="CONDITIONAL_PERMISSION은 허가도 거부도 아니다. 응답은 무엇이 누락되었는지 명시하므로 호출자는 그것을 넣어 다시 시도할 수 있다. 이를 예로 취급하는 애플리케이션에는 구멍이 생긴다."
+/>
+
+저장된 관계가 이미 컨텍스트의 절반을 가지고 있다는 점에 주목하라. 애플리케이션은 요청 시점에 아는 것만 제공한다.
+
+### 만료되는 관계
+
+만료는 caveat의 흔한 용도였다. 이에 관한 AuthZed의 글은 많은 사용자가 만료 외에는 아무것도 원하지 않았다고 말하며, 내장 형태를 소개한다. 관계는 선택적인 만료 시각을 가지며, 스키마는 `use expiration`과 `with expiration`으로 이를 선택한다. 글에 따르면 이 기능은 SpiceDB v1.40에서 `--enable-experimental-relationship-expiration` 뒤의 실험적 기능으로 출시되었다([AuthZed 블로그, 2025-02-13](https://authzed.com/blog/the-evolution-of-expiration)).
+
+```text
+use expiration
+
+definition folder {
+    relation viewer: user | user with expiration
+    permission view = viewer
+}
+```
+
+*SpiceDB 스키마. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+[만료되는 관계 문서](https://authzed.com/docs/spicedb/concepts/expiring-relationships)는 `WriteRelationships`에서 `OptionalExpiresAt`(RFC 3339)으로 시각을 지정하며, caveat보다 이를 선호할 두 가지 이유를 든다. caveat는 "requires clients to provide the `now` timestamp"(클라이언트가 `now` 타임스탬프를 제공해야 한다), 그리고 "expired caveats are not automatically garbage collected"(만료된 caveat는 자동으로 가비지 컬렉션되지 않는다). 만료된 관계는 만료되는 즉시 효력을 잃는다. 다만 만료 전에 캐시된 하위 결과는 캐시 기간 안에서 여전히 제공될 수 있다. 그 행은 나중에 가비지 컬렉션으로 제거된다(같은 페이지에 따르면 기본값은 24시간 후). 이 페이지는 버전을 한 번은 "v1.40"으로, 한 번은 "v1.4.0"으로 적는다. 블로그 글은 v1.40이라고 한다. 이 기능이 현재 릴리스에서도 여전히 실험적 기능으로 표시되는지는 확인하지 않았다.
+
+## OpenFGA 조건
+
+OpenFGA는 타입 제약을 통해 튜플에 조건을 붙인다. 다음은 [조건 가이드](https://openfga.dev/docs/modeling/conditions)의 모델에 예제의 타입을 넣은 것이다.
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type doc
+  relations
+    define viewer: [user, group#member, user with non_expired_grant]
+
+condition non_expired_grant(current_time: timestamp, grant_time: timestamp, grant_duration: duration) {
+  current_time < grant_time + grant_duration
+}
+```
+
+*OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+튜플 `user:chen`, `viewer`, `doc:readme`는 조건 이름 `non_expired_grant`, 그리고 `grant_time`과 `grant_duration`의 컨텍스트와 함께 기록된다(가이드의 예는 `2023-01-01T00:00:00Z`와 `10m`을 쓴다). 각 Check는 `current_time`을 전달한다. 가이드의 두 검사가 결과를 보여 준다. `00:09:50`에는 allowed가 `true`이고, `00:10:01`에는 `false`다. SpiceDB와 마찬가지로 저장된 컨텍스트와 요청 컨텍스트는 "merged together into a single evaluation context"(하나의 평가 컨텍스트로 병합되며), "persisted context has higher precedence than request context"(저장된 컨텍스트가 요청 컨텍스트보다 우선한다)(조건 가이드).
+
+SpiceDB와 다른 점이 두 가지 있다. 컨텍스트 누락은 세 번째 답이 아니라 오류다. "If you don't provide the current_time in the context, the Check and ListObjects operations will fail"(컨텍스트에 current_time을 제공하지 않으면 Check와 ListObjects 작업은 실패한다)이며, 메시지는 "failed to evaluate relationship condition 'non_expired_grant': context is missing parameters '[current_time]'"이다([OpenFGA 블로그, 2023-11-06](https://openfga.dev/blog/conditional-tuples-announcement)). 그리고 문서화된 한도가 있다. 저장된 컨텍스트는 "is limited to 32KB in size"(크기가 32KB로 제한된다), 서버는 "a maximum Google CEL expression evaluation cost of 100 (by default)"(Google CEL 표현식 평가 비용 최대 100(기본값))을 강제한다(조건 가이드). 같은 블로그 글은 이 기능을 OpenFGA 1.4.0-rc1로 날짜를 매긴다.
+
+### 컨텍스트 튜플
+
+OpenFGA는 요청이 자신의 튜플을 가져오는 것도 허용한다. 컨텍스트 튜플(contextual tuple)은 "a tuple that can be added to a Check request, and only exists within the context of that particular request"(Check 요청에 추가할 수 있으며 그 특정 요청의 컨텍스트 안에서만 존재하는 튜플)이며, 컨텍스트 튜플은 "are not persisted in the store"(저장소에 영속되지 않는다)([컨텍스트 및 시간 기반 인가 가이드](https://openfga.dev/docs/modeling/contextual-time-based-authorization)). 이 가이드는 허용된 IP 범위와 시간대를 객체(`ip-address-range`, `timeslot`)로 모델링하고, 검사와 함께 `user:anne` `user` `timeslot:12_13`을 보낸다. 지점이 허용하지 않는 시간대는 `{"allowed":false}`를 반환한다.
+
+예제에 적용하면, 폴더 A는 사무실 네트워크에서만 열람할 수 있다. 애플리케이션은 호출자의 주소로부터 Chen이 `network:office`에 있다고 판단하고, 이를 컨텍스트 튜플로 전달한다.
+
+```text
+type network
+  relations
+    define user: [user]
+
+type folder
+  relations
+    define allowed_network: [network]
+    define viewer: [user, group#member]
+    define can_view: viewer and user from allowed_network
+```
+
+*OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+어느 간선이 저장되어 있고, 어느 간선이 이 요청에만 존재하는가?
+
+<Graph
+  width={600}
+  height={220}
+  minWidth={480}
+  title="컨텍스트 튜플이 교집합을 완성한다"
+  desc="user:chen에서 folder:A로 저장된 viewer 간선이 간다. network:office에서 folder:A로 저장된 allowed_network 간선이 간다. user, 컨텍스트라는 레이블의 강조된 점선 간선이 user:chen에서 network:office로 간다. 이 간선은 이 Check 요청 안에만 존재한다. 이 간선이 있으면 교집합의 두 자식이 모두 성립한다."
+  nodes={[
+    { id: "chen", x: 80, y: 110, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "net", x: 300, y: 185, label: "network:office", kind: "object", mono: true, on: true },
+    { id: "folder", x: 520, y: 110, label: "folder:A", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "folder", label: "viewer (저장됨)", on: true },
+    { from: "chen", to: "net", label: "user\n(컨텍스트,\n이 요청에만)", dashed: true, on: true },
+    { from: "net", to: "folder", label: "allowed_network\n(저장됨)", on: true },
+  ]}
+  caption="can_view = viewer ∩ (allowed_network → user). 점선 간선은 저장소가 아니라 애플리케이션에서 온다. 이 간선이 없으면 교집합은 실패한다."
+/>
+
+IP 매칭이 어디에서 일어났는지에 주목하라. 호출 전에 애플리케이션에서 일어났다. 컨텍스트 튜플은 로직을 서비스로 옮기는 것이 아니라 사실을 요청으로 옮긴다. 가이드는 적용 범위도 밝힌다. 컨텍스트 튜플은 Check와 ListObjects에서 지원되고 "are not supported on read, expand and other endpoints"(read, expand 및 기타 엔드포인트에서는 지원되지 않는다). 그리고 튜플 변경으로 구축한 검색 인덱스를 이와 결합하는 것은 "will not be trivial"(간단하지 않을 것이다). 이 서술은 2026-11-13에 가져온 가이드 기준이며, 이후 릴리스에서 지원이 넓어졌을 수 있다.
+
+## Permify 속성과 규칙
+
+FusionAuth에 인수된다고 2025-11-20에 발표된 Permify([Permify, 2025-11-20](https://permify.co/post/fusionauth-acquires-permify/))는 관계에 조건을 저장하는 대신 엔터티에 속성을 저장한다. 스키마에는 `attribute`와 `rule`이 있으며, 문서는 "we design our schema language based on"(우리는 스키마 언어를 다음에 기반해 설계한다) CEL이라고 말한다([Permify ABAC 문서](https://fusionauth.io/permify-docs/use-cases/abac)). 다음은 Permify [모델링 가이드](https://fusionauth.io/permify-docs/getting-started/modeling)의 예다.
+
+```text
+entity organization {
+    relation admin @user
+    attribute ip_range string[]
+    permission view = check_ip_range(ip_range) or admin
+}
+
+rule check_ip_range(ip_range string[]) {
+    context.data.ip in ip_range
+}
+```
+
+*Permify 스키마. 2026-11-13 기준 문서화된 예에서 복사했다. 검증기는 실행하지 않았다.*
+
+`ip_range`는 조직에 저장된 속성이고, `context.data.ip`는 검사 요청과 함께 온다. 금액도 같은 형태에 들어맞는다. ABAC 페이지의 은행 예에는 `permission withdraw = check_balance(balance) and owner`가 있다. `context.data`에 값이 없을 때 Permify 검사가 무엇을 반환하는지는 인용한 페이지에서 찾지 못했으며 여기서는 밝히지 않는다.
+
+## 나란히 비교
+
+| | 논문 | SpiceDB | OpenFGA | Permify |
+| --- | --- | --- | --- | --- |
+| 조건이 있는 곳 | 없음: 튜플은 네 부분으로 이루어진다(§2.1) | 관계에: 스키마의 `with`로 허용되는 이름 붙은 caveat | 튜플에: 타입 제약의 `with`로 허용되는 이름 붙은 조건 | 권한이 호출하는 `rule`에: 엔터티 `attribute`와 요청 컨텍스트를 대상으로 |
+| 표현식 언어 | 없음 | CEL | CEL | CEL에 "기반" |
+| 요청 시점의 사실 | 없음. Check는 유저셋, 사용자, zookie를 담는다(§2.4.4) | `CheckPermission`의 `context` | Check의 `context`, 컨텍스트 튜플 | `context`(`context.data`) |
+| 저장된 값과 요청 값 | 해당 없음 | 관계가 우선 | 저장된 컨텍스트가 우선 | 확인하지 않음 |
+| 컨텍스트 누락 | 해당 없음 | 누락된 필드와 함께 `PERMISSIONSHIP_CONDITIONAL_PERMISSION` | 요청이 오류로 실패 | 확인하지 않음 |
+| 만료 | 튜플 삭제(클라이언트의 일) | `with expiration`(v1.40) 또는 caveat | `current_time`에 대한 조건 | 확인하지 않음 |
+
+각 칸의 출처는 위의 절들에 있다.
+
+## Cedar는 Zanzibar를 어떻게 분류하는가
+
+Cedar는 정책 언어이며, 그 논문은 Cedar가 RBAC와 ABAC를 기본으로 지원한다고 설명한다. 그 논문(Cutler et al., "Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)", [arXiv:2403.04651v2](https://arxiv.org/abs/2403.04651), 2024-03-08)은 관련 연구(§6)에서 Zanzibar를 다룬다. Zanzibar를 "a highly scalable, relationship-based access control (ReBAC) system"(확장성이 매우 높은 관계 기반 접근 제어(ReBAC) 시스템)이라고 부르며, "Zanzibar supports RBAC and ReBAC with a natural syntax, and with policy validation"(Zanzibar는 자연스러운 문법과 정책 검증으로 RBAC와 ReBAC를 지원한다), "forbid-style policies are supported by expressing one relationship in terms of non-membership in some other relation"(forbid 형식의 정책은 한 관계를 다른 관계의 비멤버십으로 표현하여 지원된다), 그리고 "it does not support ABAC, string matching, or search."(ABAC, 문자열 매칭, 검색은 지원하지 않는다)라고 말한다. Cedar는 그 반대로 설명한다. "Cedar natively supports RBAC and ABAC, can encode ReBAC, and supports forbid policies."(Cedar는 RBAC와 ABAC를 기본으로 지원하고, ReBAC를 인코딩할 수 있으며, forbid 정책을 지원한다.)
+
+Cedar 논문이 기술하는 것은 2019년의 Zanzibar 논문이다. 그 실험은 OpenFGA를 사용하며, OpenFGA를 "a recently developed language for specifying relationship-based access control (ReBAC) [43] policies"(관계 기반 접근 제어(ReBAC) [43] 정책을 지정하기 위해 최근 개발된 언어)로 소개하는데, 참고 문헌 43이 Zanzibar 논문이다(§1). 위의 caveat와 조건은 제품 확장이며, 그 논문의 분류는 이를 다루지 않는다. 그 논문의 "forbid 형식" 문장은 [모델링 페이지](../modeling/#차단-목록차집합)의 차집합 패턴이다.
+
+## 규칙을 애플리케이션에 둘 때
+
+인가 서비스 안의 조건에는 비용이 따른다. 이 절은 이 페이지의 지침이며 논문이나 벤더의 주장이 아니다.
+
+- **사실이 요청에만 존재한다.** 이체 금액이나 호출자의 IP는 애플리케이션이 먼저 안다. 이를 컨텍스트로 전달하는 것도 가능하지만, 서비스는 그것을 평가할 뿐이며 저장하거나 나열하거나 감사할 수 없다. 관계 검사 뒤에 애플리케이션이 확인하는 "금액은 최대 1,000" 같은 규칙이 더 단순한 경우가 많고, 인가 서비스의 답을 캐시할 수 있게 유지한다.
+- **목록 조회와 인덱싱에는 저장된 사실이 필요하다.** 논문의 Expand는 클라이언트가 "build efficient search indices for access-controlled content"(접근 제어되는 콘텐츠를 위한 효율적인 검색 인덱스를 구축)할 수 있도록 존재한다(§2.4.5). 요청에 의존하는 부여는 미리 인덱싱할 수 없다. OpenFGA의 가이드도 컨텍스트 튜플에 대해 그렇게 말하며, SpiceDB 검사는 호출자가 컨텍스트를 제공할 때까지 `CONDITIONAL_PERMISSION`으로 돌아올 수 있다.
+- **시간 제한은 저장소에 둔다.** 만료는 요청이 아니라 부여의 속성이다. 내장 만료(SpiceDB)나 저장된 튜플에 대한 조건(OpenFGA)은 만료를 부여 옆에 두므로, "지난 화요일에 누가 readme를 볼 수 있었는가"를 감사할 때 이를 볼 수 있다.
+- **자주 바뀌는 속성은 튜플보다 컨텍스트가 저렴하다.** 사용자의 위치나 문서의 상태가 바뀔 때마다 튜플을 쓰면 모든 변경이 이중 쓰기(dual write)가 된다. 요청 컨텍스트에 대해 평가하는 조건은 이를 피하지만, 호출자가 올바른 값을 보낸다고 신뢰해야 하는 대가를 치른다.
+
+<Callout kind="paper" title="논문에서">
+
+튜플 문법과 기본 키: §2.1. 저장소 행 키: §3.1.1. Check 요청의 세 입력: §2.4.4. Expand와 검색 인덱스: §2.4.5. 논문에는 조건이나 속성에 관한 절이 없다. 이 페이지의 첫 절 이후는 모두 제품에 관한 설명이다.
+
+</Callout>
+
+## 출처
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- AuthZed, [caveats docs](https://authzed.com/docs/spicedb/concepts/caveats)
+- AuthZed, [expiring relationships docs](https://authzed.com/docs/spicedb/concepts/expiring-relationships)
+- AuthZed, [The Evolution of Expiration](https://authzed.com/blog/the-evolution-of-expiration), 2025-02-13
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- AuthZed, [`dispatch.proto`](https://github.com/authzed/spicedb/blob/main/proto/internal/dispatch/v1/dispatch.proto)
+- Google, [CEL specification](https://github.com/google/cel-spec)
+- OpenFGA, [conditions](https://openfga.dev/docs/modeling/conditions)
+- OpenFGA, [contextual and time-based authorization](https://openfga.dev/docs/modeling/contextual-time-based-authorization)
+- Andres Aguiar, [Conditional Relationship Tuples for OpenFGA](https://openfga.dev/blog/conditional-tuples-announcement), OpenFGA blog, 2023-11-06
+- Permify, [ABAC use case](https://fusionauth.io/permify-docs/use-cases/abac) and [modeling guide](https://fusionauth.io/permify-docs/getting-started/modeling)
+- Permify, [An Exciting New Chapter: Permify Joins FusionAuth](https://permify.co/post/fusionauth-acquires-permify/), 2025-11-20
+- Joseph W. Cutler et al., [Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)](https://arxiv.org/abs/2403.04651), arXiv:2403.04651v2, 2024-03-08

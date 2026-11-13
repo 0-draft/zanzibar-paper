@@ -1,0 +1,165 @@
+---
+title: "用語集"
+description: "Zanzibar の論文で出会うすべての用語を平易に説明し、それを解説するガイドページと論文の節を示す。"
+section: guide
+part: reference
+order: 16
+checked: "2026-11-13"
+paper: []
+---
+
+用語は英語名のアルファベット順に並べる。論文の設定言語に出てくるコード名 (`_this`、`computed_userset`、`tuple_to_userset`) は、アンダースコアを除いて並べる。例には共通の例を使う。Anne、Beto、Chen、`folder:A` の中の `doc:readme`、`group:eng` である。
+
+## A–C
+
+<dl>
+  <dt id="acl">ACL</dt>
+  <dd>アクセス制御リスト。あるオブジェクトに対してある操作を許されたユーザーの集合である。Zanzibar では ACL は 1 つのリストとしてではなく、多数のリレーションタプルとして格納される。詳細: <a href="../access-control-models/">アクセス制御モデル</a>、§1、§2.1。</dd>
+  <dt id="aclserver">aclserver</dt>
+  <dd>Zanzibar の主要なサーバーの種類。Check、Read、Expand、Write に応答し、作業をクラスタ内の他の aclserver にファンアウトする。詳細: <a href="../architecture/">アーキテクチャ</a>、§3。</dd>
+  <dt id="at-least-as-fresh">少なくとも同じだけ新しい (at-least-as-fresh)</dt>
+  <dd>zookie の規則。Zanzibar は zookie のタイムスタンプちょうどのスナップショットだけでなく、それより古くない任意のスナップショットで評価してよい。この自由があるので、ほとんどのリクエストをローカルのレプリカから処理できる。詳細: <a href="../consistency/">一貫性</a>、§2.2。</dd>
+  <dt id="bounded-staleness">有界な古さ (bounded staleness)</dt>
+  <dd>スナップショット読み取りは「現在」より古くてもよいが、ある上限より古くてはならない。Zanzibar ではその上限はクライアントが送る zookie である。Spanner はこれを直接提供しており、クライアントが古さの上限を与え、Spanner がタイムスタンプを選ぶ (<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner の論文</a>、§4.1)。詳細: <a href="../consistency/">一貫性</a>、§2.2。</dd>
+  <dt id="cache-stampede">キャッシュスタンピード (cache stampede)</dt>
+  <dd>キャッシュされていない同じ結果に対する多数の同時リクエストが、キャッシュが埋まる前に一斉にストレージへ向かうこと。Zanzibar はロックテーブルでこれを防ぐ。論文はこの用語の出典として <a href="https://en.wikipedia.org/wiki/Cache_stampede">Wikipedia の記事</a> を挙げている (参考文献 [3])。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.2.5。</dd>
+  <dt id="changelog">変更ログ (changelog)</dt>
+  <dd>タプル更新の履歴を保持する Spanner データベース。各タプル書き込みと同じトランザクションで書き込まれる。Watch はここから読む。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.1.2。</dd>
+  <dt id="check">Check</dt>
+  <dd>ユーザーがユーザーセット ⟨<em>object#relation</em>⟩ に含まれるかを問う API 呼び出し。たとえば「Chen は <code>doc:readme</code> の閲覧者か」。与えられた zookie より古くないスナップショットで評価される。詳細: <a href="../relation-tuples/#グラフ探索としての-check">リレーションタプル</a>、§2.4.4、§3.2.3。</dd>
+  <dt id="computed-userset"><code>computed_userset</code></dt>
+  <dd>同じオブジェクト上の別の関係のユーザーセットを取る、書き換えルールの葉。たとえば「すべての編集者は閲覧者である」。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.3.1。</dd>
+  <dt id="consistent-hashing">コンシステントハッシュ (consistent hashing)</dt>
+  <dd>サーバーを追加・削除しても、ごく一部のキーしか移動しないようにキーをサーバーに割り当てる方法。Zanzibar はこれを使ってキャッシュエントリをクラスタ内のサーバーに分散させる。Web キャッシュのために <a href="https://people.csail.mit.edu/karger/Papers/web.pdf">Karger ら (STOC 1997)</a> が導入した。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.2.5。</dd>
+  <dt id="content-change-check">コンテンツ変更チェック (content-change check)</dt>
+  <dd>ユーザーが新しい内容を保存しようとするときに送る Check。zookie を持たず、最新のスナップショットで評価され、クライアントが新しいコンテンツバージョンとともに格納する zookie を返す。詳細: <a href="../consistency/">一貫性</a>、§2.2、§2.4.4。</dd>
+</dl>
+
+## D–H
+
+<dl>
+  <dt id="denormalization">非正規化 (denormalization)</dt>
+  <dd>平坦化したグループ間のメンバーシップのような派生データを、元の行から計算する代わりに、事前に計算したコピーとして格納すること。Zanzibar はストレージでは非正規化を避け、Leopard でのみ用いる。詳細: <a href="../leopard/">Leopard</a>、§3.2.4、§3.2.5。</dd>
+  <dt id="exclusion">除外 (exclusion)</dt>
+  <dd>書き換えルールの演算子。あるユーザーセットに含まれ、別のユーザーセットには含まれないユーザー。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.3.1。</dd>
+  <dt id="expand">Expand</dt>
+  <dd>書き換えルールをたどり、⟨<em>object#relation</em>⟩ の実効的なユーザーセットを木として返す API 呼び出し。葉はユーザー ID またはユーザーセット、中間ノードは和集合、積集合、除外である。詳細: <a href="../relation-tuples/#read-と-expand">リレーションタプル</a>、§2.4.5。</dd>
+  <dt id="external-consistency">外部一貫性 (external consistency)</dt>
+  <dd>更新 x が更新 y より前に起きたなら、2 つがシステムの外で調整された場合でも、x には y より小さいタイムスタンプが付く。Zanzibar はこれを Spanner から得ている。論文はこの用語の出典として Gifford の 1981 年のスタンフォード大学の博士論文を挙げている (参考文献 [18])。<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner</a> はこれを「T1 が T2 の開始前にコミットするなら、T1 のコミットタイムスタンプは T2 のものより小さい」と述べている。詳細: <a href="../consistency/">一貫性</a>、§2.2。</dd>
+  <dt id="fan-out">ファンアウト (fan-out)</dt>
+  <dd>1 つのリクエストが多数のサブリクエストに分かれること。たとえば aclserver が Check の一部をクラスタ内の他のサーバーに送る場合である。詳細: <a href="../architecture/">アーキテクチャ</a>、§3、§3.2.5。</dd>
+  <dt id="heartbeat-zookie">ハートビート zookie (heartbeat zookie)</dt>
+  <dd>各 Watch レスポンスに含まれ、ストリームがどこまで進んだかを示す zookie。クライアントはそこから再開できる。詳細: §2.4.3。</dd>
+  <dt id="hedging">ヘッジ (hedging)</dt>
+  <dd>最初のサーバーが遅いとわかった時点で同じリクエストを 2 台目のサーバーに送り、先に届いた応答を使って、もう一方をキャンセルすること。Zanzibar がヘッジするのは Spanner と Leopard への呼び出しであり、自身のサーバー間の呼び出しではない。この技法は Dean と Barroso の <a href="https://research.google/pubs/the-tail-at-scale/">「The Tail at Scale」</a> (CACM、2013) で説明されている。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.2.7。</dd>
+  <dt id="hot-spot">ホットスポット (hot spot)</dt>
+  <dd>他よりはるかに多くのトラフィックを受け、それを格納するサーバーを過負荷にしうるキー、オブジェクト、グループ。たとえば多くの ACL で共有される人気のグループである。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.2.5。</dd>
+</dl>
+
+## I–N
+
+<dl>
+  <dt id="intersection">積集合 (intersection)</dt>
+  <dd>書き換えルールの演算子。複数のユーザーセットのすべてに含まれるユーザー。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.3.1。</dd>
+  <dt id="leopard">Leopard</dt>
+  <dd>深く入れ子になったグループや非常に大きいグループのためのインデックスシステム。グループメンバーシップを整数の集合に平坦化してメンバーシップチェックを集合の積に変え、Watch によって最新の状態を保つ。詳細: <a href="../leopard/">Leopard</a>、§3.2.4。</dd>
+  <dt id="lock-table">ロックテーブル (lock table)</dt>
+  <dd>処理中の読み取りとチェックを記録する、サーバーごとの表。キャッシュキーを共有するリクエストのうち実行されるのは 1 つだけで、残りはその結果を待つ。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.2.5。</dd>
+  <dt id="lock-tuple">ロックタプル (lock tuple)</dt>
+  <dd>クライアントがオブジェクトへの書き込みのたびに touch する通常のリレーションタプル。これにより、読み取り以降に誰も書き込んでいないことを条件に書き込みを行える。詳細: §2.4.2。</dd>
+  <dt id="namespace">名前空間 (namespace)</dt>
+  <dd>クライアントが定義するオブジェクトの種類。<code>doc</code> や <code>folder</code> など。<code>doc:readme</code> のコロンより前の部分である。各名前空間のタプルはそれぞれ専用のデータベースに置かれる。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.1、§2.3、§3.1.1。</dd>
+  <dt id="namespace-config">名前空間設定 (namespace config)</dt>
+  <dd>1 つの名前空間の設定。その関係 (それぞれに省略可能なユーザーセット書き換えルールが付く) と、シャーディングなどのストレージパラメータから成る。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.3、§3.1.3。</dd>
+  <dt id="new-enemy-problem">「new enemy」問題 (new enemy problem)</dt>
+  <dd>ACL から削除された人に内容を見せてしまうこと。チェックが 2 つの ACL 変更の順序を無視したり、内容より古い ACL を適用したりすると起きる。詳細: <a href="../consistency/">一貫性</a>、§2.2。</dd>
+</dl>
+
+## O–R
+
+<dl>
+  <dt id="object">オブジェクト (object)</dt>
+  <dd>保護される対象。⟨<em>namespace</em>⟩:⟨<em>object_id</em>⟩ と書き、たとえば <code>doc:readme</code> である。詳細: <a href="../relation-tuples/#文法">リレーションタプル</a>、§2.1。</dd>
+  <dt id="paxos">Paxos</dt>
+  <dd>一部のレプリカが故障しても、レプリカのグループが各書き込みに合意できるようにする合意プロトコル。論文では、Paxos トランザクションが速くコミットするよう、Zanzibar のストレージの 5 つの投票レプリカを互いに 25 ms 以内の距離に置いている。Lamport の <a href="https://lamport.azurewebsites.net/pubs/paxos-simple.pdf">「Paxos Made Simple」</a> (2001) を参照。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.1.4。</dd>
+  <dt id="pointer-chasing">ポインタ追跡 (pointer chasing)</dt>
+  <dd>ユーザーセットを 1 ホップずつたどって Check に答えること。readme の閲覧者から <code>group:eng#member</code> へ、次にそのグループのメンバーへ、という具合である。グループが深いか大きいと遅くなる。詳細: <a href="../relation-tuples/#グラフ探索としての-check">リレーションタプル</a>、<a href="../leopard/">Leopard</a>、§3.2.3、§3.2.4。</dd>
+  <dt id="read">Read</dt>
+  <dd>1 つ以上のタプルセットにマッチする格納済みのタプルを返す API 呼び出し。書き換えルールは適用しない。詳細: <a href="../relation-tuples/#read-と-expand">リレーションタプル</a>、§2.4.1。</dd>
+  <dt id="recent-request">Recent リクエスト (Recent request)</dt>
+  <dd><a href="#safe-and-recent-requests">Safe / Recent リクエスト</a> を参照。詳細: <a href="../consistency/">一貫性</a>、§4.1。</dd>
+  <dt id="relation">関係 (relation)</dt>
+  <dd>オブジェクトとユーザーの間、または 2 つのオブジェクトの間 (<code>parent</code> がドキュメントをそのフォルダに結ぶように) の名前付きの関係。<code>owner</code>、<code>viewer</code>、<code>member</code>、<code>parent</code> など。名前空間設定で定義する。詳細: <a href="../relation-tuples/#文法">リレーションタプル</a>、§2.1、§2.3。</dd>
+  <dt id="relation-tuple">リレーションタプル (relation tuple)</dt>
+  <dd>格納された 1 つの事実。⟨<em>object</em>⟩#⟨<em>relation</em>⟩@⟨<em>user</em>⟩ と書き、たとえば <code>doc:readme#owner@user:anne</code> である。Zanzibar が格納する権限データはこれだけである。詳細: <a href="../relation-tuples/">リレーションタプル</a>、§2.1。</dd>
+  <dt id="replica">レプリカ (replica)</dt>
+  <dd>ある場所に置かれたデータのコピー。Zanzibar のデータは数十の場所に複製されており、ほとんどの読み取りを近くで処理できる。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.1.4。</dd>
+</dl>
+
+## S
+
+<dl>
+  <dt id="safe-and-recent-requests">Safe / Recent リクエスト (Safe / Recent requests)</dt>
+  <dd>論文による、zookie の古さに基づくリクエストの分類。Safe リクエストは 10 秒より古い zookie を持ち、通常はリージョン内で処理できる。Recent リクエストはそれより新しい zookie を持ち、しばしばリージョンをまたぐラウンドトリップを必要とする。詳細: <a href="../consistency/">一貫性</a>、§4.1。</dd>
+  <dt id="shard">シャード (shard)</dt>
+  <dd>別々に格納・提供される、データベースやインデックスの一部分。タプルのシャード ID は通常オブジェクト ID から決まり、非常に大きいグループではオブジェクト ID とユーザーから決まる。詳細: <a href="../architecture/">アーキテクチャ</a>、§3.1.1、§3.2.4。</dd>
+  <dt id="snapshot-read">スナップショット読み取り (snapshot read)</dt>
+  <dd>ある 1 つのタイムスタンプ時点のデータベースをそのまま見る読み取り。そのタイムスタンプ以前のすべての書き込みが見え、それより後の書き込みは見えない。Zanzibar は各 Check を単一のスナップショットで評価する。Spanner はこれを "a read in the past that executes without locking" (ロックをとらずに実行される過去の時点の読み取り) と定義している (<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner の論文</a>、§4.1)。詳細: <a href="../consistency/">一貫性</a>、§2.2。</dd>
+  <dt id="spanner">Spanner</dt>
+  <dd>Google のグローバル分散データベース。Zanzibar はタプル、名前空間設定、変更ログをこれに格納し、一貫性をそのタイムスタンプに依存している。<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Corbett ら、OSDI 2012</a> で説明されている。詳細: <a href="../consistency/">一貫性</a>、<a href="../architecture/">アーキテクチャ</a>、§2.2、§3。</dd>
+</dl>
+
+## T
+
+<dl>
+  <dt id="tail-latency">テールレイテンシ (tail latency)</dt>
+  <dd>99 パーセンタイルや 99.9 パーセンタイルのような、最も遅いリクエストのレイテンシ。検索結果の 1 ページに数十から数百のチェックが必要になりうるため重要である。Dean と Barroso の <a href="https://research.google/pubs/the-tail-at-scale/">「The Tail at Scale」</a> (CACM、2013) を参照。詳細: <a href="../architecture/#遅い-spanner-読み取りはヘッジされる">アーキテクチャ</a>、§1、§3.2.7、§4.2、§4.5。</dd>
+  <dt id="this"><code>_this</code></dt>
+  <dd>このオブジェクトと関係について、格納されたタプル中のユーザーを返す書き換えルールの葉。それらのタプルが指すユーザーセットも含む。関係にルールがない場合のデフォルトである。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.3.1。</dd>
+  <dt id="timestamp-quantization">タイムスタンプの量子化 (timestamp quantization)</dt>
+  <dd>評価タイムスタンプを 1 秒や 10 秒といった粗い単位に切り上げ、多数のリクエストがタイムスタンプ、ひいてはキャッシュエントリを共有できるようにすること。一貫性は弱まらない。zookie は下限を決めるだけであり、将来のタイムスタンプでの Spanner のスナップショット読み取りは TrueTime がそれを過ぎるまで待つからである (§3.2.5)。詳細: <a href="../architecture/">アーキテクチャ</a>、<a href="../consistency/">一貫性</a>、§2.2、§3.2.5。</dd>
+  <dt id="truetime">TrueTime</dt>
+  <dd>Spanner の時刻機構。各書き込みに、因果的順序を反映したマイクロ秒分解能のタイムスタンプを与える。これによって Zanzibar のタイムスタンプが意味を持つ。<code>TT.now()</code> は真の時刻を含むことが保証された区間を返す。<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner の論文</a> (OSDI 2012) の §3 を参照。詳細: <a href="../consistency/">一貫性</a>、§2.2、§3.2.5。</dd>
+  <dt id="tupleset">タプルセット (tupleset)</dt>
+  <dd>格納されたタプルを選ぶ指定。単一のタプルキー、またはあるオブジェクト ID やユーザーセットに対するすべてのタプルであり、1 つの関係に絞り込むこともできる。Read と <code>tuple_to_userset</code> で使われる。詳細: <a href="../relation-tuples/#read-と-expand">リレーションタプル</a>、§2.4.1。</dd>
+  <dt id="tuple-to-userset"><code>tuple_to_userset</code></dt>
+  <dd>オブジェクトのタプルをいくつか読み、それぞれからユーザーセットを計算する書き換えルールの葉。たとえば「readme の親フォルダを調べ、その閲覧者を取る」。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.3.1。</dd>
+</dl>
+
+## U–W
+
+<dl>
+  <dt id="union">和集合 (union)</dt>
+  <dd>書き換えルールの演算子。複数のユーザーセットのいずれかに含まれるユーザー。論文の図 1 の <code>viewer</code> の 3 つの分岐はすべて和集合で結ばれている。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.3.1。</dd>
+  <dt id="user">ユーザー (user)</dt>
+  <dd>タプルの 3 番目の部分。単一のユーザー ID かユーザーセットのどちらかである。詳細: <a href="../relation-tuples/#文法">リレーションタプル</a>、§2.1。</dd>
+  <dt id="userset">ユーザーセット (userset)</dt>
+  <dd>そのオブジェクトに対してその関係を持つすべてのユーザーを表す ⟨<em>object</em>⟩#⟨<em>relation</em>⟩ のペア。たとえば <code>group:eng#member</code>。これにより、タプルがグループにアクセスを付与でき、グループがグループを含むことができる。詳細: <a href="../relation-tuples/#ユーザーセットグループを指すタプル">リレーションタプル</a>、§2.1。</dd>
+  <dt id="userset-rewrite-rule">ユーザーセット書き換えルール (userset rewrite rule)</dt>
+  <dd>リレーション設定の一部。オブジェクト ID からユーザーセット式の木への関数であり、<code>_this</code>、<code>computed_userset</code>、<code>tuple_to_userset</code> を和集合、積集合、除外で組み合わせて作る。詳細: <a href="../relation-tuples/#名前空間の設定">リレーションタプル</a>、§2.3.1。</dd>
+  <dt id="userset-tree">ユーザーセット木 (userset tree)</dt>
+  <dd>Expand の結果。葉はユーザー ID またはユーザーセット、中間ノードは集合演算子である。詳細: <a href="../relation-tuples/#read-と-expand">リレーションタプル</a>、§2.4.5。</dd>
+  <dt id="watch">Watch</dt>
+  <dd>1 つ以上の名前空間のタプル変更を、zookie を起点にタイムスタンプ順でストリームする API 呼び出し。Leopard のようなセカンダリインデックスを最新に保つために使われる。詳細: <a href="../architecture/#watch-の経路">アーキテクチャ</a>、§2.4.3。</dd>
+  <dt id="watchserver">watchserver</dt>
+  <dd>変更ログを追いかけて Watch に応答するサーバーの種類。詳細: <a href="../architecture/">アーキテクチャ</a>、§3。</dd>
+  <dt id="write">Write</dt>
+  <dd>タプルを追加・削除する API 呼び出し。オブジェクトのすべてのタプルを書き換えるクライアントは、読み取りの後、ロックタプルが変わっていないことを条件とする書き込みを行う。詳細: <a href="../architecture/#watch-の経路">アーキテクチャ</a> (1 回の書き込みが触れるもの)、§2.4.2。</dd>
+</dl>
+
+## Z
+
+<dl>
+  <dt id="zookie">zookie</dt>
+  <dd>タイムスタンプをエンコードした不透明なトークン。クライアントはコンテンツ変更チェックから zookie を受け取り (Read と Write のレスポンスも zookie を含む)、それを内容とともに格納し、後続のチェックで送る。これにより、それらのチェックは少なくともそれと同じだけ新しいスナップショットで評価される。詳細: <a href="../consistency/">一貫性</a>、§2.2、§2.4。</dd>
+</dl>
+
+## 出典
+
+- J. C. Corbett et al., "Spanner: Google's Globally-Distributed Database", OSDI '12, [PDF](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
+- D. Karger et al., "Consistent Hashing and Random Trees", STOC '97, [PDF](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- J. Dean and L. A. Barroso, "The Tail at Scale", CACM 56(2), 2013, [research.google](https://research.google/pubs/the-tail-at-scale/)
+- L. Lamport, "Paxos Made Simple", ACM SIGACT News 32(4), 2001, [PDF](https://lamport.azurewebsites.net/pubs/paxos-simple.pdf)
+- D. K. Gifford, "Information Storage in a Decentralized Computer System", PhD thesis, Stanford University, 1981 (論文の参考文献 [18]。オンライン版は確認していない)
+- "Cache stampede", Wikipedia, [en.wikipedia.org](https://en.wikipedia.org/wiki/Cache_stampede) (論文が引用している出典)
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

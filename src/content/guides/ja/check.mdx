@@ -1,0 +1,279 @@
+---
+title: "1 回の Check の内側"
+description: "Zanzibar が 1 回の Check を部分問題の木に変え、葉を同時に評価し、早期に打ち切り、スナップショットごとに得た結果をキャッシュする仕組みと、深さの上限のように論文にはなく製品が追加しているもの。"
+section: guide
+part: mechanisms
+order: 6
+checked: "2026-11-13"
+paper: ["3.2.3", "3.2.4", "3.2.5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Check が問うのは 1 つのこと、すなわち、このスナップショットにおいてこのユーザーはこのユーザーセットに含まれるか、である。これに答えるには、複数のサーバーにまたがる数十回の読み取りが必要になることがある。このページでは 1 回の Check を内側から追う。Check が変換されるブール式、その各部分が実行される順序、早期に打ち切れる条件、キャッシュに残すもの、そして打ち切る場所である。
+
+隣接する内容は他の 2 つのページが扱う。[リレーションタプルとユーザーセット](../relation-tuples/#グラフ探索としての-check) は同じ問いを、グラフ探索として 1 つの枝ずつたどる。[アーキテクチャ](../architecture/#1-つの-check-を順に追う) はサーバー間をまたぐリクエストを追う。コンシステントハッシュ、キャッシュの木、ロックテーブル、読み取りのプーリング、ヘッジである。このページは評価の内側にとどまる。
+
+## Check はブール式である
+
+論文は書き換えルールのない場合から始める。"Zanzibar evaluates ACL checks by converting check requests to boolean expressions" (Zanzibar はチェックリクエストをブール式に変換することで ACL チェックを評価する) (§3.2.3)。ユーザー `U` とユーザーセット ⟨*object#relation*⟩ について、論文の式は次のとおりである。
+
+```text
+CHECK(U, ⟨object#relation⟩) =   ∃ tuple ⟨object#relation@U⟩
+                              ∨ ∃ tuple ⟨object#relation@U′⟩, where
+                                U′ = ⟨object′#relation′⟩ s.t. CHECK(U, U′)
+```
+
+1 行目は直接のヒットである。格納されたタプルがそのユーザーを指している。2 行目は再帰である。格納されたタプルが別のユーザーセットを指しており、ユーザーがそちらに含まれている。論文はこうした参照をたどることを「pointer chasing」(ポインタ追跡) と呼び、それが "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide" (ほとんどの種類の ACL やグループではうまく機能するが、間接 ACL やグループが深い場合や広い場合にはコストが高くなりうる) と述べている (§3.2.3)。書き換えルールも同じ式に加わる。"Userset rewrite rules are also translated to boolean expressions as part of check evaluation." (ユーザーセット書き換えルールも、チェック評価の一部としてブール式に変換される。)
+
+論文の図 1 にある `doc` の設定を例にとる (§2.3.1)。`viewer` は、自身のタプル、`editor`、親フォルダの閲覧者の和集合である。`editor` は、自身のタプルと `owner` の和集合である。他のページと同様に `folder#viewer` には書き換えルールがないと仮定し、Chen と readme について書き下すと次のようになる。
+
+```text
+viewer(readme, chen) =   this(readme#viewer, chen)
+                       ∨ editor(readme, chen)
+                       ∨ ∃ parent tuple readme#parent@folder:X : viewer(folder:X, chen)
+
+editor(readme, chen) =   this(readme#editor, chen)
+                       ∨ this(readme#owner, chen)
+```
+
+各 `this(…)` はタプルの検索であり、各 `∨` は木のノードである。「Chen は `doc:readme` を閲覧できるか」はどのような部分問題に分かれるのか。
+
+<Graph
+  width={640}
+  height={380}
+  minWidth={540}
+  title="1 回の Check の部分問題の木"
+  desc="1: doc:readme#viewer は OR ノードで、3 つの子を持つ。2: _this、readme の viewer タプル。3: editor は OR ノードで、2 つの子 4a: readme の editor タプルと 4b: owner、readme の owner タプルを持つ。5: parent に対する tuple_to_userset。6 で readme の parent タプルを読んで folder:A を見つけ、7 で Chen が folder:A#viewer に含まれるかを問う。ステップ 7 は真であり、強調された経路 1、5、6、7 が yes と答える。"
+  nodes={[
+    { id: "root", x: 320, y: 40, label: "① doc:readme#viewer\nOR", kind: "group", on: true },
+    { id: "this", x: 90, y: 140, label: "② _this\nviewer タプル", kind: "object" },
+    { id: "ed", x: 270, y: 140, label: "③ editor\nOR", kind: "group" },
+    { id: "ttu", x: 520, y: 140, label: "⑤ tuple_to_userset\nparent → viewer", kind: "group", on: true },
+    { id: "edthis", x: 180, y: 250, label: "④a _this\neditor タプル", kind: "object" },
+    { id: "owner", x: 355, y: 250, label: "④b owner\nowner タプル", kind: "object" },
+    { id: "par", x: 520, y: 250, label: "⑥ readme#parent を読む\n→ folder:A", kind: "object", on: true },
+    { id: "fold", x: 520, y: 340, label: "⑦ folder:A#viewer\n@user:chen: 真", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "root", to: "this" },
+    { from: "root", to: "ed" },
+    { from: "root", to: "ttu", on: true },
+    { from: "ed", to: "edthis" },
+    { from: "ed", to: "owner" },
+    { from: "ttu", to: "par", on: true },
+    { from: "par", to: "fold", label: "新しい部分チェック", on: true },
+  ]}
+  caption="Check(user:chen, viewer, doc:readme)。破線の箱は演算子、通常の箱はタプルの読み取りである。Chen に到達するのは枝 ⑤ だけである。"
+/>
+
+番号は部分問題の名前であり、順序ではないことに注意されたい。葉 ②、④a、④b、⑥ が必要とするのは readme 自身のタプルだけである。論文が転送をオブジェクトをキーにして行うのはこのためであり (§3.2.5)、これらはすべて `doc:readme` を受け持つサーバーが答えられる。ステップ ⑦ は別のオブジェクトに対する新しい Check なので、`folder:A` を受け持つサーバーに転送される。それ自体も木であり、ここでは 1 回の `_this` 検索である。
+
+## すべての葉を同時に、そしてキャンセル
+
+葉はどの順序で実行されるのか。論文は木を順にたどらない。"To minimize check latency, we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled." (チェックのレイテンシを最小化するため、ブール式の木のすべての葉ノードを並行に評価する。あるノードの結果が部分木の結果を決定した場合、その部分木の他のノードの評価はキャンセルされる。) (§3.2.3)
+
+Chen のチェックでは、これは時間とともにどう見えるか。
+
+<Swimlane
+  lanes={["① viewer (OR)", "② viewer タプル", "③④ editor, owner", "⑤⑥⑦ 親フォルダ"]}
+  laneWidth={138}
+  rowHeight={60}
+  timeLabel="時間"
+  title="葉は並行に実行され、決まった OR は残りをキャンセルする"
+  desc="開始時、根はすべての葉を一斉に開始する。readme の viewer タプル、editor タプルと owner タプル、parent タプルの読み取りである。viewer タプルは Chen を含まずに返ってくるので、その葉は偽である。parent の読み取りは folder:A を見つけ、folder:A#viewer に対する部分チェックが送られる。editor と owner の読み取りが終わる前に、フォルダの部分チェックが真を返す。根の OR は真に決まって応答し、editor と owner の読み取りをキャンセルする。"
+  events={[
+    { lane: 0, t: 0, label: "全葉を開始", kind: "note" },
+    { lane: 1, t: 0, label: "タプルを読む", kind: "read" },
+    { lane: 2, t: 0, label: "タプルを読む", kind: "read" },
+    { lane: 3, t: 0, label: "parent を読む", kind: "read" },
+    { lane: 1, t: 1, label: "Chen なし: 偽", kind: "note" },
+    { lane: 3, t: 1, label: "folder:A →\n部分チェック", kind: "read", mono: true },
+    { lane: 2, t: 2, label: "読み取り中", kind: "note" },
+    { lane: 3, t: 2, label: "Chen は\n閲覧者: 真", kind: "good" },
+    { lane: 0, t: 3, label: "決定: 真", kind: "good" },
+    { lane: 2, t: 3, label: "キャンセル", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [1, 1], to: [0, 1], label: "偽", dashed: true },
+    { from: [3, 2], to: [0, 3], label: "真" },
+    { from: [0, 3], to: [2, 3], label: "キャンセル", dashed: true },
+  ]}
+  caption="真の子が 1 つあれば OR は決まる。② の偽の答えは何も変えず、⑦ の真の答えが木全体を終わらせる。"
+/>
+
+レイテンシを決めるのは決定的な答えに至る最も速い経路であり、最も遅い葉ではないことに注意されたい。もし親の枝が遅く、Chen が閲覧者でなかったならば、根はすべての子が偽と答えるのを待たなければならなかった。
+
+キャンセルは作業を節約するが、隙間も残す。キャンセルされた部分チェックは結果をキャッシュに書き込まず、他のリクエストが [ロックテーブル](../architecture/#ロックテーブルが同一のリクエストをまとめる) でその結果を待っているかもしれない。論文はまさにこの問題に遭遇した。"indirect ACL checks are frequently cancelled when the result of the parent ACL check is already determined. This leaves the cache key unpopulated." (親の ACL チェックの結果がすでに決まっている場合、間接 ACL チェックは頻繁にキャンセルされる。これによりキャッシュキーが埋まらないまま残る。) その対策は "we delay eager cancellation when there are waiters on the corresponding lock table entry" (対応するロックテーブルのエントリに待機者がいる場合には積極的なキャンセルを遅らせる) である (§3.2.5)。
+
+## 各演算子はいつ早期に打ち切れるか
+
+論文は部分式の組み合わせ方として "union, intersection, and exclusion" (和集合、積集合、除外) の 3 つを挙げ (§2.3.1)、そのすべてに対して 1 つのキャンセル規則を述べている。部分木がいつ「決定」されるかは演算子によって異なる。それぞれ、どの答えが 1 つあれば十分なのか。
+
+<Frames min="12rem">
+
+<Graph
+  width={300}
+  height={210}
+  title="和集合は最初の真で止まる"
+  desc="子 A と B を持つ和集合ノード。B が先に真と答え、和集合が真に決まるので、A はキャンセルされる。"
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∪ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A: 実行中\n→ キャンセル", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B: 真", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "決定", on: true },
+  ]}
+  caption="和集合：真が 1 つあれば十分。偽にはすべての子が必要。"
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="積集合は最初の偽で止まる"
+  desc="子 A と B を持つ積集合ノード。B が先に偽と答え、積集合が偽に決まるので、A はキャンセルされる。"
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∩ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A: 実行中\n→ キャンセル", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B: 偽", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "決定", on: true },
+  ]}
+  caption="積集合：偽が 1 つあれば十分。真にはすべての子が必要。"
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="除外は基底が偽か除外側が真で止まる"
+  desc="除外ノード A マイナス B。除外側 B が先に真と答え、除外が偽に決まるので、基底 A はキャンセルされる。基底が偽であっても決まる。"
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A − B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A (基底):\n実行中\n→ キャンセル", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B (除外側):\n真", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "決定", on: true },
+  ]}
+  caption="除外：基底が偽か、除外側が真であれば十分。真には両方の答えが必要。"
+/>
+
+</Frames>
+
+非対称性に注意されたい。各演算子には、早く届きうる答えと、すべての子を必要とする答えが 1 つずつある。和集合では早く届く答えは *yes* であり、積集合と除外では *no* である。したがって和集合で書かれた権限は最も速い経路と同じ速さで「許可」と答えるが、積集合や除外を含む権限は、必要な部分のうち最も遅いものと同じ速さでしか「許可」と答えられない。表にまとめると次のようになる。
+
+| 演算子 | 早期に決まる条件 | すべての子に求められる答え |
+| --- | --- | --- |
+| 和集合 `A ∪ B` | いずれかの子が真 → 真 | 偽 (偽と答えるため) |
+| 積集合 `A ∩ B` | いずれかの子が偽 → 偽 | 真 (真と答えるため) |
+| 除外 `A − B` | 基底が偽、または除外側が真 → 偽 | 基底が真かつ除外側が偽 (真と答えるため) |
+
+製品も同じ論理に従う。OpenFGA の [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go) (v1.22.1) では、和集合のリデューサーは最初の許可の結果で返り ("Short-circuit success")、積集合のリデューサーは最初の不許可の結果で返り ("Short-circuit failure")、除外のリデューサーは基底と差し引く側を並行に実行し、"base is false" のときか "subtract is true" のときに不許可を返す。積集合と除外についての AuthZed の記事 ([2022-03-03](https://authzed.com/blog/check-it-out-2)) は、これらの演算子について "SpiceDB can only partially short-circuit the subproblems" (SpiceDB は部分問題を部分的にしか短絡できない) と述べ、その例では積集合の一方の枝が no と答えた時点で "SpiceDB was able to cancel the other `check` immediately" (SpiceDB はもう一方の `check` を即座にキャンセルできた)。和集合については、それ以前の記事 ([2021-03-17](https://authzed.com/blog/check-it-out)) が簡潔に "any path found suffices to grant permission!" (見つかった経路のどれか 1 つで権限の付与に十分である) と書いている。
+
+## スナップショットごとに部分結果をキャッシュする
+
+木の各ノードは答えを持つ問いであり、論文はそのすべてをキャッシュする。サーバー群は "form a distributed cache for both reads and check evaluations, including intermediate check results evaluated during pointer chasing" (読み取りとチェック評価の両方について分散キャッシュを形成する。これにはポインタ追跡中に評価された中間的なチェック結果も含まれる) (§3.2.5)。上のステップ ⑦「Chen は `folder:A#viewer` に含まれるか」はそのような中間結果である。後で同じ問いに到達したチェックは、それを再利用できる。
+
+再利用を安全にしているのは何か。結果は *あるスナップショットにおいて* のみ正しい。論文はスナップショットをキーに含める。"We avoid reusing results evaluated from a different snapshot by encoding snapshot timestamps in cache keys." (キャッシュキーにスナップショットのタイムスタンプをエンコードすることで、異なるスナップショットから評価された結果を再利用することを避ける。) さらに評価タイムスタンプを "to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies" (リクエストの zookie による古さの制約を尊重しつつ、1 秒や 10 秒といった粗い粒度に) 切り上げ、大半のチェックが少数の同じタイムスタンプに集まるようにしている (§3.2.5。切り上げは [一貫性のページ](../consistency/#ちょうどその時点ではなく少なくとも同じだけ新しい理由) に図示してある)。
+
+キャッシュされた部分結果が役立つのはいつで、ミスになるのはいつか。
+
+<Graph
+  width={640}
+  height={300}
+  minWidth={540}
+  title="部分結果はスナップショットごとにキャッシュされる"
+  desc="T=13 s で評価された readme に対する Chen のチェックは、部分結果 folder:A#viewer@user:chen を 13 s、真として格納する。同じ時間枠にあり同じく 13 s に切り上げられた 2 回目のチェックは、そのエントリにヒットする。次の境界を越えて T=14 s で評価された 3 回目のチェックは別のキーを使うのでミスとなり、Spanner からフォルダのタプルを再び読む。"
+  nodes={[
+    { id: "c1", x: 95, y: 50, label: "Chen のチェック\nT = 13 s", kind: "client" },
+    { id: "c2", x: 95, y: 145, label: "同じチェック、\n0.4 s 後\nT = 13 s", kind: "client" },
+    { id: "c3", x: 95, y: 250, label: "同じチェック、\n1.2 s 後\nT = 14 s", kind: "client" },
+    { id: "k13", x: 350, y: 95, label: "key: folder:A#viewer\n@user:chen @ 13 s\n= true", kind: "server", mono: true, on: true },
+    { id: "k14", x: 350, y: 250, label: "key: … @ 14 s\n(未キャッシュ)", kind: "server", mono: true },
+    { id: "db", x: 565, y: 250, label: "フォルダのタプル\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "c1", to: "k13", label: "格納" },
+    { from: "c2", to: "k13", label: "ヒット", on: true },
+    { from: "c3", to: "k14", label: "ミス" },
+    { from: "k14", to: "db", label: "14 s で読む" },
+  ]}
+  caption="13 s のエントリは無効化されることがなく、14 s で再利用されることもない。タイムスタンプは説明のためのものである。"
+/>
+
+無効化の手順がないことに注意されたい。スナップショットをキーとするエントリが誤りになることはない。13 s 時点のデータは決して変わらないからである。評価がより後のタイムスタンプに移れば、そのエントリは単に問い合わせられなくなる。SpiceDB における同じ仕組みについての AuthZed の記事 ([2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)) も同じ考えを述べている。"For any given problem or sub-problem, at a specified time, the result to the check is immutable" (任意の問題または部分問題について、指定された時刻におけるチェックの結果は不変である)、そして "if we were to change the evaluation timestamp, the cache keys would change as well" (評価タイムスタンプを変えれば、キャッシュキーも変わる)。
+
+このキャッシュの周りには §3.2.5 の仕組みがさらに 2 つあり、どちらもアーキテクチャのページに図示してある。"at both the caller and the callee of internal RPCs" (内部 RPC の呼び出し側と呼び出される側の両方で) キャッシュすることで形成される [キャッシュの木](../architecture/#呼び出しの両端が答えをキャッシュする) と、"Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated." (同じキャッシュキーを共有するリクエストのうち、処理を開始するのは 1 つのリクエストだけであり、残りはキャッシュが埋まるまでブロックされる。) という [ロックテーブル](../architecture/#ロックテーブルが同一のリクエストをまとめる) である。
+
+製品では次のとおりである。
+
+- SpiceDB はリビジョンを `--datastore-revision-quantization-interval` (デフォルト `5s`) で設定される時間枠に丸め ([`dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go)、v1.57.1)、ディスパッチャーを [`singleflight`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go) 層で包んでいる。この層は "dispatch requests that were single flighted" を数えており、ロックテーブルの役割を果たす。
+- OpenFGA のチェックキャッシュはデフォルトで無効である (`checkQueryCache.enabled` は `false`、有効時の TTL は `10s`) ([configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration))。そのエントリはスナップショットに属するのではなく TTL で期限切れになる。OpenFGA がキャッシュを迂回するための `HIGHER_CONSISTENCY` モードを必要とするのはこのためである ([consistency](https://openfga.dev/docs/interacting/consistency)。[TrueTime なしの順序付け](../without-truetime/) を参照)。
+
+## 読み取りはチェックごとにプールされる
+
+葉 ②、④a、④b、⑥ はすべて `doc:readme` の行を読む。各読み取りを個別に送る代わりに、"We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner" (同じ ACL チェックのための読み取りをまとめるプーリング機構を適用し、Spanner への読み取り RPC の数を最小化する) (§3.2.3)。論文はこの 1 文以上に機構を説明していない。[アーキテクチャのページ](../architecture/#spanner-への読み取りはプールされる) は 4 つの読み取りが 1 つのサーバーに集まる様子を図示している。それらを隣接する行に対する範囲読み取りにできるのは、オブジェクトと関係でソートされたストレージのレイアウト (§3.1.1) による。
+
+## どこまで深くなりうるか
+
+`CHECK(U, U′)` の再帰には組み込みの上限がない。グループはグループを含むグループを含むことができ、データモデルには循環を禁じるものが何もない。チェックが循環に出会うと何が起きるのか。
+
+<Graph
+  width={640}
+  height={290}
+  minWidth={540}
+  title="入れ子のグループの循環"
+  desc="仮の設定ミス：group:all#member が group:eng#member を含み、group:eng#member が group:all#member を含む。doc:readme#viewer に対する Anne のチェックは group:eng#member に到達し、次に group:all#member、再び group:eng#member と続く。SpiceDB は深さの上限 50 までディスパッチを続けてエラーを返す。OpenFGA は訪問したタプルキーを記録し、繰り返しを検出してその枝を不許可として扱う。それとは別に、深さ 25 でエラーになる。"
+  nodes={[
+    { id: "doc", x: 90, y: 60, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "eng", x: 320, y: 60, label: "group:eng#member", kind: "group", mono: true },
+    { id: "all", x: 320, y: 200, label: "group:all#member", kind: "group", mono: true },
+    { id: "sdb", x: 540, y: 60, label: "SpiceDB: ホップ 50\n→ エラー", kind: "note" },
+    { id: "fga", x: 540, y: 200, label: "OpenFGA: 既出のキー\n→ 循環、\n不許可", kind: "note" },
+  ]}
+  edges={[
+    { from: "doc", to: "eng", label: "ホップ 1" },
+    { from: "eng", to: "all", label: "ホップ 2, 3, 4 …", dir: "both", on: true },
+    { from: "eng", to: "sdb", dashed: true },
+    { from: "all", to: "fga", dashed: true },
+  ]}
+  caption="2 つのグループタプルは仮のものであり、共通の例には含まれない。矢印はチェックが探索する方向を示す。"
+/>
+
+論文は数値を定めていない。深い入れ子と広い入れ子は、"selected namespaces that exhibit such structure" (そのような構造を示す選ばれた名前空間) に対して Leopard で処理する (§3.2.4。[Leopard のページ](../leopard/) を参照)。§5 は "safe pointer chasing despite potentially deep recursion (e.g. membership checks on hierarchical groups)" (潜在的に深い再帰 (たとえば階層的なグループのメンバーシップチェック) があっても安全なポインタ追跡) を主張しているが、何がそれを安全にしているのかはそれ以上述べていない。§3.2.6 のクライアントごとの制限は CPU と処理中の RPC に上限を設けるもので、深さに対するものではない。製品は明示的な上限を選んでいる。
+
+| システム | 上限 | デフォルト | 到達したとき | 出典 |
+| --- | --- | --- | --- | --- |
+| 論文 | 記載なし | なし | 記載なし | §3.2.4, §5 |
+| SpiceDB | `--dispatch-max-depth` | 50 | エラー："the check request has exceeded the allowable maximum depth of 50" | [Cyclical relationships and traversal limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), [`serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go) |
+| OpenFGA | `resolveNodeLimit` | 25 | エラー。循環は先に検出され、不許可と答える | [configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration), [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go) |
+| OpenFGA | `resolveNodeBreadthLimit` | 10 | "how many nodes on a given level can be evaluated concurrently" (ある階層で並行に評価できるノード数) に上限を設ける | [configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
+| Ory Keto | `limit.max_read_depth` | 5 | 全体の最大値。リクエストはこれを下げることしかできない | [`config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json) |
+
+SpiceDB のドキュメントによれば、SpiceDB には独立した循環検出器がない。循環は深さの上限に達するまで続き、非常に深い階層と同じエラーを返す。ドキュメントは、訪問済みのオブジェクトを追跡することをセマンティクスと性能上の理由で避けたと説明している ([recursion and max depth](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth))。OpenFGA の `LocalChecker` はリクエストごとに訪問済みのタプルキーの集合を保持し、キーが繰り返されると `CycleDetected` とともに不許可を返す ([`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go)、`hasCycle`)。どちらの上限も 1 つの経路に沿ったホップ数を数えるもので、これは最初の図の木の深さにあたる。これらのうち、論文の "evaluate all leaf nodes … concurrently" (すべての葉ノードを並行に評価する) を制限するのは `resolveNodeBreadthLimit` だけである。
+
+<Callout kind="note" title="未検証">
+
+本サイトの調査メモには、元 Google 社員が Hacker News で Zanzibar の最大再帰深さについて述べた記録が 1 件ある。その主張は論文になく、Google のどの資料とも照合していないため、このページでは Zanzibar の数値を挙げない。
+
+</Callout>
+
+## 出典
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.3.1, §3.1.1, §3.2.3, §3.2.4, §3.2.5, §3.2.6, §5.
+- AuthZed, [Check it out: How permissions are answered in SpiceDB and Authzed](https://authzed.com/blog/check-it-out), 2021-03-17 (ベンダーブログ)。
+- AuthZed, [Check it out #2: How intersections and exclusions are computed in SpiceDB and Authzed](https://authzed.com/blog/check-it-out-2), 2022-03-03 (ベンダーブログ)。
+- AuthZed, [Hotspot Caching in Google Zanzibar and SpiceDB](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb), 2023-05-10 (ベンダーブログ)。
+- AuthZed, [Cyclical Relationships and Traversal Limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), SpiceDB ドキュメント。
+- SpiceDB v1.57.1 のソース：[`pkg/cmd/serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go)、[`pkg/cmd/datastore/dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go)、[`internal/dispatch/singleflight/singleflight.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go)。
+- OpenFGA, [Configuring OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configuration) と [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency)。
+- OpenFGA v1.22.1 のソース：[`internal/graph/check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go)。
+- Ory Keto, [`.schema/config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json) (`limit.max_read_depth`)。

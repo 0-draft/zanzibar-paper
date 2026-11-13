@@ -1,16 +1,21 @@
 ---
-// A disclosure of plain links to every translation: works without JS and is
-// crawlable. reader.ts carries the current paragraph over as #hash on click.
-import { TRANSLATIONS } from "../i18n/langs.ts";
+// A disclosure of plain links to every language version of the current page:
+// works without JS and is crawlable. reader.ts carries the current paragraph
+// over as #hash on click (paper pages).
+import { LANGS, type Lang, TRANSLATIONS } from "../i18n/langs.ts";
 import { withBase } from "../lib/paths.ts";
 
 interface Props {
   current: string;
   label: string;
   class?: string;
+  /** Path of this page in another language, below the base. Default: the paper page. */
+  pathFor?: (code: string) => string;
+  /** Which languages to list. Default: the eight translations. */
+  langs?: readonly Lang[];
 }
-const { current, label, class: cls } = Astro.props;
-const cur = TRANSLATIONS.find((l) => l.code === current)!;
+const { current, label, class: cls, pathFor = (code: string) => `${code}/`, langs = TRANSLATIONS } = Astro.props;
+const cur = LANGS.find((l) => l.code === current)!;
 ---
 
 <details class:list={["langmenu", cls]}>
@@ -23,10 +28,10 @@ const cur = TRANSLATIONS.find((l) => l.code === current)!;
   </summary>
   <ul class="pop-panel langmenu-list">
     {
-      TRANSLATIONS.map((l) => (
+      langs.map((l) => (
         <li>
           <a
-            href={withBase(`${l.code}/`)}
+            href={withBase(pathFor(l.code))}
             hreflang={l.code}
             aria-current={l.code === current ? "page" : undefined}
             data-lang-link

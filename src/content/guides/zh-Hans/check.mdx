@@ -1,0 +1,279 @@
+---
+title: "一次 Check 的内部"
+description: "Zanzibar 如何把一次 Check 变成一棵子问题树，同时评估各叶节点，提前停止，把在某个快照上得到的结果缓存起来，以及产品补上了哪些论文没有涉及的东西，例如深度限制。"
+section: guide
+part: mechanisms
+order: 6
+checked: "2026-11-13"
+paper: ["3.2.3", "3.2.4", "3.2.5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Check 只问一个问题：在这个快照上，该用户是否属于该用户集。回答它可能需要几十次读取，分布在多台服务器上。本页从内部跟随一次 Check：它变成的布尔表达式、各部分执行的顺序、何时可以提前停止、在缓存中留下了什么，以及它在哪里放弃。
+
+另外两个页面涵盖相邻的内容。[关系元组与用户集](../relation-tuples/#把-check-看作图搜索)把同一个问题作为图搜索一次走一个分支。[架构](../architecture/#一次-check-的逐步过程)跟随请求跨越服务器：一致性哈希、缓存树、锁表、读取池化和对冲。本页只关注评估过程本身。
+
+## Check 是一个布尔表达式
+
+论文从没有重写规则的情形讲起："Zanzibar evaluates ACL checks by converting check requests to boolean expressions"（Zanzibar 通过把检查请求转换为布尔表达式来评估 ACL 检查）（§3.2.3）。对于用户 `U` 和用户集 ⟨*object#relation*⟩，论文的公式为：
+
+```text
+CHECK(U, ⟨object#relation⟩) =   ∃ tuple ⟨object#relation@U⟩
+                              ∨ ∃ tuple ⟨object#relation@U′⟩, where
+                                U′ = ⟨object′#relation′⟩ s.t. CHECK(U, U′)
+```
+
+第一行是直接命中：某个已存储的元组指名了该用户。第二行是递归：某个已存储的元组指向另一个用户集，而该用户属于那个用户集。论文把沿着这些引用前进称为“指针追逐”，并指出它 "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide"（对大多数类型的 ACL 和组都很有效，但当间接 ACL 或组很深或很宽时代价可能很高）（§3.2.3）。重写规则也并入同一个表达式："Userset rewrite rules are also translated to boolean expressions as part of check evaluation."（在检查评估过程中，用户集重写规则也会被转换为布尔表达式。）
+
+以论文图 1 中 `doc` 的配置为例（§2.3.1）。`viewer` 是其自身元组、`editor` 和父文件夹查看者的并集；`editor` 是其自身元组和 `owner` 的并集。针对 Chen 和 readme 展开写出，并像其他页面一样假定 `folder#viewer` 没有重写规则：
+
+```text
+viewer(readme, chen) =   this(readme#viewer, chen)
+                       ∨ editor(readme, chen)
+                       ∨ ∃ parent tuple readme#parent@folder:X : viewer(folder:X, chen)
+
+editor(readme, chen) =   this(readme#editor, chen)
+                       ∨ this(readme#owner, chen)
+```
+
+每个 `this(…)` 是一次元组查找，每个 `∨` 是树中的一个节点。“Chen 能否查看 `doc:readme`？”会拆分成哪些子问题？
+
+<Graph
+  width={640}
+  height={380}
+  minWidth={540}
+  title="一次 Check 的子问题树"
+  desc="1：doc:readme#viewer，一个 OR 节点，有三个子节点。2：_this，readme 的 viewer 元组。3：editor，一个 OR 节点，有两个子节点：4a，readme 的 editor 元组；4b，owner，readme 的 owner 元组。5：基于 parent 的 tuple_to_userset，其中 6 读取 readme 的 parent 元组并找到 folder:A，然后 7 询问 Chen 是否属于 folder:A#viewer。第 7 步为真，高亮路径 1、5、6、7 给出答案“是”。"
+  nodes={[
+    { id: "root", x: 320, y: 40, label: "① doc:readme#viewer\nOR", kind: "group", on: true },
+    { id: "this", x: 90, y: 140, label: "② _this\nviewer 元组", kind: "object" },
+    { id: "ed", x: 270, y: 140, label: "③ editor\nOR", kind: "group" },
+    { id: "ttu", x: 520, y: 140, label: "⑤ tuple_to_userset\nparent → viewer", kind: "group", on: true },
+    { id: "edthis", x: 180, y: 250, label: "④a _this\neditor 元组", kind: "object" },
+    { id: "owner", x: 355, y: 250, label: "④b owner\nowner 元组", kind: "object" },
+    { id: "par", x: 520, y: 250, label: "⑥ 读取 readme#parent\n→ folder:A", kind: "object", on: true },
+    { id: "fold", x: 520, y: 340, label: "⑦ folder:A#viewer\n@user:chen：真", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "root", to: "this" },
+    { from: "root", to: "ed" },
+    { from: "root", to: "ttu", on: true },
+    { from: "ed", to: "edthis" },
+    { from: "ed", to: "owner" },
+    { from: "ttu", to: "par", on: true },
+    { from: "par", to: "fold", label: "新的子检查", on: true },
+  ]}
+  caption="Check(user:chen, viewer, doc:readme)。虚线框是运算符，普通框是元组读取。只有分支 ⑤ 到达了 Chen。"
+/>
+
+注意，编号标识的是子问题，而不是顺序。叶节点 ②、④a、④b 和 ⑥ 只需要 readme 自身的元组，这正是论文以对象作为转发键的原因（§3.2.5）：它们都可以由负责 `doc:readme` 的服务器回答。第 ⑦ 步是针对另一个对象的新 Check，因此被转发到负责 `folder:A` 的服务器，而它本身也是一棵树，在这里只是一次 `_this` 查找。
+
+## 所有叶节点同时执行，以及取消
+
+叶节点按什么顺序执行？论文并不逐个遍历这棵树："To minimize check latency, we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled."（为尽量降低检查延迟，我们并发地评估布尔表达式树的所有叶节点。当某个节点的结果决定了子树的结果时，子树中其他节点的评估会被取消。）（§3.2.3）
+
+对于 Chen 的检查，这在时间上是什么样子？
+
+<Swimlane
+  lanes={["① viewer (OR)", "② viewer 元组", "③④ editor、owner", "⑤⑥⑦ 父文件夹"]}
+  laneWidth={138}
+  rowHeight={60}
+  timeLabel="时间"
+  title="叶节点并发执行；OR 一旦确定就取消其余部分"
+  desc="开始时，根节点同时启动所有叶节点：readme 的 viewer 元组、editor 和 owner 元组，以及 parent 元组。viewer 元组返回时不含 Chen，因此该叶节点为假。parent 读取找到 folder:A，并发出一次针对 folder:A#viewer 的子检查。在 editor 和 owner 的读取完成之前，文件夹子检查返回真。根节点 OR 此时确定为真，给出答案，并取消 editor 和 owner 的读取。"
+  events={[
+    { lane: 0, t: 0, label: "启动所有叶节点", kind: "note" },
+    { lane: 1, t: 0, label: "读取元组", kind: "read" },
+    { lane: 2, t: 0, label: "读取元组", kind: "read" },
+    { lane: 3, t: 0, label: "读取 parent", kind: "read" },
+    { lane: 1, t: 1, label: "没有 Chen：假", kind: "note" },
+    { lane: 3, t: 1, label: "folder:A →\n子检查", kind: "read", mono: true },
+    { lane: 2, t: 2, label: "仍在读取", kind: "note" },
+    { lane: 3, t: 2, label: "Chen 是\n查看者：真", kind: "good" },
+    { lane: 0, t: 3, label: "已确定：真", kind: "good" },
+    { lane: 2, t: 3, label: "已取消", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [1, 1], to: [0, 1], label: "假", dashed: true },
+    { from: [3, 2], to: [0, 3], label: "真" },
+    { from: [0, 3], to: [2, 3], label: "取消", dashed: true },
+  ]}
+  caption="一个为真的子节点就能确定 OR。② 的“假”不改变任何东西；⑦ 的“真”结束了整棵树。"
+/>
+
+注意，延迟由通往决定性答案的最快路径决定，而不是由最慢的叶节点决定。如果父文件夹分支很慢，而 Chen 又不是查看者，根节点就必须等待每个子节点都回答“假”。
+
+取消节省了工作，但也留下了空缺。被取消的子检查永远不会把结果写入缓存，而其他请求可能正在[锁表](../architecture/#锁表合并相同的请求)中等待这个结果。论文恰好遇到了这个问题："indirect ACL checks are frequently cancelled when the result of the parent ACL check is already determined. This leaves the cache key unpopulated."（当父 ACL 检查的结果已经确定时，间接 ACL 检查经常被取消。这会使缓存键未被填充。）其解决办法是："we delay eager cancellation when there are waiters on the corresponding lock table entry"（在相应锁表条目上有等待者时，我们推迟及早取消）（§3.2.5）。
+
+## 各运算符何时可以提前停止
+
+论文列出了组合子表达式的三种方式，"union, intersection, and exclusion"（并集、交集和排除）（§2.3.1），并为它们规定了同一条取消规则。子树何时“确定”取决于运算符。对每种运算符而言，哪一个答案就足够了？
+
+<Frames min="12rem">
+
+<Graph
+  width={300}
+  height={210}
+  title="并集在第一个“真”处停止"
+  desc="一个并集节点，子节点为 A 和 B。B 先回答“真”，这确定了并集为真，因此 A 被取消。"
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∪ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A：运行中\n→ 已取消", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B：真", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "决定", on: true },
+  ]}
+  caption="并集：一个“真”就够了。“假”需要所有子节点。"
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="交集在第一个“假”处停止"
+  desc="一个交集节点，子节点为 A 和 B。B 先回答“假”，这确定了交集为假，因此 A 被取消。"
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∩ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A：运行中\n→ 已取消", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B：假", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "决定", on: true },
+  ]}
+  caption="交集：一个“假”就够了。“真”需要所有子节点。"
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="排除在基础为假或被排除侧为真时停止"
+  desc="一个排除节点，A 减 B。被排除的一侧 B 先回答“真”，这确定了排除为假，因此基础 A 被取消。基础为假也同样能确定结果。"
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A − B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A（基础）：\n运行中\n→ 已取消", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B（被排除）：\n真", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "决定", on: true },
+  ]}
+  caption="排除：基础为假或被排除侧为真就够了。“真”需要两个答案。"
+/>
+
+</Frames>
+
+注意其中的不对称。每种运算符都有一个可以提前得到的答案，和一个需要所有子节点的答案。对并集而言，提前得到的答案是*是*；对交集和排除而言则是*否*。因此，写成并集的权限回答“允许”的速度取决于其最快的路径，而带有交集或排除的权限回答“允许”的速度只能取决于其最慢的必需部分。下表把它列了出来：
+
+| 运算符 | 可提前确定的条件 | 需要所有子节点回答 |
+| --- | --- | --- |
+| 并集 `A ∪ B` | 任一子节点为真 → 真 | 假，才能回答假 |
+| 交集 `A ∩ B` | 任一子节点为假 → 假 | 真，才能回答真 |
+| 排除 `A − B` | 基础为假，或被排除侧为真 → 假 | 基础为真且被排除侧为假，才能回答真 |
+
+各产品遵循同样的逻辑。在 OpenFGA 的 [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go)（v1.22.1）中，并集归约器在第一个“允许”结果处返回（"Short-circuit success"），交集归约器在第一个“不允许”结果处返回（"Short-circuit failure"），排除归约器则并发运行基础侧和被减侧，并在 "base is false"（基础为假）或 "subtract is true"（被减侧为真）时返回“不允许”。AuthZed 关于交集和排除的文章（[2022-03-03](https://authzed.com/blog/check-it-out-2)）说，对于这些运算符，"SpiceDB can only partially short-circuit the subproblems"（SpiceDB 只能对子问题进行部分短路），而在其示例中，一旦交集的某个分支回答“否”，"SpiceDB was able to cancel the other `check` immediately"（SpiceDB 就能立即取消另一个 `check`）。对于并集，其更早的文章（[2021-03-17](https://authzed.com/blog/check-it-out)）说得很简单："any path found suffices to grant permission!"（找到任意一条路径就足以授予权限！）
+
+## 在快照上缓存子结果
+
+树中的每个节点都是一个有答案的问题，而论文把它们全部缓存起来：服务器 "form a distributed cache for both reads and check evaluations, including intermediate check results evaluated during pointer chasing"（为读取和检查评估（包括指针追逐过程中评估的中间检查结果）构成一个分布式缓存）（§3.2.5）。上面的第 ⑦ 步“Chen 是否属于 `folder:A#viewer`”就是这样一个中间结果。之后任何到达同一问题的检查都可以复用它。
+
+是什么让复用变得安全？一个结果只在*某个快照上*成立。论文把快照放进了键里："We avoid reusing results evaluated from a different snapshot by encoding snapshot timestamps in cache keys."（我们通过在缓存键中编码快照时间戳，避免复用在不同快照上评估得到的结果。）然后它把评估时间戳向上取整，"to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies"（到较粗的粒度，例如 1 秒或 10 秒，同时遵循请求 zookie 中的陈旧度约束），从而使大多数检查落在同样的少数几个时间戳上（§3.2.5；取整过程画在[一致性页面](../consistency/#为什么是至少一样新而不是恰好在)上）。
+
+缓存的子结果何时有用，何时会未命中？
+
+<Graph
+  width={640}
+  height={300}
+  minWidth={540}
+  title="子结果按快照缓存"
+  desc="在 T=13 s 上评估的一次 Chen 对 readme 的检查，存储了子结果 folder:A#viewer@user:chen 在 13 s 为真。同一时间窗口内的第二次检查，同样取整到 13 s，命中该条目。在下一个边界之后、在 T=14 s 上评估的第三次检查使用不同的键，未命中，并再次从 Spanner 读取文件夹元组。"
+  nodes={[
+    { id: "c1", x: 95, y: 50, label: "Chen 的检查\nT = 13 s", kind: "client" },
+    { id: "c2", x: 95, y: 145, label: "同一检查，\n0.4 s 后\nT = 13 s", kind: "client" },
+    { id: "c3", x: 95, y: 250, label: "同一检查，\n1.2 s 后\nT = 14 s", kind: "client" },
+    { id: "k13", x: 350, y: 95, label: "key: folder:A#viewer\n@user:chen @ 13 s\n= true", kind: "server", mono: true, on: true },
+    { id: "k14", x: 350, y: 250, label: "key: … @ 14 s\n（尚未缓存）", kind: "server", mono: true },
+    { id: "db", x: 565, y: 250, label: "folder 元组\n（Spanner）", kind: "store" },
+  ]}
+  edges={[
+    { from: "c1", to: "k13", label: "填充" },
+    { from: "c2", to: "k13", label: "命中", on: true },
+    { from: "c3", to: "k14", label: "未命中" },
+    { from: "k14", to: "db", label: "在 14 s 上读取" },
+  ]}
+  caption="13 s 的条目永远不会失效，也永远不会在 14 s 被复用。这些时间戳仅作示意。"
+/>
+
+注意，这里没有失效这一步。以快照为键的条目永远不会变错，因为 13 s 时的数据永远不会改变；只是当评估转移到更晚的时间戳之后，就不再有人查询它了。AuthZed 关于 SpiceDB 版本的文章（[2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)）表达了同样的想法："For any given problem or sub-problem, at a specified time, the result to the check is immutable"（对于任何给定的问题或子问题，在指定的时间点，检查的结果是不可变的），以及 "if we were to change the evaluation timestamp, the cache keys would change as well"（如果我们改变评估时间戳，缓存键也会随之改变）。
+
+§3.2.5 中还有两种机制围绕着这个缓存，两者都画在架构页面上：通过 "at both the caller and the callee of internal RPCs"（在内部 RPC 的调用方和被调用方）缓存而形成的[缓存树](../architecture/#调用两端都缓存结果)，以及[锁表](../architecture/#锁表合并相同的请求)，在锁表中 "Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated."（在共享同一缓存键的请求中，只有一个请求会开始处理；其余请求阻塞，直到缓存被填充。）
+
+在产品中：
+
+- SpiceDB 把修订版本取整到由 `--datastore-revision-quantization-interval` 设定的窗口中，默认为 `5s`（[`dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go)，v1.57.1），并在其分派器外包了一层 [`singleflight`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go)，用于统计 "dispatch requests that were single flighted"（被 single flight 合并的分派请求），起到锁表的作用。
+- OpenFGA 的检查缓存默认关闭（`checkQueryCache.enabled` 为 `false`，开启时 TTL 为 `10s`）（[配置](https://openfga.dev/docs/getting-started/setup-openfga/configuration)）。其条目在 TTL 之后过期，而不属于某个快照，这就是 OpenFGA 需要 `HIGHER_CONSISTENCY` 模式来绕过它的原因（[一致性](https://openfga.dev/docs/interacting/consistency)；参见[没有 TrueTime 时的顺序保证](../without-truetime/)）。
+
+## 每次检查的读取会被池化
+
+叶节点 ②、④a、④b 和 ⑥ 都读取 `doc:readme` 的行。与其单独发送每次读取，"We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner"（我们采用一种池化机制，把同一 ACL 检查的读取归并在一起，以尽量减少发往 Spanner 的读取 RPC 数量）（§3.2.3）。除了这句话，论文没有描述该机制。[架构页面](../architecture/#对-spanner-的读取共用一个池)画出了这四次读取汇聚到一台服务器上的情形；按对象和关系排序的存储布局（§3.1.1）使它们能够变成对相邻行的范围读取。
+
+## 能递归多深
+
+`CHECK(U, U′)` 中的递归没有内置的上界：一个组可以包含一个组，后者又包含一个组，数据模型中也没有任何东西禁止环。检查遇到环时会怎样？
+
+<Graph
+  width={640}
+  height={290}
+  minWidth={540}
+  title="嵌套组中的环"
+  desc="一个假设的错误配置：group:all#member 包含 group:eng#member，而 group:eng#member 又包含 group:all#member。一次针对 Anne 和 doc:readme#viewer 的检查到达 group:eng#member，然后是 group:all#member，然后又是 group:eng#member，如此往复。SpiceDB 持续分派，直到达到深度上限 50 并返回错误。OpenFGA 记住它访问过的元组键，检测到重复后把该分支视为“不允许”；另外，它在深度 25 时报错。"
+  nodes={[
+    { id: "doc", x: 90, y: 60, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "eng", x: 320, y: 60, label: "group:eng#member", kind: "group", mono: true },
+    { id: "all", x: 320, y: 200, label: "group:all#member", kind: "group", mono: true },
+    { id: "sdb", x: 540, y: 60, label: "SpiceDB：第 50 跳\n→ 错误", kind: "note" },
+    { id: "fga", x: 540, y: 200, label: "OpenFGA：键已\n见过 → 环，\n不允许", kind: "note" },
+  ]}
+  edges={[
+    { from: "doc", to: "eng", label: "第 1 跳" },
+    { from: "eng", to: "all", label: "第 2、3、4 跳 …", dir: "both", on: true },
+    { from: "eng", to: "sdb", dashed: true },
+    { from: "all", to: "fga", dashed: true },
+  ]}
+  caption="这两个组元组是假设的，不属于贯穿示例。箭头沿着检查搜索的方向。"
+/>
+
+论文没有给出具体数字。它对 "selected namespaces that exhibit such structure"（呈现此类结构的选定命名空间）用 Leopard 来处理深而宽的嵌套（§3.2.4；参见 [Leopard 页面](../leopard/)），§5 则声称 "safe pointer chasing despite potentially deep recursion (e.g. membership checks on hierarchical groups)"（尽管可能存在深度递归（例如对层级组的成员关系检查），仍能安全地进行指针追逐），但除此之外没有说明是什么使其安全。§3.2.6 中按客户端的限制约束的是 CPU 和未完成的 RPC，而不是深度。各产品选择了明确的上限：
+
+| 系统 | 限制 | 默认值 | 达到时 | 来源 |
+| --- | --- | --- | --- | --- |
+| 论文 | 未说明 | 无 | 未描述 | §3.2.4、§5 |
+| SpiceDB | `--dispatch-max-depth` | 50 | 报错："the check request has exceeded the allowable maximum depth of 50" | [Cyclical relationships and traversal limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)，[`serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go) |
+| OpenFGA | `resolveNodeLimit` | 25 | 报错；环会先被检测出来并回答“不允许” | [配置](https://openfga.dev/docs/getting-started/setup-openfga/configuration)，[`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go) |
+| OpenFGA | `resolveNodeBreadthLimit` | 10 | 限制 "how many nodes on a given level can be evaluated concurrently"（同一层上可以并发评估的节点数） | [配置](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
+| Ory Keto | `limit.max_read_depth` | 5 | 全局最大值；请求只能把它调低 | [`config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json) |
+
+SpiceDB 的文档说它没有单独的环检测器：环会一直运行到深度上限，并返回与极深层级相同的错误；文档解释说，出于语义和性能方面的原因，没有采用跟踪已访问对象的做法（[recursion and max depth](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)）。OpenFGA 的 `LocalChecker` 为每个请求维护一个已访问元组键的集合，一旦某个键重复，就返回“不允许”并带上 `CycleDetected`（[`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go)，`hasCycle`）。这两个上限都计算沿一条路径的跳数，也就是第一张图中树的深度；`resolveNodeBreadthLimit` 是其中唯一一个约束论文中 "evaluate all leaf nodes … concurrently"（并发地评估所有叶节点）的限制。
+
+<Callout kind="note" title="未经核实">
+
+本站的研究笔记记录了一位前 Google 员工在 Hacker News 上描述 Zanzibar 中存在最大递归深度。这一说法不在论文中，也没有对照任何 Google 来源核实，因此本页不为 Zanzibar 复述任何数字。
+
+</Callout>
+
+## 来源
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.3.1, §3.1.1, §3.2.3, §3.2.4, §3.2.5, §3.2.6, §5.
+- AuthZed, [Check it out: How permissions are answered in SpiceDB and Authzed](https://authzed.com/blog/check-it-out), 2021-03-17（厂商博客）。
+- AuthZed, [Check it out #2: How intersections and exclusions are computed in SpiceDB and Authzed](https://authzed.com/blog/check-it-out-2), 2022-03-03（厂商博客）。
+- AuthZed, [Hotspot Caching in Google Zanzibar and SpiceDB](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb), 2023-05-10（厂商博客）。
+- AuthZed, [Cyclical Relationships and Traversal Limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), SpiceDB 文档。
+- SpiceDB v1.57.1 源码：[`pkg/cmd/serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go)、[`pkg/cmd/datastore/dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go)、[`internal/dispatch/singleflight/singleflight.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go)。
+- OpenFGA, [Configuring OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configuration) 和 [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency)。
+- OpenFGA v1.22.1 源码：[`internal/graph/check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go)。
+- Ory Keto, [`.schema/config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json)（`limit.max_read_depth`）。

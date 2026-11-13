@@ -1,0 +1,386 @@
+---
+title: "關係元組與使用者集合"
+description: "Zanzibar 如何將每一項權限儲存為一則小事實、命名空間設定如何將這些事實轉為有效的 ACL，以及 Check 如何將結果當作圖來走訪。"
+section: guide
+part: mechanisms
+order: 3
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "2.3.1", "2.4.1", "2.4.5", "3.2.3"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar 以*關係元組*儲存權限：每一列是一則事實，讀作「此使用者對此物件具有此關係」。本頁其餘內容，包括改寫規則、Check 與 Expand，都是由這些列計算而來。
+
+貫穿全站的範例：Anne、Beto 與 Chen（`user:anne`、`user:beto`、`user:chen`）；位於 `folder:A` 中的文件 `doc:readme`；群組 `group:eng`。Anne 擁有 readme，Beto 屬於 eng，eng 的成員可檢視 readme，Chen 可檢視資料夾 A。
+
+## 文法
+
+論文（§2.1）以四條規則給出文字表示法：
+
+```text
+⟨tuple⟩   ::= ⟨object⟩ ‘#’ ⟨relation⟩ ‘@’ ⟨user⟩
+⟨object⟩  ::= ⟨namespace⟩ ‘:’ ⟨object_id⟩
+⟨user⟩    ::= ⟨user_id⟩ | ⟨userset⟩
+⟨userset⟩ ::= ⟨object⟩ ‘#’ ⟨relation⟩
+```
+
+元組由三個部分組成。*物件*是命名空間加上 ID，例如 `doc:readme`。*關係*是命名空間所定義的名稱，例如 `owner` 或 `viewer`。*使用者*是單一使用者 ID 或一個*使用者集合*。論文中的使用者 ID 是整數；本站寫成 `user:anne`，讓範例保持易讀。
+
+單一元組表達了什麼？
+
+<Graph
+  width={560}
+  height={150}
+  title="一筆關係元組"
+  desc="標示為 user:anne 的膠囊，以一支標示為 owner 的箭頭指向標示為 doc:readme 的方框。這就是元組 doc:readme#owner@user:anne。"
+  nodes={[
+    { id: "anne", x: 110, y: 75, label: "user:anne", kind: "subject", mono: true },
+    { id: "doc", x: 450, y: 75, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner" }]}
+  caption="doc:readme#owner@user:anne，畫成一條從使用者指向物件的邊。"
+/>
+
+它只表達一件事：Anne 對 `doc:readme` 具有 `owner` 關係。論文列出識別一筆元組的主鍵：命名空間、物件 ID、關係與使用者。
+
+## 使用者集合：指向群組的元組
+
+第四條文法規則才是關鍵。使用者集合本身是一個物件加上一個關係：`group:eng#member` 的意思是「所有對 `group:eng` 具有 `member` 關係的使用者」。當元組的使用者是使用者集合時，一列就能把某項權限授予一整組使用者，而這組使用者由其他列定義。
+
+一筆元組如何讓 eng 的所有成員都能存取 readme？
+
+<Graph
+  width={600}
+  height={170}
+  minWidth={480}
+  title="使用者為使用者集合的元組"
+  desc="user:beto 以一支標示為 member 的箭頭指向虛線方框 group:eng#member。該虛線方框再以一支標示為 viewer 的箭頭指向 doc:readme。Beto 只能透過群組到達 readme。"
+  nodes={[
+    { id: "beto", x: 80, y: 85, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 85, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 515, y: 85, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+  ]}
+  caption="兩筆元組：group:eng#member@user:beto 與 doc:readme#viewer@group:eng#member。虛線方框是使用者集合，不是單一使用者。"
+/>
+
+請注意，沒有任何一列同時提到 Beto 與 readme。Beto 之所以是檢視者，是因為他屬於第二筆元組所指向的集合。在 eng 中新增一名成員，該成員就能檢視 readme，而 readme 的 ACL 不需任何變更。
+
+同樣的手法可以巢狀使用。群組的成員可以是另一個使用者集合，例如 `group:eng#member@group:sre#member`（一個假設的子團隊，不屬於貫穿全站的範例），成員資格便會沿著元組所描述的層數一路傳遞。論文用一句話說明："a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership"（⟨*userset*⟩ 讓 ACL 能夠參照群組，從而支援表示巢狀的群組成員資格）（§2.1）。論文也說明了其好處：以元組而非逐物件的 ACL 來建模，"allows us to unify the concepts of ACLs and groups"（讓我們得以統一 ACL 與群組的概念）（§2.1）。群組只是一個其 `member` 關係為 ACL 的物件。
+
+## 將表 1 畫成一張圖
+
+論文的表 1 列出四筆元組範例。將使用者 10 與 11 改名為 Anne 與 Beto，並為 Chen 加上一筆元組後，它們如下：
+
+| 元組 | 讀作 |
+| --- | --- |
+| `doc:readme#owner@user:anne` | Anne 是 readme 的擁有者 |
+| `group:eng#member@user:beto` | Beto 是 eng 的成員 |
+| `doc:readme#viewer@group:eng#member` | eng 的成員是 readme 的檢視者 |
+| `doc:readme#parent@folder:A#...` | readme 位於資料夾 A 中 |
+| `folder:A#viewer@user:chen` | Chen 是資料夾 A 的檢視者（不在表 1 中） |
+
+第四列的 `#...` 是論文用來表示 "a relation that does not affect the semantics of the tuple"（不影響元組語意的關係）的記法（表 1 說明）：該元組指向資料夾本身，而不是其使用者構成的集合。
+
+五列放在一起是什麼樣子？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="將表 1 與 Chen 的元組畫成一張圖"
+  desc="左側有三名使用者。user:anne 以一支標示為 owner 的箭頭直接指向右側的 doc:readme。user:beto 以一支標示為 member 的箭頭指向虛線的使用者集合 group:eng#member，後者以一支標示為 viewer 的箭頭指向 doc:readme。user:chen 以一支標示為 viewer 的箭頭指向 folder:A，後者以一支標示為 parent 的箭頭指向 doc:readme。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="每一筆儲存的元組都是一條邊，從使用者（或使用者集合）畫向物件。"
+/>
+
+請注意，`parent` 邊本身與存取無關。如論文所述，有些關係 "only define abstract relations between objects. These abstract relations may indirectly affect access control given userset rewrite rules specified in namespace configs"（只定義物件之間的抽象關係。在命名空間設定中指定的使用者集合改寫規則之下，這些抽象關係可能會間接影響存取控制）（§2.1）。Chen 能否看到 readme，取決於這樣的規則，也就是下一節的主題。
+
+## 命名空間設定
+
+客戶端在儲存元組之前，會先設定一個*命名空間*，例如 `doc` 或 `folder`（§2.3）。設定中列出該命名空間的關係，每個關係有一個名稱與一個*關係設定*，另外還有儲存參數：分片設定與物件 ID 的編碼方式。
+
+僅憑元組並不能定義有效的 ACL。許多客戶端希望每位編輯者同時也是檢視者。為每個物件的每位編輯者額外儲存一筆 `viewer` 元組，用論文的話來說會 "wasteful and make it hard to make modifications across all objects"（既浪費，也會使跨所有物件的修改變得困難）（§2.3.1）。因此，關係設定可以帶有一條*使用者集合改寫規則*：一個以物件 ID 為輸入、傳回使用者集合運算式樹的函式。
+
+以下是論文的圖 1，原文照錄：
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+
+relation {
+ name: "editor"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "owner" } }
+} } }
+
+relation {
+ name: "viewer"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "editor" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+> Figure 1: Simple namespace configuration with concentric relations on documents. All owners are editors, and all editors are viewers. Further, viewers of the parent folder are also viewers of the document.
+>
+> （圖 1：文件上具有同心關係的簡單命名空間設定。所有擁有者都是編輯者，所有編輯者都是檢視者。此外，上層資料夾的檢視者也是該文件的檢視者。）
+
+改寫樹的葉節點分為三種（§2.3.1）：
+
+| 葉節點 | 傳回什麼 | 在圖 1 中 |
+| --- | --- | --- |
+| `_this` | 儲存的元組中針對此物件與關係的使用者，包括這些元組所指向的使用者集合。關係沒有規則時的預設行為。 | 儲存在 `doc:readme` 上的 `viewer` 元組 |
+| `computed_userset` | 同一物件上另一個關係的使用者集合。 | 同一文件上的 `editor`；對 `editor` 而言則是 `owner` |
+| `tuple_to_userset` | 從物件讀取一個*元組集合*，再從找到的每一筆元組計算出一個使用者集合。 | 讀取文件的 `parent` 元組，再取每個上層資料夾的 `viewer` |
+
+葉節點以聯集、交集與排除加以組合（§2.3.1）。圖 1 只使用聯集。交集會要求使用者屬於每一個子節點，例如「同時也屬於 eng 的編輯者」；排除則會移除一個集合，例如「封鎖清單以外的檢視者」。這兩個例子是說明用，並非出自論文。
+
+`viewer` 規則會為一份文件建出什麼樣的樹？
+
+<Graph
+  width={620}
+  height={380}
+  minWidth={540}
+  title="doc:readme#viewer 的運算式樹"
+  desc="根節點 doc:readme#viewer，其下為一個虛線的 union 節點。union 有三個子節點：_this，讀取儲存的 viewer 元組；computed_userset relation editor；以及 tuple_to_userset，tupleset 為 parent、computed_userset 為 viewer，可到達上層資料夾的檢視者。editor 子節點透過 editor 自身的規則，展開為另一個由 _this 與 computed_userset relation owner 組成的 union。"
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "this1", x: 90, y: 180, label: "_this", kind: "group", mono: true },
+    { id: "cue", x: 310, y: 180, label: "computed_userset\nrelation: editor", kind: "group", mono: true },
+    { id: "ttu", x: 520, y: 180, label: "tuple_to_userset\ntupleset: parent\nthen: viewer", kind: "group", mono: true },
+    { id: "n1", x: 90, y: 250, label: "文件上儲存的\nviewer 元組", kind: "note" },
+    { id: "n3", x: 520, y: 270, label: "每個上層資料夾\n的檢視者", kind: "note" },
+    { id: "u2", x: 310, y: 262, label: "union", kind: "group", mono: true },
+    { id: "this2", x: 200, y: 345, label: "_this", kind: "group", mono: true },
+    { id: "cuo", x: 420, y: 345, label: "computed_userset\nrelation: owner", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "this1" },
+    { from: "u1", to: "cue" },
+    { from: "u1", to: "ttu" },
+    { from: "cue", to: "u2", label: "editor 的規則", dashed: true, labelOffset: 48 },
+    { from: "u2", to: "this2" },
+    { from: "u2", to: "cuo" },
+  ]}
+  caption="圖 1 中的 viewer 規則，其中 editor 分支已依 editor 自身的規則展開。虛線方框是計算出來的，並未儲存。"
+/>
+
+請注意，`owner` 位於下兩層：擁有者是編輯者，編輯者是檢視者。這正是圖 1 說明中 "concentric relations"（同心關係）的意思。右側分支是唯一離開該文件的分支：它沿著一條儲存的 `parent` 邊前往另一個物件。
+
+## 將 Check 視為圖搜尋
+
+Check 請求指定一個使用者集合 ⟨*object#relation*⟩ 與一名使用者，詢問該使用者是否屬於該集合（§2.4.4）。在沒有改寫規則的情況下，論文將評估寫成一個遞迴公式（§3.2.3）：若存在元組 ⟨*object#relation@U*⟩，或存在元組 ⟨*object#relation@U′*⟩ 且 U′ 是使用者集合而該使用者屬於 U′，則該使用者屬於 ⟨*object#relation*⟩。論文將這種遞迴稱為 "pointer chasing"（指標追蹤）。改寫規則 "are also translated to boolean expressions as part of check evaluation"（也會在檢查評估過程中轉換為布林運算式）（§3.2.3），因此上面的運算式樹會成為三個分支的 OR。
+
+接下來四張圖要回答的問題：Chen 能否檢視 `doc:readme`？每一格都使用同一張圖，並標出目前分支所讀取的邊。`folder` 的命名空間設定不在論文中；這幾格假設 `folder#viewer` 沒有改寫規則，因此它就只是 `_this`。
+
+<Callout kind="note" title="是分格，不是時間軸">
+
+這幾格一次只走一個分支，讓每一格都能單獨閱讀。Zanzibar 並不會像這樣等待：它會評估 "all leaf nodes of the boolean expression tree concurrently"（布林運算式樹的所有葉節點，同時進行），並在某個節點決定結果後取消該子樹其餘的評估（§3.2.3）。
+
+</Callout>
+
+### 步驟 1：`_this`
+
+readme 上儲存的 `viewer` 元組是否包含 Chen？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 步驟 1：_this 分支"
+  desc="與表 1 相同的圖。標出的部分：從 group:eng#member 到 doc:readme 的 viewer 邊、群組節點，以及從 user:beto 進入群組的 member 邊。user:chen 不在標出的路徑上。此分支的結果：否。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="_this 找到一筆 viewer 元組，指向 group:eng#member。追下去只找到 Beto。分支結果：否。"
+/>
+
+唯一儲存的檢視者是一個使用者集合，因此 Check 遞迴進入 `group:eng#member`。它唯一的成員是 Beto。此分支的答案是否。
+
+### 步驟 2：`computed_userset` editor，接著 owner
+
+Chen 是編輯者，或是擁有者嗎？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 步驟 2：editor 與 owner 分支"
+  desc="相同的圖。標出的部分：從 user:anne 到 doc:readme 的 owner 邊。沒有 editor 元組。user:chen 不在標出的路徑上。此分支的結果：否。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="editor = _this ∪ owner。沒有 editor 元組；唯一的擁有者是 Anne。分支結果：否。"
+/>
+
+改寫在同一物件上從 `viewer` 移到 `editor`，再移到 `owner`。前兩步不需要任何儲存的元組：它們來自設定。唯一的擁有者是 Anne，因此此分支的答案也是否。
+
+### 步驟 3：`tuple_to_userset`，找出上層
+
+readme 位於哪個資料夾中？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 步驟 3：讀取 parent 元組集合"
+  desc="相同的圖。標出的部分：從 folder:A 到 doc:readme 的 parent 邊，以及 folder:A 節點。此步驟只找出資料夾，尚未決定任何結果。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="元組集合 doc:readme#parent 中有一筆元組，指向 folder:A。規則接著改問 folder:A#viewer。"
+/>
+
+`parent` 元組就是表 1 中的「抽象關係」。它本身不授予任何權限；改寫規則將它轉為一個關於另一個物件的新問題。
+
+### 步驟 4：`folder:A#viewer`
+
+Chen 是資料夾 A 的檢視者嗎？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 步驟 4：得出「是」的路徑"
+  desc="相同的圖。標出的部分：user:chen、從 user:chen 到 folder:A 的 viewer 邊、folder:A、通往 doc:readme 的 parent 邊，以及 doc:readme。這是一條從 Chen 到 readme 的完整路徑。結果：是。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="folder:A#viewer@user:chen 已儲存。union 有一個為真的子節點，因此 Check 回答是。"
+/>
+
+路徑 user:chen → folder:A → doc:readme 回答了這個問題。請注意，每一格中的邊方向都相同，但搜尋是從 readme 向外進行的：Check 從 ⟨*object#relation*⟩ 出發，尋找該使用者。
+
+這樣的指標追蹤 "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide"（對大多數類型的 ACL 與群組都運作良好，但當間接 ACL 或群組很深或很寬時，成本可能很高）（§3.2.3）。對於這類命名空間，Zanzibar 使用 Leopard 索引，詳見 [Leopard 頁面](../leopard/)。
+
+## Read 與 Expand
+
+有兩個 API 呼叫從不同的高度檢視同一份資料。
+
+**Read**（§2.4.1）只傳回儲存的元組。請求會指定一個或多個*元組集合*：單一元組鍵，或命名空間中某個物件 ID 或使用者集合的所有元組，並可選擇性地限縮為單一關係。論文明確指出 "Read results only depend on contents of relation tuples and do not reflect userset rewrite rules"（讀取結果僅取決於關係元組的內容，不會反映使用者集合改寫規則）（§2.4.1）。在貫穿全站的範例中，以關係 `viewer` 讀取 `doc:readme` 會傳回一列：
+
+```text
+doc:readme#viewer@group:eng#member
+```
+
+雖然每位擁有者都是檢視者，結果中卻沒有 Anne；雖然 Chen 能檢視 readme，結果中也沒有他。
+
+**Expand**（§2.4.5）"follows indirect references expressed through userset rewrite rules"（會追蹤透過使用者集合改寫規則所表達的間接參照）。它傳回一棵*使用者集合樹*：葉節點是使用者 ID 或指向其他 ⟨*object#relation*⟩ 配對的使用者集合，中間節點則是聯集、交集或排除。
+
+Expand 對 `doc:readme#viewer` 會傳回什麼？
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={540}
+  title="doc:readme#viewer 的 Expand 結果"
+  desc="一棵樹。根節點 doc:readme#viewer，接著是一個有三個子節點的 union。第一個子節點是使用者集合葉節點 group:eng#member。第二個是 editor 的 union，只有一個來自 owner 的葉節點 user:anne。第三個是使用者集合葉節點 folder:A#viewer。使用者集合葉節點以虛線表示；user:anne 是膠囊。"
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 100, y: 180, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 310, y: 180, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 520, y: 180, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "anne", x: 310, y: 262, label: "user:anne", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "eng", label: "_this" },
+    { from: "u1", to: "ed", label: "editor" },
+    { from: "u1", to: "fold", label: "parent → viewer" },
+    { from: "ed", to: "anne", label: "owner" },
+  ]}
+  caption="Expand 會套用改寫規則；Read 則只會傳回 group:eng#member 這一列。"
+/>
+
+請注意兩個虛線葉節點。依 §2.4.5，葉節點可以是指向別處的使用者集合，因此想取得每一個個別使用者（Beto、Chen）的客戶端，必須再依序展開這些葉節點。論文並未說明單次 Expand 呼叫會遞迴多深；此圖停在文件自身規則所能到達的使用者集合為止。論文點出了其用途：Expand 讓客戶端能 "reason about the complete set of users and groups that have access to their objects, which allows them to build efficient search indices for access-controlled content"（推論有權存取其物件的完整使用者與群組集合，這讓它們能為受存取控制的內容建構高效率的搜尋索引）（§2.4.5）。
+
+<Callout kind="paper" title="論文中的對應">
+
+元組與文法：§2.1 與表 1。命名空間設定：§2.3。改寫規則與圖 1：§2.3.1。Read：§2.4.1。Check：§2.4.4。Expand：§2.4.5。檢查評估與指標追蹤：§3.2.3。術語彙整於[術語表](../glossary/)。
+
+</Callout>
+
+## 資料來源
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

@@ -1,0 +1,231 @@
+---
+title: "OpenFGA"
+description: "受 Zanzibar 啟發的 CNCF 授權引擎，對照論文閱讀。"
+section: ecosystem
+order: 2
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.4"]
+product:
+  name: OpenFGA
+  maintainer: CNCF project (Okta core maintainer)
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/openfga/openfga
+  docs: https://openfga.dev/docs
+  status: "活躍，CNCF Incubating"
+  latest: v1.22.1 (2026-10-28)
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+OpenFGA 是一套開源授權引擎。其文件指出，其模型語言的 JSON 形式（也就是 API 所接受的形式）"closely tracks the language in the Zanzibar paper"（緊密依循 Zanzibar 論文中的語言）；DSL 則加入語法糖，並編譯為該 JSON（[configuration language](https://openfga.dev/docs/configuration-language)）。CNCF 宣布其進入孵化階段的文章指出，它 "was developed by a group of Okta employees, and is the foundation for the Auth0 FGA commercial offering"（由一群 Okta 員工開發，是 Auth0 FGA 商業產品的基礎）（[CNCF，2025-11-11](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)）。它以 Go 撰寫，採用 Apache-2.0 授權（[儲存庫](https://github.com/openfga/openfga)）。Auth0 的託管服務自稱 "based on OpenFGA, an open-source project owned by the Cloud Native Computing Foundation"（以 OpenFGA 為基礎，這是一個由 Cloud Native Computing Foundation 擁有的開源專案）（[Auth0 FGA docs](https://docs.fga.dev/fga)）。
+
+## 論文術語與 OpenFGA 術語
+
+OpenFGA 自己的文件中有一張 "Equivalent Zanzibar Concepts"（對應的 Zanzibar 概念）表（[configuration language](https://openfga.dev/docs/configuration-language#equivalent-zanzibar-concepts)）；本表將其延伸到 API 與儲存層。
+
+| 論文中 | OpenFGA 中 |
+| --- | --- |
+| 命名空間設定（§2.3） | 授權模型中的一個 `type`，以 DSL 或 JSON 撰寫（[configuration language](https://openfga.dev/docs/configuration-language)） |
+| 關係元組 `object#relation@user`（§2.1） | 由 `user`、`relation`、`object` 組成的 relationship tuple，例如 `user:anne`、`owner`、`doc:readme`；使用者集合寫成 `group:eng#member` |
+| `_this`（§2.3.1） | 直接型別限制，例如 `[user, group#member]`（JSON 中為 `this`） |
+| `computed_userset` | 直接寫關係名稱，例如 `or owner` |
+| `tuple_to_userset` | `viewer from parent`（JSON 中為 `tupleToUserset`） |
+| `union` / `intersection` / `exclusion` | `or` / `and` / `but not`（JSON 中為 `union` / `intersection` / `difference`） |
+| zookie（§2.4） | 無；查詢選擇 `MINIMIZE_LATENCY` 或 `HIGHER_CONSISTENCY`（[consistency](https://openfga.dev/docs/interacting/consistency)） |
+| Check（§2.4.4） | `Check`、`BatchCheck` |
+| Read（§2.4.1） | `Read` |
+| Write（§2.4.2） | `Write` |
+| Watch（§2.4.3） | `ReadChanges`，以接續權杖分頁讀取清單（[tuple changes](https://openfga.dev/docs/interacting/read-tuple-changes)） |
+| Expand（§2.4.5） | `Expand` |
+| 不在論文的 API 中 | `ListObjects`、`StreamedListObjects`、`ListUsers`；store；模型版本（`WriteAuthorizationModel`、`ReadAuthorizationModel(s)`） |
+| Leopard（§3.2.4） | 此處引用的文件中沒有對應物 |
+| Spanner（§3） | `memory`（預設）、`postgres`、`mysql`、`sqlite`（[configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)） |
+
+API 名稱出自 [`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)。
+
+## 以模型表示貫穿全站的範例
+
+論文的圖 1 讓擁有者成為編輯者、編輯者成為檢視者，並讓上層資料夾的檢視者成為文件的檢視者（§2.3.1）。在 OpenFGA 的 DSL 中，同樣的規則每個關係只佔一行：
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type folder
+  relations
+    define viewer: [user, group#member]
+
+type doc
+  relations
+    define parent: [folder]
+    define owner: [user]
+    define editor: [user, group#member] or owner
+    define viewer: [user, group#member] or editor or viewer from parent
+```
+
+<Callout kind="note" title="未經驗證器執行">
+
+此模型只使用截至 2026-11-13 出現在 OpenFGA [configuration language 頁面](https://openfga.dev/docs/configuration-language)以及維護者的 Google Drive 範例（[`model.fga`](https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga)）中的語法：`model`、`schema 1.1`、`type`、`relations`、`define`、含 `group#member` 的型別限制、`or` 與 `from`。它尚未經過 OpenFGA CLI 或 Playground 執行。
+
+</Callout>
+
+Anne、Beto 與 Chen 的元組：
+
+| user | relation | object |
+| --- | --- | --- |
+| `user:anne` | `owner` | `doc:readme` |
+| `folder:A` | `parent` | `doc:readme` |
+| `user:beto` | `member` | `group:eng` |
+| `group:eng#member` | `viewer` | `doc:readme` |
+| `user:chen` | `viewer` | `folder:A` |
+
+對 readme 進行 `viewer` 檢查時，每個人各會走過其中哪些元組？
+
+<Graph
+  width={600}
+  height={270}
+  title="以 OpenFGA 元組表示貫穿全站的範例"
+  desc="五筆元組。user:anne 是 doc:readme 的 owner。user:beto 是 group:eng 的 member，而 group:eng#member 是 doc:readme 的 viewer。user:chen 是 folder:A 的 viewer，而 folder:A 是 doc:readme 的 parent。Anne 的路徑被標出：owner 導向 editor，editor 再導向 viewer。"
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 225, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 280, y: 135, label: "group:eng", kind: "object", mono: true },
+    { id: "folder", x: 280, y: 225, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 500, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer\n(eng#member)" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="每支箭頭都是一筆儲存的元組。Anne 的 owner 元組（標出部分）算作 editor，再算作 viewer；Beto 經由群組進入，Chen 則經由 viewer from parent 進入。"
+/>
+
+請注意，承載「擁有者是編輯者」與「編輯者是檢視者」的是模型，而不是元組：這正是論文的論點，即關係之間的關係屬於設定，而不是每個物件一筆元組（§2.3.1）。
+
+## 架構
+
+一套 OpenFGA 部署由什麼組成？文件描述的是共用一個 SQL 資料儲存區的多台伺服器。每台伺服器都可以為 Check 保有記憶體內快取，而正式環境指南建議使用 "a small pool of servers with high capacity (memory and CPU cores) instead of a big pool of servers, to increase cache hit ratios"（少量但高容量（記憶體與 CPU 核心）的伺服器，而非大量伺服器，以提高快取命中率）（[running in production](https://openfga.dev/docs/best-practices/running-in-production)）。對於 PostgreSQL，可以設定一個次要（唯讀副本）資料儲存區；`HIGHER_CONSISTENCY` 讀取會送往主資料庫（[configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)）。變更的消費者呼叫 `ReadChanges` 並保存接續權杖（[tuple changes](https://openfga.dev/docs/interacting/read-tuple-changes)）。
+
+<Graph
+  width={640}
+  height={320}
+  minWidth={560}
+  title="OpenFGA 架構"
+  desc="應用程式客戶端透過 gRPC 或 HTTP 將 Check 送往兩台 OpenFGA 伺服器之一。每台伺服器都有一個選用的記憶體內 Check 快取。兩台伺服器都寫入主要的 PostgreSQL 資料儲存區，並可從選用的唯讀副本讀取，該副本由 PostgreSQL 複製供應資料。變更消費者以接續權杖呼叫某台伺服器的 ReadChanges。"
+  nodes={[
+    { id: "app", x: 230, y: 40, label: "應用程式\n（gRPC／HTTP 客戶端）", kind: "client" },
+    { id: "cons", x: 520, y: 40, label: "變更消費者\n（輪詢 ReadChanges）", kind: "client" },
+    { id: "s1", x: 200, y: 155, label: "OpenFGA 伺服器\n+ Check 快取", kind: "server" },
+    { id: "s2", x: 440, y: 155, label: "OpenFGA 伺服器\n+ Check 快取", kind: "server" },
+    { id: "pri", x: 200, y: 275, label: "主資料儲存區\nPostgreSQL · MySQL · SQLite", kind: "store" },
+    { id: "rep", x: 480, y: 275, label: "唯讀副本\n（PostgreSQL，選用）", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "s1", label: "Check" },
+    { from: "cons", to: "s2", label: "ReadChanges + 權杖" },
+    { from: "s1", to: "pri", label: "寫入、HIGHER_CONSISTENCY", dir: "both" },
+    { from: "s2", to: "pri", dir: "both" },
+    { from: "s2", to: "rep", label: "其他讀取", dashed: true },
+    { from: "pri", to: "rep", label: "複製", dashed: true },
+  ]}
+  caption="黃色：伺服器。綠色：資料儲存區。藍色：客戶端。虛線：選用。文件沒有描述伺服器之間的 dispatch。"
+/>
+
+對照論文的圖 2（§3）：`aclservers` 彼此扇出工作，`watchservers` 推送串流，Leopard 維護一個反正規化的索引。此處引用的 OpenFGA 文件三者都沒有描述；伺服器從資料儲存區與自己的快取回答。
+
+## 沒有 zookie 的一致性
+
+OpenFGA 沒有 zookie。其文件在 "Future work"（未來工作）下坦承這一點：論文 "has a feature called `Zookies`"（有一項稱為 `Zookies` 的功能），而 OpenFGA "is considering a similar feature in future releases"（正在考慮於未來版本中加入類似的功能）（[consistency](https://openfga.dev/docs/interacting/consistency)）。取而代之的是，Read 與查詢 API 接受以下兩個值之一：
+
+| 模式 | 行為（[consistency 文件](https://openfga.dev/docs/interacting/consistency)） | 論文中的對應 |
+| --- | --- | --- |
+| `MINIMIZE_LATENCY`（預設） | "will serve queries from the cache when possible"（在可能時從快取提供查詢結果） | 不帶 zookie 的請求："a reasonably recent snapshot"（相當新的快照）（§2.4.1） |
+| `HIGHER_CONSISTENCY` | "will skip the cache and query the database directly"（略過快取，直接查詢資料庫） | 沒有完全對應者；最接近的是在最新快照上評估 |
+
+快取 "disabled by default"（預設停用），此時 "all queries will have strong consistency regardless of the consistency mode specified"（無論指定哪種一致性模式，所有查詢都具有強一致性）（[consistency](https://openfga.dev/docs/interacting/consistency)）。只有在開啟快取之後，模式才有意義。
+
+在快取開啟的情況下，Chen 從資料夾 A 中被移除後，是否仍能立即看到 readme？
+
+<Swimlane
+  lanes={["應用程式", "OpenFGA 伺服器", "資料儲存區"]}
+  laneWidth={190}
+  timeLabel="時間"
+  title="OpenFGA 中的快取與一致性模式"
+  desc="在啟用 Check 快取的情況下，對 Chen 與 readme 的第一次檢查被允許並快取。接著應用程式刪除 Chen 在資料夾 A 上的 viewer 元組。以 MINIMIZE_LATENCY 進行的第二次檢查可能由快取回答，仍然顯示允許。以 HIGHER_CONSISTENCY 進行的第三次檢查略過快取，讀取資料儲存區，結果被拒絕。"
+  events={[
+    { lane: 0, t: 0, label: "Chen 能檢視嗎？", kind: "read" },
+    { lane: 1, t: 0, label: "允許，已快取", kind: "note" },
+    { lane: 0, t: 1, label: "刪除 Chen 的元組", kind: "write" },
+    { lane: 2, t: 1, label: "元組已刪除", kind: "write" },
+    { lane: 0, t: 2, label: "Chen 能檢視嗎？", kind: "read" },
+    { lane: 1, t: 2, label: "快取：允許", kind: "bad" },
+    { lane: 0, t: 3, label: "Chen 能檢視嗎？", kind: "read" },
+    { lane: 2, t: 3, label: "讀取元組", kind: "read" },
+    { lane: 1, t: 4, label: "拒絕", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0], label: "Check" },
+    { from: [0, 1], to: [2, 1], label: "Write（刪除）" },
+    { from: [0, 2], to: [1, 2], label: "MINIMIZE_LATENCY" },
+    { from: [0, 3], to: [2, 3], label: "HIGHER_CONSISTENCY" },
+    { from: [2, 3], to: [1, 4], dashed: true },
+  ]}
+  caption="第 2 列正是文件所警告的情況：若結果來自快取，元組變更 “might not be taken in consideration”（可能不會被納入考量）。zookie 能讓應用程式要求「至少與我的寫入一樣新」（§2.2）；在這裡，選擇只有全有或全無。"
+/>
+
+文件建議逐請求決定：如果應用程式記錄了資源最後被修改的時間，就可以將該時間與快取 TTL 比較，以在兩種模式之間選擇（[consistency](https://openfga.dev/docs/interacting/consistency)）。這個時間戳記扮演了 zookie 的部分角色，由應用程式保存。另外也有快取失效旗標（`cache-controller-enabled`），會檢查 store 最近是否有寫入。
+
+## 與論文的差異
+
+- **沒有 zookie。** 不傳回也不接受任何一致性權杖；取而代之的是兩種模式加上一個預設關閉的快取（[consistency](https://openfga.dev/docs/interacting/consistency)）。論文的一致性模型建立在 zookie 之上（§2.2）。
+- **變更以輪詢取得。** `ReadChanges` 傳回一頁 "sorted by ascending time"（依時間遞增排序）的元組變更，並附上接續權杖（[`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)）。論文的 Watch 是帶有心跳 zookie 的串流（§2.4.3）。
+- **儲存。** 論文使用 Spanner（§3.1）。OpenFGA 提供 `memory`（預設，"Data is lost between server restarts"，伺服器重新啟動後資料會遺失）、PostgreSQL（可選用唯讀副本）、MySQL 與 SQLite（[configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)）。
+- **條件。** 像 `[user with non_expired_grant]` 這樣的型別限制，讓元組只在某個 CEL 條件成立時才計入（[conditions](https://openfga.dev/docs/modeling/conditions)）。論文的元組（§2.1）沒有條件。
+- **情境元組。** 隨單一 Check、ListObjects、ListUsers 或 Expand 請求送出的元組，"not persisted in the datastore"（不會持久化到資料儲存區中）（[concepts](https://openfga.dev/docs/concepts)、[contextual tuples](https://openfga.dev/docs/interacting/contextual-tuples)）。
+- **萬用字元。** `[user, user:*]` 允許公開授權（[configuration language](https://openfga.dev/docs/configuration-language)）；論文的元組文法沒有萬用字元（§2.1）。
+- **store 與模型版本。** 一個 store 存放 "one or more versions of an authorization model"（授權模型的一個或多個版本）及其元組；"Store data cannot be shared across stores"（store 的資料無法跨 store 共用）（[concepts](https://openfga.dev/docs/concepts)）。在論文中，設定存放在一張以命名空間 ID 為鍵的表中，旁邊是設定更新的變更日誌，而每個請求都在單一的設定快照時間戳記上評估（§3.1.3、§3.2.2）。OpenFGA 的檢查可以指名它所使用的模型版本。
+- **沒有 Leopard。** 此處引用的文件描述的是 Check 快取與 iterator 快取，而不是像 Leopard 那樣預先計算的集合索引（§3.2.4）。
+- **列出 API。** `ListObjects`、`StreamedListObjects` 與 `ListUsers` 不在論文的 API 之中（§2.4）。
+
+## 狀態
+
+截至 2026-11-13：活躍。最新版本 v1.22.1，發布於 2026-10-28；首個版本 v0.1.0 發布於 2022-06-10；GitHub 星數約 6.1k；Apache-2.0（[儲存庫](https://github.com/openfga/openfga)、[releases](https://github.com/openfga/openfga/releases)）。
+
+- 2022 年 6 月：開源（[專案文章，2026-01-07](https://openfga.dev/blog/incubation-announcement)）。
+- 2022 年：被接受為 CNCF Sandbox 專案。來源之間的日期不一致：CNCF 的專案頁面說 OpenFGA "was accepted to CNCF on September 14, 2022"（於 2022 年 9 月 14 日被 CNCF 接受），其公告說是 2022 年 9 月；專案自己的文章則說是 2022 年 12 月（[CNCF project page](https://www.cncf.io/projects/openfga/)、[CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)、[專案文章](https://openfga.dev/blog/incubation-announcement)）。
+- 2025-10-28：依 CNCF 專案頁面，晉升到 Incubating 成熟度等級。
+- 2025-11-11：CNCF 宣布其技術監督委員會 "has voted to accept OpenFGA as a CNCF incubating project"（已投票接受 OpenFGA 成為 CNCF 孵化專案）（[CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)）。
+- 託管服務為 Auth0 FGA（[docs](https://docs.fga.dev/fga)）。
+
+## 資料來源
+
+- [https://github.com/openfga/openfga](https://github.com/openfga/openfga)
+- [https://github.com/openfga/openfga/releases](https://github.com/openfga/openfga/releases)
+- [https://openfga.dev/docs](https://openfga.dev/docs)
+- [https://openfga.dev/docs/concepts](https://openfga.dev/docs/concepts)
+- [https://openfga.dev/docs/configuration-language](https://openfga.dev/docs/configuration-language)
+- [https://openfga.dev/docs/interacting/consistency](https://openfga.dev/docs/interacting/consistency)
+- [https://openfga.dev/docs/interacting/read-tuple-changes](https://openfga.dev/docs/interacting/read-tuple-changes)
+- [https://openfga.dev/docs/interacting/contextual-tuples](https://openfga.dev/docs/interacting/contextual-tuples)
+- [https://openfga.dev/docs/modeling/conditions](https://openfga.dev/docs/modeling/conditions)
+- [https://openfga.dev/docs/best-practices/running-in-production](https://openfga.dev/docs/best-practices/running-in-production)
+- [https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)
+- [https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)
+- [https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga](https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga)
+- [https://openfga.dev/blog/incubation-announcement](https://openfga.dev/blog/incubation-announcement)
+- [https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
+- [https://www.cncf.io/projects/openfga/](https://www.cncf.io/projects/openfga/)
+- [https://docs.fga.dev/fga](https://docs.fga.dev/fga)

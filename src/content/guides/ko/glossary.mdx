@@ -1,0 +1,165 @@
+---
+title: "용어집"
+description: "Zanzibar 논문에서 독자가 만나는 모든 용어를 쉬운 말로 풀고, 그것을 설명하는 가이드 페이지와 논문 절을 가리킨다."
+section: guide
+part: reference
+order: 16
+checked: "2026-11-13"
+paper: []
+---
+
+용어는 영어 표기의 알파벳 순서로 배열했다. 논문의 설정 언어에 나오는 코드 이름(`_this`, `computed_userset`, `tuple_to_userset`)은 밑줄을 빼고 정렬했다. 예는 Anne, Beto, Chen, `folder:A`에 있는 `doc:readme`, `group:eng`로 이루어진 예제를 쓴다.
+
+## A–C
+
+<dl>
+  <dt id="acl">ACL</dt>
+  <dd>접근 제어 목록(access control list): 객체에 대해 어떤 일을 할 수 있도록 허용된 사용자의 집합. Zanzibar에서 ACL은 목록 하나로 저장되지 않고 여러 관계 튜플로 저장된다. 더 보기: <a href="../access-control-models/">접근 제어 모델</a>, §1, §2.1.</dd>
+  <dt id="aclserver">aclserver</dt>
+  <dd>Zanzibar의 주된 서버 유형. Check, Read, Expand, Write에 답하고, 클러스터 내 다른 aclserver로 작업을 팬아웃한다. 더 보기: <a href="../architecture/">아키텍처</a>, §3.</dd>
+  <dt id="at-least-as-fresh">최소한 그만큼은 최신(at-least-as-fresh)</dt>
+  <dd>zookie에 대한 규칙: Zanzibar는 zookie의 타임스탬프 그 자체에서만이 아니라, 그보다 오래되지 않은 어떤 스냅샷에서든 평가할 수 있다. 이 자유 덕분에 대부분의 요청을 로컬 복제본에서 처리할 수 있다. 더 보기: <a href="../consistency/">일관성</a>, §2.2.</dd>
+  <dt id="bounded-staleness">오래된 정도 제한(bounded staleness)</dt>
+  <dd>스냅샷 읽기는 "지금"보다 오래될 수 있지만 한도보다 오래되어서는 안 된다. Zanzibar에서 그 한도는 클라이언트가 보내는 zookie다. Spanner는 이를 직접 제공한다. 클라이언트가 오래된 정도의 상한을 주면 Spanner가 타임스탬프를 고른다(<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner 논문</a>, §4.1). 더 보기: <a href="../consistency/">일관성</a>, §2.2.</dd>
+  <dt id="cache-stampede">캐시 스탬피드(cache stampede)</dt>
+  <dd>캐시되지 않은 같은 결과에 대한 많은 동시 요청이, 캐시가 채워지기 전에 한꺼번에 저장소로 가는 것. Zanzibar는 락 테이블로 이를 막는다. 논문은 이 용어에 대해 <a href="https://en.wikipedia.org/wiki/Cache_stampede">Wikipedia 문서</a>를 인용한다(참고 문헌 [3]). 더 보기: <a href="../architecture/">아키텍처</a>, §3.2.5.</dd>
+  <dt id="changelog">변경 로그(changelog)</dt>
+  <dd>튜플 갱신의 이력을 보관하는 Spanner 데이터베이스로, 각 튜플 쓰기와 같은 트랜잭션에서 쓰인다. Watch는 여기서 읽는다. 더 보기: <a href="../architecture/">아키텍처</a>, §3.1.2.</dd>
+  <dt id="check">Check</dt>
+  <dd>사용자가 유저셋 ⟨<em>object#relation</em>⟩에 속하는지 묻는 API 호출. 예를 들어 "Chen은 <code>doc:readme</code>의 열람자인가?". 주어진 zookie보다 이르지 않은 스냅샷에서 평가된다. 더 보기: <a href="../relation-tuples/#그래프-탐색으로서의-check">관계 튜플</a>, §2.4.4, §3.2.3.</dd>
+  <dt id="computed-userset"><code>computed_userset</code></dt>
+  <dd>같은 객체에 대한 다른 관계의 유저셋을 취하는 재작성 규칙 리프. 예를 들어 "모든 편집자는 열람자다". 더 보기: <a href="../relation-tuples/#네임스페이스-설정">관계 튜플</a>, §2.3.1.</dd>
+  <dt id="consistent-hashing">일관된 해싱(consistent hashing)</dt>
+  <dd>서버를 추가하거나 제거해도 키의 작은 비율만 이동하도록 키를 서버에 할당하는 방법. Zanzibar는 이를 사용하여 캐시 항목을 클러스터의 서버들에 분산한다. 웹 캐시를 위해 <a href="https://people.csail.mit.edu/karger/Papers/web.pdf">Karger et al. (STOC 1997)</a>이 도입했다. 더 보기: <a href="../architecture/">아키텍처</a>, §3.2.5.</dd>
+  <dt id="content-change-check">content-change 검사(content-change check)</dt>
+  <dd>사용자가 새 콘텐츠를 저장하려 할 때 보내는 Check. zookie를 담지 않고, 최신 스냅샷에서 평가되며, 클라이언트가 새 콘텐츠 버전과 함께 저장하는 zookie를 반환한다. 더 보기: <a href="../consistency/">일관성</a>, §2.2, §2.4.4.</dd>
+</dl>
+
+## D–H
+
+<dl>
+  <dt id="denormalization">비정규화(denormalization)</dt>
+  <dd>평탄화된 그룹 간 멤버십처럼 파생된 데이터를 원래 행에서 계산하는 대신 미리 계산한 사본으로 저장하는 것. Zanzibar는 저장소에서는 이를 피하고 Leopard에서만 사용한다. 더 보기: <a href="../leopard/">Leopard</a>, §3.2.4, §3.2.5.</dd>
+  <dt id="exclusion">차집합(exclusion)</dt>
+  <dd>재작성 규칙 연산자: 한 유저셋에는 속하고 다른 유저셋에는 속하지 않는 사용자. 더 보기: <a href="../relation-tuples/#네임스페이스-설정">관계 튜플</a>, §2.3.1.</dd>
+  <dt id="expand">Expand</dt>
+  <dd>재작성 규칙을 따라 ⟨<em>object#relation</em>⟩의 실효 유저셋을 트리로 반환하는 API 호출. 리프는 사용자 ID나 유저셋이고, 내부 노드는 합집합, 교집합, 차집합이다. 더 보기: <a href="../relation-tuples/#read와-expand">관계 튜플</a>, §2.4.5.</dd>
+  <dt id="external-consistency">외부 일관성(external consistency)</dt>
+  <dd>갱신 x가 갱신 y보다 먼저 일어나면, 두 갱신이 시스템 밖에서 조율되었더라도 x는 y보다 작은 타임스탬프를 받는다. Zanzibar는 이를 Spanner로부터 얻는다. 논문은 이 용어에 대해 Gifford의 1981년 Stanford 학위 논문을 인용하며(참고 문헌 [18]), <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner</a>는 이를 다음과 같이 서술한다. T1이 T2가 시작되기 전에 커밋되면 T1의 커밋 타임스탬프는 T2의 것보다 작다. 더 보기: <a href="../consistency/">일관성</a>, §2.2.</dd>
+  <dt id="fan-out">팬아웃(fan-out)</dt>
+  <dd>요청 하나가 많은 하위 요청으로 바뀌는 것. 예를 들어 aclserver가 Check의 일부를 클러스터의 다른 서버로 보내는 것. 더 보기: <a href="../architecture/">아키텍처</a>, §3, §3.2.5.</dd>
+  <dt id="heartbeat-zookie">하트비트 zookie(heartbeat zookie)</dt>
+  <dd>각 Watch 응답에 들어 있는 zookie로, 스트림이 어디까지 도달했는지 표시하여 클라이언트가 그 지점부터 재개할 수 있게 한다. 더 보기: §2.4.3.</dd>
+  <dt id="hedging">헤징(hedging)</dt>
+  <dd>첫 서버가 느리다고 알려지면 같은 요청을 두 번째 서버에 보내고, 먼저 도착하는 응답을 쓰고 다른 것은 취소하는 것. Zanzibar는 Spanner와 Leopard에 대한 호출을 헤징하며, 자신의 서버 사이의 호출은 헤징하지 않는다. 이 기법은 Dean and Barroso, <a href="https://research.google/pubs/the-tail-at-scale/">"The Tail at Scale"</a>(CACM, 2013)에 기술되어 있다. 더 보기: <a href="../architecture/">아키텍처</a>, §3.2.7.</dd>
+  <dt id="hot-spot">핫스팟(hot spot)</dt>
+  <dd>다른 것보다 훨씬 많은 트래픽을 받아 그것을 저장한 서버를 과부하시킬 수 있는 키, 객체 또는 그룹. 예를 들어 많은 ACL이 공유하는 인기 있는 그룹. 더 보기: <a href="../architecture/">아키텍처</a>, §3.2.5.</dd>
+</dl>
+
+## I–N
+
+<dl>
+  <dt id="intersection">교집합(intersection)</dt>
+  <dd>재작성 규칙 연산자: 여러 유저셋 모두에 속하는 사용자. 더 보기: <a href="../relation-tuples/#네임스페이스-설정">관계 튜플</a>, §2.3.1.</dd>
+  <dt id="leopard">Leopard</dt>
+  <dd>깊게 중첩되었거나 매우 넓은 그룹을 위한 인덱싱 시스템. 그룹 멤버십을 정수 집합으로 평탄화하여 멤버십 검사를 집합 교집합으로 만들고, Watch로 최신 상태를 유지한다. 더 보기: <a href="../leopard/">Leopard</a>, §3.2.4.</dd>
+  <dt id="lock-table">락 테이블(lock table)</dt>
+  <dd>처리 중인 읽기와 검사를 담는 서버별 테이블. 캐시 키를 공유하는 요청 가운데 하나만 실행되고, 나머지는 그 결과를 기다린다. 더 보기: <a href="../architecture/">아키텍처</a>, §3.2.5.</dd>
+  <dt id="lock-tuple">락 튜플(lock tuple)</dt>
+  <dd>클라이언트가 객체에 쓸 때마다 touch하는 일반 관계 튜플로, 읽기 이후 아무도 쓰지 않았다는 조건을 쓰기에 붙일 수 있게 한다. 더 보기: §2.4.2.</dd>
+  <dt id="namespace">네임스페이스(namespace)</dt>
+  <dd><code>doc</code>이나 <code>folder</code>처럼 클라이언트가 정의한 객체의 종류. <code>doc:readme</code>에서 콜론 앞부분이다. 각 네임스페이스의 튜플은 자신의 데이터베이스에 있다. 더 보기: <a href="../relation-tuples/#네임스페이스-설정">관계 튜플</a>, §2.1, §2.3, §3.1.1.</dd>
+  <dt id="namespace-config">네임스페이스 설정(namespace config)</dt>
+  <dd>네임스페이스 하나의 설정: 각각 선택적인 유저셋 재작성 규칙을 가진 관계들, 그리고 샤딩 같은 저장소 매개변수. 더 보기: <a href="../relation-tuples/#네임스페이스-설정">관계 튜플</a>, §2.3, §3.1.3.</dd>
+  <dt id="new-enemy-problem">new enemy 문제(new enemy problem)</dt>
+  <dd>검사가 두 ACL 변경의 순서를 무시했거나 콘텐츠보다 오래된 ACL을 적용했기 때문에, ACL에서 제거된 사람에게 콘텐츠를 보여 주는 것. 더 보기: <a href="../consistency/">일관성</a>, §2.2.</dd>
+</dl>
+
+## O–R
+
+<dl>
+  <dt id="object">객체(object)</dt>
+  <dd>보호 대상. <code>doc:readme</code>처럼 ⟨<em>namespace</em>⟩:⟨<em>object_id</em>⟩로 쓴다. 더 보기: <a href="../relation-tuples/#문법">관계 튜플</a>, §2.1.</dd>
+  <dt id="paxos">Paxos</dt>
+  <dd>일부 복제본이 장애를 일으켜도 복제본 그룹이 각 쓰기에 합의할 수 있게 하는 합의 프로토콜. 논문은 Paxos 트랜잭션이 빠르게 커밋되도록 Zanzibar 저장소의 투표 복제본 다섯 개를 서로 25 ms 이내에 둔다. Lamport, <a href="https://lamport.azurewebsites.net/pubs/paxos-simple.pdf">"Paxos Made Simple"</a>(2001)을 보라. 더 보기: <a href="../architecture/">아키텍처</a>, §3.1.4.</dd>
+  <dt id="pointer-chasing">포인터 추적(pointer chasing)</dt>
+  <dd>유저셋을 한 번에 한 홉씩 따라가서 Check에 답하는 것. readme의 열람자에서 <code>group:eng#member</code>로, 다시 그 그룹의 멤버로, 이런 식이다. 그룹이 깊거나 넓으면 느리다. 더 보기: <a href="../relation-tuples/#그래프-탐색으로서의-check">관계 튜플</a>, <a href="../leopard/">Leopard</a>, §3.2.3, §3.2.4.</dd>
+  <dt id="read">Read</dt>
+  <dd>하나 이상의 튜플셋과 일치하는 저장된 튜플을 반환하는 API 호출. 재작성 규칙을 적용하지 않는다. 더 보기: <a href="../relation-tuples/#read와-expand">관계 튜플</a>, §2.4.1.</dd>
+  <dt id="recent-request">Recent 요청(Recent request)</dt>
+  <dd><a href="#safe-and-recent-requests">Safe / Recent 요청</a>을 보라. 더 보기: <a href="../consistency/">일관성</a>, §4.1.</dd>
+  <dt id="relation">관계(relation)</dt>
+  <dd>객체와 사용자 사이, 또는 두 객체 사이(<code>parent</code>가 문서를 폴더와 연결하듯)의 이름 붙은 관계. <code>owner</code>, <code>viewer</code>, <code>member</code>, <code>parent</code> 등. 네임스페이스 설정에서 정의된다. 더 보기: <a href="../relation-tuples/#문법">관계 튜플</a>, §2.1, §2.3.</dd>
+  <dt id="relation-tuple">관계 튜플(relation tuple)</dt>
+  <dd>저장된 사실 하나, ⟨<em>object</em>⟩#⟨<em>relation</em>⟩@⟨<em>user</em>⟩. 예를 들어 <code>doc:readme#owner@user:anne</code>. Zanzibar가 저장하는 유일한 종류의 권한 데이터다. 더 보기: <a href="../relation-tuples/">관계 튜플</a>, §2.1.</dd>
+  <dt id="replica">복제본(replica)</dt>
+  <dd>한 위치에 있는 데이터의 사본. Zanzibar의 데이터는 수십 곳에 복제되어 대부분의 읽기를 가까운 곳에서 처리할 수 있다. 더 보기: <a href="../architecture/">아키텍처</a>, §3.1.4.</dd>
+</dl>
+
+## S
+
+<dl>
+  <dt id="safe-and-recent-requests">Safe / Recent 요청(Safe / Recent requests)</dt>
+  <dd>zookie의 나이에 따른 논문의 요청 구분. Safe 요청은 10초보다 오래된 zookie를 담으며 보통 리전 안에서 처리될 수 있다. Recent 요청은 그보다 새로운 zookie를 담으며 리전 간 왕복이 필요한 경우가 많다. 더 보기: <a href="../consistency/">일관성</a>, §4.1.</dd>
+  <dt id="shard">샤드(shard)</dt>
+  <dd>따로 저장되고 제공되는 데이터베이스나 인덱스의 조각. 튜플의 샤드 ID는 보통 객체 ID에서 오며, 매우 큰 그룹에서는 객체 ID와 사용자에서 온다. 더 보기: <a href="../architecture/">아키텍처</a>, §3.1.1, §3.2.4.</dd>
+  <dt id="snapshot-read">스냅샷 읽기(snapshot read)</dt>
+  <dd>데이터베이스를 정확히 한 타임스탬프 시점으로 보는 읽기: 그 시점 이전의 모든 쓰기는 보이고 이후의 쓰기는 보이지 않는다. Zanzibar는 각 Check를 단일 스냅샷에서 평가한다. Spanner는 이를 "a read in the past that executes without locking"(잠금 없이 실행되는 과거 시점의 읽기)으로 정의한다(<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner 논문</a>, §4.1). 더 보기: <a href="../consistency/">일관성</a>, §2.2.</dd>
+  <dt id="spanner">Spanner</dt>
+  <dd>Google의 글로벌 분산 데이터베이스. Zanzibar는 튜플, 네임스페이스 설정, 변경 로그를 여기에 저장하고 일관성을 위해 그 타임스탬프에 의존한다. <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Corbett et al., OSDI 2012</a>에 기술되어 있다. 더 보기: <a href="../consistency/">일관성</a>, <a href="../architecture/">아키텍처</a>, §2.2, §3.</dd>
+</dl>
+
+## T
+
+<dl>
+  <dt id="tail-latency">꼬리 지연 시간(tail latency)</dt>
+  <dd>99번째나 99.9번째 백분위수처럼 가장 느린 요청들의 지연 시간. 검색 결과 한 페이지에 수십에서 수백 건의 검사가 필요할 수 있으므로 중요하다. Dean and Barroso, <a href="https://research.google/pubs/the-tail-at-scale/">"The Tail at Scale"</a>(CACM, 2013)을 보라. 더 보기: <a href="../architecture/#느린-spanner-읽기는-헤징된다">아키텍처</a>, §1, §3.2.7, §4.2, §4.5.</dd>
+  <dt id="this"><code>_this</code></dt>
+  <dd>이 객체와 관계에 대해 저장된 튜플의 사용자를 반환하는 재작성 규칙 리프로, 그 튜플이 가리키는 유저셋도 포함한다. 관계에 규칙이 없을 때의 기본값이다. 더 보기: <a href="../relation-tuples/#네임스페이스-설정">관계 튜플</a>, §2.3.1.</dd>
+  <dt id="timestamp-quantization">타임스탬프 양자화(timestamp quantization)</dt>
+  <dd>평가 타임스탬프를 1초나 10초 같은 거친 단위로 올림하여, 많은 요청이 타임스탬프와 그에 따른 캐시 항목을 공유하게 하는 것. 일관성을 약화시키지 않는다. zookie는 하한만 정하며, 미래 타임스탬프에서의 Spanner 스냅샷 읽기는 TrueTime이 그 시점을 지날 때까지 기다리기 때문이다(§3.2.5). 더 보기: <a href="../architecture/">아키텍처</a>, <a href="../consistency/">일관성</a>, §2.2, §3.2.5.</dd>
+  <dt id="truetime">TrueTime</dt>
+  <dd>각 쓰기에 인과적 순서를 반영하는 마이크로초 해상도의 타임스탬프를 부여하는 Spanner의 시계 메커니즘. Zanzibar의 타임스탬프를 의미 있게 만드는 것이 이것이다. <code>TT.now()</code>는 실제 시각을 반드시 포함하는 구간을 반환한다. <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner 논문</a>(OSDI 2012) §3을 보라. 더 보기: <a href="../consistency/">일관성</a>, §2.2, §3.2.5.</dd>
+  <dt id="tupleset">튜플셋(tupleset)</dt>
+  <dd>저장된 튜플의 선택자: 단일 튜플 키, 또는 객체 ID나 유저셋에 대한 모든 튜플이며, 선택적으로 관계 하나로 제한된다. Read와 <code>tuple_to_userset</code>이 사용한다. 더 보기: <a href="../relation-tuples/#read와-expand">관계 튜플</a>, §2.4.1.</dd>
+  <dt id="tuple-to-userset"><code>tuple_to_userset</code></dt>
+  <dd>객체의 일부 튜플을 읽고 각각으로부터 유저셋을 계산하는 재작성 규칙 리프. 예를 들어 "readme의 상위 폴더를 찾아 그 열람자를 취한다". 더 보기: <a href="../relation-tuples/#네임스페이스-설정">관계 튜플</a>, §2.3.1.</dd>
+</dl>
+
+## U–W
+
+<dl>
+  <dt id="union">합집합(union)</dt>
+  <dd>재작성 규칙 연산자: 여러 유저셋 가운데 어느 하나에라도 속하는 사용자. 논문의 그림 1에서 <code>viewer</code>의 세 가지는 모두 합집합으로 결합된다. 더 보기: <a href="../relation-tuples/#네임스페이스-설정">관계 튜플</a>, §2.3.1.</dd>
+  <dt id="user">사용자(user)</dt>
+  <dd>튜플의 셋째 부분: 단일 사용자 ID이거나 유저셋. 더 보기: <a href="../relation-tuples/#문법">관계 튜플</a>, §2.1.</dd>
+  <dt id="userset">유저셋(userset)</dt>
+  <dd>그 객체에 대해 그 관계를 가진 모든 사용자를 나타내는 ⟨<em>object</em>⟩#⟨<em>relation</em>⟩ 쌍. 예를 들어 <code>group:eng#member</code>. 튜플이 그룹에 접근을 부여하고, 그룹이 그룹을 포함할 수 있게 한다. 더 보기: <a href="../relation-tuples/#유저셋-그룹을-가리키는-튜플">관계 튜플</a>, §2.1.</dd>
+  <dt id="userset-rewrite-rule">유저셋 재작성 규칙(userset rewrite rule)</dt>
+  <dd>관계 설정의 일부: 객체 ID에서 유저셋 표현식 트리로 가는 함수로, <code>_this</code>, <code>computed_userset</code>, <code>tuple_to_userset</code>을 합집합, 교집합, 차집합으로 결합하여 만든다. 더 보기: <a href="../relation-tuples/#네임스페이스-설정">관계 튜플</a>, §2.3.1.</dd>
+  <dt id="userset-tree">유저셋 트리(userset tree)</dt>
+  <dd>Expand의 결과: 리프는 사용자 ID나 유저셋이고, 내부 노드는 집합 연산자다. 더 보기: <a href="../relation-tuples/#read와-expand">관계 튜플</a>, §2.4.5.</dd>
+  <dt id="watch">Watch</dt>
+  <dd>하나 이상의 네임스페이스에 대한 튜플 변경을 zookie부터 시작하여 타임스탬프 순서로 스트리밍하는 API 호출. Leopard 같은 보조 인덱스를 최신으로 유지하는 데 쓰인다. 더 보기: <a href="../architecture/#watch-경로">아키텍처</a>, §2.4.3.</dd>
+  <dt id="watchserver">watchserver</dt>
+  <dd>변경 로그를 추적하여 Watch에 답하는 서버 유형. 더 보기: <a href="../architecture/">아키텍처</a>, §3.</dd>
+  <dt id="write">Write</dt>
+  <dd>튜플을 추가하거나 제거하는 API 호출. 객체의 모든 튜플을 다시 쓰는 클라이언트는 읽기를 한 다음, 락 튜플이 바뀌지 않았다는 조건부로 쓰기를 한다. 더 보기: <a href="../architecture/#watch-경로">아키텍처</a>(쓰기 하나가 건드리는 것), §2.4.2.</dd>
+</dl>
+
+## Z
+
+<dl>
+  <dt id="zookie">zookie</dt>
+  <dd>타임스탬프를 인코딩한 불투명한 토큰. 클라이언트는 content-change 검사에서 zookie를 받고(Read와 Write 응답에도 zookie가 들어 있다), 콘텐츠와 함께 저장하며, 이후 검사와 함께 보내 적어도 그만큼 최신인 스냅샷에서 평가되도록 한다. 더 보기: <a href="../consistency/">일관성</a>, §2.2, §2.4.</dd>
+</dl>
+
+## 출처
+
+- J. C. Corbett et al., "Spanner: Google's Globally-Distributed Database", OSDI '12, [PDF](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
+- D. Karger et al., "Consistent Hashing and Random Trees", STOC '97, [PDF](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- J. Dean and L. A. Barroso, "The Tail at Scale", CACM 56(2), 2013, [research.google](https://research.google/pubs/the-tail-at-scale/)
+- L. Lamport, "Paxos Made Simple", ACM SIGACT News 32(4), 2001, [PDF](https://lamport.azurewebsites.net/pubs/paxos-simple.pdf)
+- D. K. Gifford, "Information Storage in a Decentralized Computer System", PhD thesis, Stanford University, 1981 (paper reference [18]; no online copy checked)
+- "Cache stampede", Wikipedia, [en.wikipedia.org](https://en.wikipedia.org/wiki/Cache_stampede) (the source the paper cites)
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

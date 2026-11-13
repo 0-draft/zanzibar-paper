@@ -8,8 +8,10 @@ import type { UiStrings } from "../i18n/ui.ts";
 
 interface Props {
   t: UiStrings;
+  /** "paper": every option. "prose": a single text, so only size and theme. */
+  mode?: "paper" | "prose";
 }
-const { t } = Astro.props;
+const { t, mode = "paper" } = Astro.props;
 ---
 
 <details class="viewmenu pop" data-js-only hidden>
@@ -20,13 +22,13 @@ const { t } = Astro.props;
     >
   </summary>
   <form class="pop-panel viewmenu-panel" data-view-form>
-    <fieldset>
+    {mode === "paper" && (<fieldset>
       <legend>{t.show}</legend>
       <label><input type="radio" name="view" value="both" checked /> {t.viewBoth}</label>
       <label><input type="radio" name="view" value="original" /> {t.viewOriginal}</label>
       <label><input type="radio" name="view" value="translation" /> {t.viewTranslation}</label>
-    </fieldset>
-    <fieldset>
+    </fieldset>)}
+    {mode === "paper" && (<fieldset>
       <legend>{t.layout}</legend>
       <div class="only-wide">
         <label><input type="radio" name="layout" value="side" checked /> {t.layoutSide}</label>
@@ -36,7 +38,7 @@ const { t } = Astro.props;
         ><input type="checkbox" name="first" value="translation" />
         <span class="only-wide">{t.translationFirst}</span><span class="only-narrow">{t.translationOnTop}</span></label
       >
-    </fieldset>
+    </fieldset>)}
     <fieldset class="sizes">
       <legend>{t.textSize}</legend>
       <label><input type="radio" name="size" value="s" /> {t.sizeSmall}</label>

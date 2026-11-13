@@ -1,0 +1,217 @@
+---
+title: "Zanzibar は必要か"
+description: "自前のデータベースのロールテーブル、OPA や Cedar のようなポリシーエンジン、Zanzibar 型のサービス、またはその組み合わせを同じ要件で比べ、公開されている批判と反論を紹介する。"
+section: guide
+part: practice
+order: 14
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.2", "2.3.1", "2.4.3", "2.4.5", "3", "4.2"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+論文が述べているのは "billions of objects shared by billions of users" (数十億のユーザーが共有する数十億のオブジェクト) のために作られたシステムである (§1)。ほとんどのアプリケーションはそれより小さく、読者が最もよく抱く疑問は、そもそもそれが必要なのかどうかである。このページでは、よくある 4 つの答えを同じ要件で比べる。アプリケーション自身のデータベースに置くロールテーブル、ポリシーエンジン、Zanzibar 型のサービス、そしてそれらの組み合わせである。勝者は決めない。引用する出典どうしは実際に意見が食い違っており、そのまま引用する。そのうちいくつかはベンダーであり、そのように明記する。
+
+これらの選択肢の背後にあるモデル (ACL、RBAC、ABAC、ReBAC) は [ACL、RBAC、ABAC、ReBAC](../access-control-models/) で比べている。オープンソースの Zanzibar 型システムは [Zanzibar 型システムの比較](../../ecosystem/compare/) で比べている。
+
+## 4 つの選択肢
+
+**自前のデータベースのロールテーブル。** 付与は、それが保護するデータの隣に置かれた行であり (たとえば `(user_id, role, doc_id)`)、アプリケーションはクエリでそれをチェックする。「Anne が見られるドキュメント」の一覧は結合である。入れ子のグループには、メンバーシップの辺をたどるクエリが必要になる。PostgreSQL では "Using `RECURSIVE`, a `WITH` query can refer to its own output" (`RECURSIVE` を使うと、`WITH` クエリは自身の出力を参照できる) ([PostgreSQL docs](https://www.postgresql.org/docs/current/queries-with.html))。Oso の "Why Authorization Is Hard" に関する 2021 年の Hacker News のスレッドで、あるコメント投稿者は、多くのプロジェクトは主にデータベースアクセスに関するものなので、データベース自身でルールを強制すれば十分かもしれないと主張した ([HN 28543457](https://news.ycombinator.com/item?id=28543457))。
+
+**ポリシーエンジン。** ルールはポリシー言語で書かれ、アプリケーションが渡すデータ、またはエンジンがキャッシュしたデータに対して評価される。"Cedar is a language for writing authorization policies and making authorization decisions based on those policies" (Cedar は認可ポリシーを書き、そのポリシーに基づいて認可判定を行うための言語である)、"Cedar evaluates each request against the provided policies and entities to make an allow or deny decision" (Cedar は与えられたポリシーとエンティティに対して各リクエストを評価し、許可または拒否の判定を下す) ([Cedar docs](https://docs.cedarpolicy.com/))。OPA は "a cache or replica of that data, just as OPA has a cache/replica of policy" (OPA がポリシーのキャッシュ/レプリカを持つのと同様に、そのデータのキャッシュまたはレプリカ) を保持し、それはバンドル、プッシュ、リクエストの入力、または評価中の呼び出しによって読み込まれる。バンドルの場合、"OPA stores the entire datasource at once in memory" (OPA はデータソース全体を一度にメモリに格納する) ([OPA external data](https://www.openpolicyagent.org/docs/external-data))。
+
+**Zanzibar 型のサービス。** 関係はあらかじめ認可サービスに格納され、ネットワーク越しに問い合わせられる。AuthZed (SpiceDB を開発する会社) はその違いをこう表現している。"authorization data must be explicitly written into the backing datastore ahead of query time, just like an RDBMS" (RDBMS と同じように、認可データはクエリの前に背後のデータストアへ明示的に書き込まれなければならない) ([AuthZed blog, 2023-11-29](https://authzed.com/blog/policy-based-access-control))。1 つの共有サービスを持つ理由は、論文の §1 にある。それは "helps establish consistent semantics and user experience across applications" (アプリケーション間で一貫したセマンティクスとユーザー体験を確立しやすくする)、"makes it easier for applications to interoperate" (アプリケーション同士の相互運用を容易にする)、そして "a search index that respects access control and works across applications" (アクセス制御を尊重し、アプリケーションをまたいで機能する検索インデックス) のような共通基盤を支える。
+
+**組み合わせ。** 両方のモデルを持つ 1 つの製品 (SpiceDB の caveat、OpenFGA の condition。[ACL、RBAC、ABAC、ReBAC](../access-control-models/) を参照) か、2 つのシステムを並べて使うかのどちらかである。後者は下で論じる。
+
+判定に必要なデータはどこにあり、誰がそれを最新に保つのか。
+
+<Frames min="18rem">
+
+<Graph
+  width={280}
+  height={240}
+  title="ロールテーブル"
+  desc="アプリケーションは、自身のデータとロールテーブルの両方を保持する 1 つのデータベースを読み書きする。書き込みの経路は 1 つである。"
+  nodes={[
+    { id: "app", x: 140, y: 40, label: "アプリケーション", kind: "client" },
+    { id: "db", x: 140, y: 175, label: "アプリの DB:\ndocs + ロールテーブル", kind: "store", on: true },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "1 つのトランザクション", dir: "both", on: true },
+  ]}
+  caption="ロールテーブル: ストアは 1 つ、書き込みは 1 回。"
+/>
+
+<Graph
+  width={320}
+  height={240}
+  title="ポリシーエンジン"
+  desc="アプリケーションは自身のデータを自身のデータベースに置く。リクエストとともに入力とエンティティを送り、ポリシーエンジンに判定を求める。エンジンはポリシーと、任意でバンドルとして読み込んだデータのレプリカも保持する。"
+  nodes={[
+    { id: "app", x: 80, y: 40, label: "アプリケーション", kind: "client" },
+    { id: "db", x: 80, y: 180, label: "アプリの DB", kind: "store" },
+    { id: "pe", x: 240, y: 120, label: "ポリシーエンジン\n(OPA, Cedar)", kind: "server", on: true },
+    { id: "b", x: 240, y: 205, label: "ポリシー + データの\nバンドル", kind: "note" },
+  ]}
+  edges={[
+    { from: "app", to: "db", dir: "both" },
+    { from: "app", to: "pe", label: "入力 +\nエンティティ", on: true },
+    { from: "b", to: "pe", dashed: true },
+  ]}
+  caption="ポリシーエンジン: データはリクエストとともに送られるか、複製されて入る。"
+/>
+
+<Graph
+  width={280}
+  height={240}
+  title="Zanzibar 型のサービス"
+  desc="アプリケーションは自身のデータを自身のデータベースに書き込み、リレーションタプルを認可サービスに書き込む。認可サービスは自身のデータストアを持つ。チェックはサービスに送られる。2 つの書き込みは別々である。"
+  nodes={[
+    { id: "app", x: 140, y: 40, label: "アプリケーション", kind: "client" },
+    { id: "db", x: 60, y: 185, label: "アプリの DB", kind: "store" },
+    { id: "z", x: 215, y: 120, label: "認可サービス", kind: "server" },
+    { id: "zs", x: 215, y: 200, label: "tuples", kind: "store", mono: true },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "書き込み 1", on: true },
+    { from: "app", to: "z", label: "書き込み 2、\nチェック", on: true },
+    { from: "z", to: "zs", dir: "both" },
+  ]}
+  caption="Zanzibar 型: ストアは 2 つ、書き込みは 2 回。"
+/>
+
+</Frames>
+
+強調した矢印に注目してほしい。ロールテーブルでは、付与とデータは 1 つのトランザクションで変わる。ポリシーエンジンは作業をリクエスト時に移す。呼び出す側が事実を集めなければならない。独立した Zanzibar 型のサービスは作業を書き込み時に移す。アクセスに影響するすべての変更は、アプリケーションに 1 回、サービスに 1 回の計 2 回書き込まれる。AuthZed はこれを "the dual-write problem" (二重書き込み問題) と呼び、帯域外での一貫性チェックからトランザクショナルアウトボックスや durable execution まで、それに対処する方法を挙げている ([AuthZed blog, 2025-01-02](https://authzed.com/blog/the-dual-write-problem))。論文はこのコストを論じていない。"Zanzibar stores ACLs and their metadata in Spanner databases" (Zanzibar は ACL とそのメタデータを Spanner データベースに格納する) (§3) と述べ、クライアントが zookie を "in an atomic write to the client storage" (クライアントストレージへのアトミックな書き込みで) 格納すると述べている (§2.2) が、クライアントが自身のデータとタプルをどう揃えておくかは述べていない。
+
+## 要件と選択肢の対照
+
+各セルは、このページの段落と出典の短い要約である。「可能」は、そのセルに書いた作業をすればその選択肢で実現できることを意味する。
+
+| 要件 | 自前の DB のロールテーブル | ポリシーエンジン (OPA, Cedar) | Zanzibar 型のサービス | 組み合わせ |
+| --- | --- | --- | --- | --- |
+| 1 つのオブジェクトを 1 人のユーザーやグループと共有する | 可能: オブジェクトとサブジェクトごとに付与の行を 1 つ | 共有をデータとして渡すか複製すれば可能 | ネイティブ: 共有 1 件につきタプル 1 つ (§2.1) | 共有は関係のストアに、残りはポリシーとして |
+| 入れ子のグループ | 再帰クエリ (例: `WITH RECURSIVE`) | エンジン依存。データに階層全体を含める必要がある | ネイティブ: ユーザーセットは入れ子になる (§2.1)。深いグループにはコストがある。[Leopard](../leopard/) を参照 | 関係のストアから |
+| サービスをまたぐ一貫性 | 1 つのデータベース内で、1 つのトランザクション | 呼び出し側のデータが反映している状態次第。エンジンにスナップショットトークンはない | 論文の zookie (§2.2)。製品の対応はまちまち ([比較](../../ecosystem/compare/)) | 部分ごと。ポリシー側は呼び出し側の鮮度を引き継ぐ |
+| 監査: 誰が X を見られるか | 付与テーブルに対するクエリ | ルールとデータの分析。属性のルールでは難しい ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)) | Expand がユーザーセット木を返す (§2.4.5)。製品はルックアップ API を加えている | 関係の側は答えられる。ポリシーの側はポリシーエンジンと同じ |
+| 一覧: Anne は何を見られるか | 結合 | 部分評価または絞り込み。エンジン依存 | ルックアップ API または一括チェック。[protecting a list endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint) を参照 | 関係を保持するストアと同じ |
+| 1 回のチェックのレイテンシ | ローカルのクエリ 1 回 | データを集めた後、プロセス内またはサイドカーで評価 | ネットワーク呼び出し。Google は Safe チェックで p50 ≈ 3 ms と報告している (§4.2) | 両方のシステムが経路上にあれば呼び出し 2 回 |
+| 運用コスト | データベース以外になし | ポリシーとデータを各エンジンに配布する | ステートフルなサービスとデータストアが 1 つ増える | 両方 |
+| データの同期 | なし | データを複製するか、リクエストごとに渡す | アプリケーションからの二重書き込み | 関係についてのみ二重書き込み |
+
+最も読み込まれすぎるのはレイテンシの行である。論文の数値 (表 2、§4.2) は Google のデプロイメントとキャッシュによるもので、単一ノードのインストールについては何も語らない。また、ポリシーエンジンの評価時間には、呼び出し側がデータを取得するのに費やす時間が含まれていない。AuthZed は 2 点目を自社に有利な論点として挙げている ([AuthZed blog](https://authzed.com/blog/policy-based-access-control))。これはベンダーの主張であり、ここでは測定していない。
+
+## 問いのおおまかな順序
+
+どの問いが選択肢を分けるのか。図は表の行を、たいてい決め手になる順に並べている。
+
+<Graph
+  width={620}
+  height={360}
+  minWidth={540}
+  title="選択肢を絞り込む問い"
+  desc="3 つの問いの流れ。1 つ目: ユーザーは個々のオブジェクトを、他のユーザーやグループ (入れ子の場合もある) と共有するか。いいえなら、たいていロールテーブルかポリシーエンジンで足りる。はいなら 2 つ目の問い: 複数のサービスやデータベースが同じ答えを必要とするか。いいえなら、アプリケーションのデータベースの付与テーブルと再帰クエリで足りるかもしれない。はいなら、Zanzibar 型のサービスが候補になる。3 つ目の問いはどちらの分岐からも続く: 判定が時刻、IP アドレス、金額のようなリクエストのコンテキストに依存するか。はいなら、条件 (caveat) を加えるか、ポリシーエンジンを併用する。"
+  nodes={[
+    { id: "q1", x: 150, y: 40, label: "ユーザーは単一のオブジェクトを\nユーザーや入れ子のグループと共有するか", w: 280 },
+    { id: "a1", x: 500, y: 40, label: "ロールテーブルか\nポリシーエンジン", kind: "note" },
+    { id: "q2", x: 150, y: 150, label: "複数のサービスや DB が\n同じ答えを必要とするか", w: 280 },
+    { id: "a2", x: 500, y: 150, label: "付与テーブル +\n再帰クエリ", kind: "note" },
+    { id: "a3", x: 150, y: 250, label: "Zanzibar 型のサービス", kind: "server", on: true },
+    { id: "q3", x: 470, y: 250, label: "コンテキスト: 時刻、IP、\n金額?", w: 200 },
+    { id: "a4", x: 470, y: 330, label: "condition / caveat\nかポリシーエンジン", kind: "note" },
+  ]}
+  edges={[
+    { from: "q1", to: "a1", label: "いいえ" },
+    { from: "q1", to: "q2", label: "はい" },
+    { from: "q2", to: "a2", label: "いいえ" },
+    { from: "q2", to: "a3", label: "はい", on: true },
+    { from: "a3", to: "q3", dashed: true },
+    { from: "a2", to: "q3", dashed: true },
+    { from: "q3", to: "a4", label: "はい" },
+  ]}
+  caption="このページの出典から引き出した経験則であり、規則ではない。規模やチームのスキルによって境界は動く。"
+/>
+
+コンテキストは別の軸であることに注目してほしい。論文には属性の条件はない。ユーザーセット書き換えは、ユーザーセットを "union, intersection, and exclusion" (和集合、積集合、除外) で組み合わせる (§2.3.1)。最初の 2 つの答えが何であれ、時刻やネットワークに関するルールには、製品の拡張か 2 つ目のシステムのどちらかが必要になる。
+
+## 批判と反論
+
+この議論は公開されており、一部は商業的なものである。主な公開された立場を、それぞれの書き手とともに示す。
+
+**"Zanzibar isn't flexible"** (Greg Sarjeant、Oso、2024-11-01。Oso はポリシーベースの認可サービスを販売している)。主張はこうである。アプリケーションはアクションについて問うが、"Your authorization service only lets you define relations" (あなたの認可サービスは関係しか定義させてくれない) ので、チームは結局権限を関係としてエンコードすることになる。また、制約の多い言語では、意図を正確に表現しにくくなる ([Oso blog](https://www.osohq.com/post/google-zanzibar-isnt-flexible))。Oso はマイクロサービスで認可データを集中させることによる同期のコストについても書いており ([Oso Academy](https://www.osohq.com/academy/microservices-authorization))、"Local Authorization" を開始した。これは Oso が「はい、ただし条件付き」と答え、アプリケーションがその条件を自身のデータベースに対して評価するものである ([Oso blog, 2024-04-16](https://www.osohq.com/post/local-authorization))。
+
+**"Reading Zanzibar"** (Tom MacWright、2025-05-02。独立系の開発者)。この記事は、論文のモデル (オブジェクト、ユーザーセット、書き換えルール) を、一貫性とスケールのための仕組みから切り離して論じ、"Zookies are very clearly important to Google" (zookie は Google にとって明らかに重要である) が、Zanzibar に似た製品のいくつかには相当するものがないと指摘し、こう結論づけている。"For my own needs, zookies and distributed consistency to the degree described in the Zanzibar paper are overkill." (私自身の用途には、zookie や、Zanzibar 論文に書かれた程度の分散一貫性は過剰である。) MacWright が求めているのは "the API surface that Zanzibar describes" (Zanzibar が記述する API の表面) であり、"some scalability for simplicity" (ある程度のスケーラビリティを単純さと引き換えに) するものである ([macwright.com](https://macwright.com/2025/05/02/reading-zanzibar.html))。
+
+**ポリシーと ReBAC は補完関係にあるという立場** (AuthZed、SpiceDB の開発元)。AuthZed の学習用ページは、格納された関係に対応しないケースについて "Policy engines like Cerbos and OPA primarily focus on ABAC but can be used alongside ReBAC systems" (Cerbos や OPA のようなポリシーエンジンは主に ABAC に焦点を当てているが、ReBAC システムと併用できる) と述べている ([AuthZed learn](https://authzed.com/learn/rebac-key-components))。比較記事は、選択は "depends on the authorization problems you have" (抱えている認可の問題次第である) とし、SpiceDB の caveat は "offer some of the benefits of policy engines without sacrificing the benefits of Google Zanzibar" (Google Zanzibar の利点を犠牲にせずに、ポリシーエンジンの利点の一部を提供する) と述べている ([AuthZed blog, 2023-11-29](https://authzed.com/blog/policy-based-access-control))。SpiceDB の FAQ は "SpiceDB is not a policy engine" (SpiceDB はポリシーエンジンではない) と明言している ([FAQ](https://authzed.com/docs/spicedb/getting-started/faq))。2021 年の HN のスレッドでは、AuthZed の創業者の 1 人が、ReBAC システムでは ABAC を実現できないという主張に異を唱え、Oso の記事の著者は、Zanzibar 型のシステムをポリシーエンジンと組み合わせられることに同意した ([HN 28543457](https://news.ycombinator.com/item?id=28543457))。
+
+**実務者から。** 2023 年の HN のスレッドで、あるコメント投稿者は Zanzibar を "overkill for the majority of needs" (大半の用途には過剰) と呼び、別の投稿者は、ホスティング型のサービスがその複雑さを隠してくれると応じた ([HN 36470943](https://news.ycombinator.com/item?id=36470943))。OpenFGA を Postgres で書き直すことに関する 2025 年のスレッドでは、挙げられた悩みは "keeping everything in sync all the time" (常にすべてを同期させておくこと) だった ([HN 45661547](https://news.ycombinator.com/item?id=45661547))。
+
+これらの立場は、タイトルから受ける印象よりも重なっている。どれも、関係のデータとリクエストのコンテキストは種類の異なる入力であるという点では一致しており、どちらを中心に置くべきかで異なっている。
+
+## ハイブリッドなデプロイメント
+
+組み合わせは実際にはどのような形になるのか。ここに示すのは上のパターンを組み立てた例示であり、文書化された参照アーキテクチャではない。
+
+<Graph
+  width={630}
+  height={360}
+  minWidth={540}
+  title="ハイブリッドなデプロイメント"
+  desc="クライアントは API ゲートウェイを呼び出し、そこではポリシーエンジンがトークンのスコープや IP の範囲のような、リクエスト単位の粗い判定を行う。ゲートウェイはアプリケーションサービスに転送する。サービスは共有やグループの権限を Zanzibar 型のサービスでチェックし、そのサービスは関係を自身のデータストアに格納する。サービスは自身のデータをアプリケーションのデータベースに書き込み、同じトランザクションで書かれたアウトボックステーブルは、タプルの書き込みとして認可サービスへ中継される。認可サービスの Watch ストリームは、権限で絞り込む検索インデックスに供給される。"
+  nodes={[
+    { id: "c", x: 60, y: 60, label: "クライアント", kind: "client" },
+    { id: "gw", x: 220, y: 60, label: "API ゲートウェイ +\nポリシーエンジン", kind: "server" },
+    { id: "svc", x: 420, y: 60, label: "アプリケーション\nサービス", kind: "server" },
+    { id: "db", x: 420, y: 190, label: "アプリの DB\n+ アウトボックステーブル", kind: "store" },
+    { id: "relay", x: 420, y: 300, label: "アウトボックスの中継", kind: "server" },
+    { id: "z", x: 580, y: 190, label: "認可\nサービス", kind: "server", on: true },
+    { id: "zs", x: 580, y: 300, label: "tuples", kind: "store", mono: true },
+    { id: "idx", x: 220, y: 190, label: "検索インデックス", kind: "store" },
+  ]}
+  edges={[
+    { from: "c", to: "gw", label: "リクエスト" },
+    { from: "gw", to: "svc", label: "スコープ、IP OK" },
+    { from: "svc", to: "db", label: "1 つのトランザクション" },
+    { from: "svc", to: "z", label: "Check", on: true },
+    { from: "db", to: "relay", dashed: true },
+    { from: "relay", to: "z", label: "タプルの書き込み", dashed: true },
+    { from: "z", to: "zs", dir: "both" },
+    { from: "z", to: "idx", label: "Watch", dashed: true, labelOffset: -10 },
+  ]}
+  groups={[
+    { x: 140, y: 15, w: 160, h: 95, label: "リクエストのコンテキスト" },
+    { x: 510, y: 140, w: 120, h: 200, label: "関係" },
+  ]}
+  caption="コンテキストのためのポリシーは入口に、関係は 1 つのサービスに置き、2 つの書き込みが気づかないうちにずれないようアウトボックスを使う。"
+/>
+
+各システムが、自分がデータを持っている問いに答えていることに注目してほしい。ゲートウェイはリクエストだけから判定する。関係のサービスは、誰がどのドキュメントを見てよいかを判定する。アウトボックスは二重書き込みを、1 つのローカルなトランザクションと、その後の再試行される配送に変える。これは AuthZed の [dual-write post](https://authzed.com/blog/the-dual-write-problem) にある選択肢の 1 つである。Watch の矢印は論文自身の使い方に従っている。"Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API" (一部のクライアントは、Zanzibar のリレーションタプルの二次インデックスを維持している。それは Watch API を用いて行える) (§2.4.3)。また Expand は "build efficient search indices for access-controlled content" (アクセス制御されたコンテンツの効率的な検索インデックスを構築する) のに役立つ (§2.4.5)。
+
+<Callout kind="note" title="このページで決着がつかないこと">
+
+ここで挙げた出典のどれも、1 つのワークロードで選択肢どうしを比べて測定してはいない。要件の行は定性的なものであり、レイテンシの数値は Google のものであり、製品に関する主張の大半はベンダー自身のページによる。
+
+</Callout>
+
+## 出典
+
+- Zanzibar paper, §1, §2.1, §2.2, §2.3.1, §2.4.3, §2.4.5, §3, §4.2 (this site's transcription)
+- PostgreSQL documentation, WITH Queries: [postgresql.org/docs/current/queries-with.html](https://www.postgresql.org/docs/current/queries-with.html)
+- Cedar documentation: [docs.cedarpolicy.com](https://docs.cedarpolicy.com/)
+- Open Policy Agent, External Data: [openpolicyagent.org/docs/external-data](https://www.openpolicyagent.org/docs/external-data)
+- D. R. Kuhn, E. J. Coyne, T. R. Weil, Adding Attributes to Role-Based Access Control, IEEE Computer, 2010: [csrc.nist.gov](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)
+- Evan Cordell, Policy-Based Access Control (PBAC) vs Google Zanzibar, AuthZed blog (2023-11-29): [authzed.com/blog/policy-based-access-control](https://authzed.com/blog/policy-based-access-control)
+- AuthZed, The Dual-Write Problem (2025-01-02): [authzed.com/blog/the-dual-write-problem](https://authzed.com/blog/the-dual-write-problem)
+- AuthZed, What are the key components of ReBAC?: [authzed.com/learn/rebac-key-components](https://authzed.com/learn/rebac-key-components)
+- AuthZed, SpiceDB FAQ: [authzed.com/docs/spicedb/getting-started/faq](https://authzed.com/docs/spicedb/getting-started/faq)
+- AuthZed, Protecting a List Endpoint: [authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)
+- Greg Sarjeant, Google Zanzibar Isn't Flexible, Oso blog (2024-11-01): [osohq.com/post/google-zanzibar-isnt-flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible)
+- Greg Sarjeant, Launching Local Authorization, Oso blog (2024-04-16): [osohq.com/post/local-authorization](https://www.osohq.com/post/local-authorization)
+- Oso Academy, Authorization in Microservices: [osohq.com/academy/microservices-authorization](https://www.osohq.com/academy/microservices-authorization)
+- Tom MacWright, Reading Zanzibar (2025-05-02): [macwright.com/2025/05/02/reading-zanzibar.html](https://macwright.com/2025/05/02/reading-zanzibar.html)
+- Hacker News, "Why Authorization Is Hard" (2021-09-15): [news.ycombinator.com/item?id=28543457](https://news.ycombinator.com/item?id=28543457)
+- Hacker News, "Why Google Zanzibar shines at building authorization" (2023-06-25): [news.ycombinator.com/item?id=36470943](https://news.ycombinator.com/item?id=36470943)
+- Hacker News, "We rewrote OpenFGA in pure Postgres" (2025-10-21): [news.ycombinator.com/item?id=45661547](https://news.ycombinator.com/item?id=45661547)

@@ -1,0 +1,218 @@
+---
+title: "Permify"
+description: "一个以 Zanzibar 为蓝本的开源授权服务，现归 FusionAuth 所有，采用 AGPL-3.0 许可证，具备 schema 语言、snap token 和 PostgreSQL 数据存储。"
+section: ecosystem
+order: 3
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3.2.4"]
+product:
+  name: Permify
+  maintainer: FusionAuth (acquisition announced 2025-11-20)
+  license: AGPL-3.0 (Apache-2.0 until 2025-05-12)
+  language: Go
+  repo: https://github.com/Permify/permify
+  docs: https://fusionauth.io/permify-docs
+  status: "活跃"
+  latest: v1.7.6 (2026-11-05)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+Permify 是一个用 Go 编写的授权服务。其文档称它为 "an open-source authorization service for creating fine-grained and scalable authorization systems"（一个用于创建细粒度、可扩展授权系统的开源授权服务），"inspired by Google's consistent, global authorization system, Google Zanzibar"（受 Google 的一致性全球授权系统 Google Zanzibar 启发）（[Permify 文档](https://fusionauth.io/permify-docs)）。你在 Permify Schema 中描述实体类型及其关系，把关系写成元组，然后通过 gRPC 或 HTTP 询问服务器某个主体是否拥有某项权限。
+
+FusionAuth 收购 Permify 一事于 2025-11-20 宣布（[Permify 公告](https://permify.co/post/fusionauth-acquires-permify/)，[FusionAuth 公告](https://fusionauth.io/blog/fusionauth-acquires-permify)）。FusionAuth 现在把该产品命名为 "FusionAuth FGA by Permify"（[FusionAuth 支持文章](https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify)），文档位于 [fusionauth.io/permify-docs](https://fusionauth.io/permify-docs)。Permify 的文章说 "The core Permify project remains open source and will continue to live on GitHub."（Permify 的核心项目仍然开源，并将继续托管在 GitHub 上。）
+
+## 论文与 Permify 对照
+
+每一行列出论文中的一个概念以及 Permify 文档中最接近的东西。Permify 没有可比之物的地方，单元格中会注明。
+
+| 论文中 | Permify 中 |
+| --- | --- |
+| 命名空间配置（§2.3） | Permify Schema 中的一个 `entity` 块，包含 `relation`、`permission`（或其同义词 `action`）、`attribute` 和 `rule`（[建模](https://fusionauth.io/permify-docs/getting-started/modeling)） |
+| 关系元组 `object#relation@user`（§2.1） | 关系型元组（relational tuple）`entity#relation@subject`，例如 `doc:readme#owner@user:anne`（[存储数据](https://fusionauth.io/permify-docs/getting-started/sync-data)） |
+| `_this` | 某个 `relation` 的已存储元组；权限通过写出该关系的名称来包含它们 |
+| `computed_userset` | 写出同一实体的另一个关系或权限的名称，例如 `view = viewer or edit` 中的 `edit` |
+| `tuple_to_userset` | 通过关系的点号遍历，例如 `parent.view` |
+| 并集、交集、排除 | `or`、`and`、`not` |
+| zookie（§2.2、§2.4） | Snap token，即 `snap_token` 字段（[snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)） |
+| Check（§2.4.4） | `Permission.Check`，以及 `BulkCheck`（[service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)） |
+| Read（§2.4.1） | `Data.ReadRelationships`，以及 `ReadAttributes` |
+| Write（§2.4.2） | `Data.Write`、`WriteRelationships`、`Delete`、`DeleteRelationships` |
+| Watch（§2.4.3） | `Watch.Watch`，一个服务器流（[Watch 操作](https://fusionauth.io/permify-docs/operations/watch)） |
+| Expand（§2.4.5） | `Permission.Expand` |
+| Leopard（§3.2.4） | 文档中没有对应物 |
+| Spanner（§3.1） | PostgreSQL，或内存引擎（配置默认值）（[配置](https://fusionauth.io/permify-docs/setting-up/configuration)） |
+
+Permify 还有论文没有描述的查找调用：`LookupEntity`、`LookupSubject` 和 `SubjectPermission`。
+
+## 用 Permify Schema 表示贯穿示例
+
+论文的图 1 为文档设定了三个同心关系：所有者是编辑者，编辑者是查看者，父文件夹的查看者是文档的查看者（§2.3.1）。下面是用 Permify Schema 写出、采用贯穿示例类型的该模型。
+
+```text
+entity user {}
+
+entity group {
+    relation member @user
+}
+
+entity folder {
+    relation viewer @user @group#member
+
+    permission view = viewer
+}
+
+entity doc {
+    relation parent @folder
+    relation owner @user
+    relation editor @user @group#member
+    relation viewer @user @group#member
+
+    permission edit = owner or editor
+    permission view = viewer or edit or parent.view
+}
+```
+
+`@group#member` 让关系可以存放一个用户集：“该组的所有成员”。`parent.view` 沿着 `parent` 关系到达文件夹，并在那里评估文件夹的 `view` 权限；文档说 "The same traversal rule applies to both `relation.userset` and `relation.permission`"（同样的遍历规则既适用于 `relation.userset`，也适用于 `relation.permission`）（[建模](https://fusionauth.io/permify-docs/getting-started/modeling)）。
+
+<Callout title="对照文档核对，未实际运行">
+这个 schema 遵循截至 2026-11-13 的文档语法：[建模页面](https://fusionauth.io/permify-docs/getting-started/modeling)以及维护者的示例 [google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml)。它没有经过 Permify 验证器的运行。
+</Callout>
+
+贯穿示例是五个元组：
+
+```text
+doc:readme#owner@user:anne
+group:eng#member@user:beto
+doc:readme#viewer@group:eng#member
+doc:readme#parent@folder:A
+folder:A#viewer@user:chen
+```
+
+哪些已存储的元组和哪些规则让三个人分别获得 readme 的访问权？
+
+<Graph
+  width={600}
+  height={260}
+  title="以 Permify 关系表示的贯穿示例"
+  desc="五条关系。user:anne 是 doc:readme 的 owner。user:beto 是 group:eng 的 member。group:eng#member 是 doc:readme 的 viewer。folder:A 是 doc:readme 的 parent。user:chen 是 folder:A 的 viewer。从 Chen 经由文件夹 A 到 readme 的路径被高亮：它由规则 parent.view 解析。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer (#member)", dashed: true },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Anne 经由 owner → edit → view 查看，Beto 经由组用户集，Chen 经由 parent.view。虚线：用户集，而不是单个用户。"
+/>
+
+注意，从 `folder:A` 到 readme 的箭头是一个已存储的元组（`doc:readme#parent@folder:A`），而从 Chen 的文件夹访问权到 readme 的那一步并没有存储在任何地方：schema 中的 `parent.view` 在检查时把它计算出来，就像论文中的 `tuple_to_userset` 一样。
+
+## 架构
+
+Permify 服务器如何分担工作，元组存放在哪里？
+
+<Graph
+  width={620}
+  height={290}
+  title="文档所描述的 Permify 部署"
+  desc="一个服务通过端口 3478 上的 gRPC 或端口 3476 上的 HTTP 调用 Permify pod。在分布式模式下，pod 组成一个一致性哈希环，因此被哈希到 pod 2 的请求由 pod 2 的本地 Ristretto 缓存作答。两个 pod 都读写 PostgreSQL，后者可以配置独立的写连接和读连接。一个 Watch 消费者与某个 pod 保持一条流。"
+  nodes={[
+    { id: "app", x: 95, y: 60, label: "你的服务", kind: "client" },
+    { id: "watch", x: 95, y: 235, label: "Watch 消费者", kind: "client" },
+    { id: "p1", x: 315, y: 60, label: "Permify pod 1\n本地缓存", kind: "server" },
+    { id: "p2", x: 315, y: 235, label: "Permify pod 2\n本地缓存", kind: "server" },
+    { id: "pg", x: 530, y: 148, label: "PostgreSQL\n写库 + 读库", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "p1", label: "Check, Write" },
+    { from: "p1", to: "p2", label: "哈希环", dir: "both", dashed: true },
+    { from: "p1", to: "pg", label: "SQL" },
+    { from: "p2", to: "pg", label: "SQL" },
+    { from: "p2", to: "watch", label: "Watch 流" },
+  ]}
+  caption="黄色：Permify 服务器。绿色：数据存储。蓝色：客户端。哈希环是可选的（分布式模式）。"
+/>
+
+各个组成部分，均来自文档：
+
+- 服务器默认监听 HTTP 端口 3476 和 gRPC 端口 3478（[配置](https://fusionauth.io/permify-docs/setting-up/configuration)）。数据库部分接受独立的 `writer` 和 `reader` URI。
+- 每个 pod 维护一个进程内的 [Ristretto](https://github.com/dgraph-io/ristretto) 检查结果缓存；"there is no shared cache layer"（没有共享缓存层）（[缓存](https://fusionauth.io/permify-docs/operations/cache)）。
+- 启用 `distributed.enabled` 后，pod 把每个请求哈希到一致性哈希环上，因此 "subsequent API calls with the same hash will retrieve the response from the instance 2, regardless of which instance that API called from"（之后具有相同哈希的 API 调用都会从实例 2 获取响应，无论该 API 是从哪个实例调用的）。数据库宕机时，熔断器会停止对它的调用。
+- PostgreSQL 以 MVCC 方式存储元组：Permify 创建 "a separate database snapshot for each write and delete operation"（为每次写入和删除操作创建一个单独的数据库快照），一个可选的垃圾回收器会删除旧版本。
+- 每个 Watch 流 "opens a long-lived connection with a continuous polling loop against the database"（打开一条长连接，并对数据库执行持续的轮询循环）（[Watch 操作](https://fusionauth.io/permify-docs/operations/watch)）。
+
+## 一致性
+
+Permify 的 snap token 扮演 zookie 的角色。Write 返回它；客户端把它与资源一起存储，并在之后的检查中作为 `snap_token` 发回。文档把它描述为 "a token that consists of an encoded timestamp"（一个由编码后的时间戳构成的令牌），在访问检查中用于比较，"to ensure that the snapshot of the access control is at least as fresh as the resource timestamp"（以确保访问控制的快照至少与资源的时间戳一样新）（[snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)）。这正是论文为携带 zookie 的检查所给出的保证："a consistent snapshot no earlier than"（一个不早于给定 zookie 的一致快照）（§2.4.4）。
+
+共享变更之后进行的检查如何看到该变更？
+
+<Swimlane
+  lanes={["你的服务", "Permify", "PostgreSQL"]}
+  timeLabel="时间"
+  title="snap token 的往返"
+  desc="服务写入元组 doc:readme#viewer@group:eng#member。Permify 在 PostgreSQL 中以一个新事务记录它，并返回一个 snap token。服务把该令牌与 readme 一起存储。之后一次针对 Beto 和 readme 的检查发送该令牌，Permify 在不旧于该令牌的快照上评估检查，因此新的 viewer 元组是可见的。"
+  events={[
+    { lane: 0, t: 0, label: "写入：eng#member\n查看 readme", kind: "write" },
+    { lane: 1, t: 0, label: "Data.Write", kind: "write" },
+    { lane: 2, t: 0, label: "记录\n新事务", kind: "write" },
+    { lane: 1, t: 1, label: "返回\nsnap_token", kind: "note" },
+    { lane: 0, t: 1, label: "把令牌与\nreadme 一起存储", kind: "write" },
+    { lane: 0, t: 2, label: "检查 beto view\n+ snap_token", kind: "read" },
+    { lane: 1, t: 2, label: "快照不旧于\n该令牌", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 0] },
+    { from: [1, 1], to: [0, 1], label: "snap_token" },
+    { from: [0, 2], to: [1, 2] },
+  ]}
+  caption="令牌随内容一起传递，就像论文中的 zookie 一样（§2.2）。"
+/>
+
+注意不带令牌时的行为。论文允许 Zanzibar "choose a reasonably recent snapshot, possibly offering a lower-latency response"（选择一个合理较新的快照，这可能带来更低的响应延迟）（§2.4.1）。Permify 则从其 `transactions` 表中读取最新事务的 ID，并在该快照上进行评估；结果以包含该 ID 的键缓存（[snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)）。缓存键为 `check_{tenant_id}_{schema_version}:{snapshot_token}:{check_request}`（[缓存](https://fusionauth.io/permify-docs/operations/cache)），因此一次新的写入会产生新的键，而不是使旧键失效。
+
+## 与论文的差异
+
+- **属性与规则。** Permify Schema 增加了用于基于属性检查的 `attribute` 和 `rule`，例如 `permission view = check_ip_range(ip_range) or admin`（[建模](https://fusionauth.io/permify-docs/getting-started/modeling)）。Zanzibar 的重写只作用于元组（§2.3.1）。
+- **上下文元组。** "dynamically added to permission request operations"（动态添加到权限请求操作中）的关系与已存储的关系一起评估，且永远不会被写入（[上下文元组](https://fusionauth.io/permify-docs/operations/contextual-tuples)）。
+- **租户。** `Tenancy` 服务用于创建、列出和删除租户（[service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)）；论文中没有租户的概念。
+- **存储。** 使用带 MVCC 快照的 PostgreSQL，而不是 Spanner；Spanner 的 TrueTime 机制为每次 ACL 写入打上时间戳（§2.2、§3.1）。分布式缓存可以 "across availability zones (within an AWS region)"（跨可用区（在同一 AWS 区域内））工作（[缓存](https://fusionauth.io/permify-docs/operations/cache)）。
+- **没有反规范化索引。** 论文用 Leopard 回答深度嵌套组的检查（§3.2.4）。Permify 文档记载的是结果缓存和一致性哈希，而不是集合索引。
+- **查找。** `LookupEntity` 和 `LookupSubject` 回答论文的 API 不涵盖的“哪些资源”和“哪些主体”问题。
+
+## 状态
+
+- 首个版本 v0.0.0-alpha1 发布于 2022-08-03；最新版本 v1.7.6 发布于 2026-11-05；默认分支的最后一次提交在 2026-11-10；约 6.0k 个 star（[releases](https://github.com/Permify/permify/releases)，GitHub API，2026-11-13）。
+- 许可证：LICENSE 文件于 2023-02-14 被替换为 Apache-2.0 文本（[提交 97285f9](https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7)），又于 2025-05-12 在一次标题为 "docs: update license" 的提交中被替换为 AGPL-3.0 文本（[提交 26912d9](https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5)）。在此之前，2022 年该文件先后为 Apache-2.0 文本（2022-07-14）、GPL-3.0（2022-08-25）和 AGPL-3.0（2022-08-26）（[LICENSE 历史](https://github.com/Permify/permify/commits/master/LICENSE)）。
+- 所有权：被 FusionAuth 收购，于 2025-11-20 在 Permify 博客上宣布（[文章](https://permify.co/post/fusionauth-acquires-permify/)）；FusionAuth 的公告页面没有显示日期（[文章](https://fusionauth.io/blog/fusionauth-acquires-permify)）。二者都由厂商撰写。
+- 文档已从 docs.permify.co 迁至 [fusionauth.io/permify-docs](https://fusionauth.io/permify-docs)。
+
+## 来源
+
+- Permify 仓库：[https://github.com/Permify/permify](https://github.com/Permify/permify)
+- Permify 文档（FusionAuth）：[https://fusionauth.io/permify-docs](https://fusionauth.io/permify-docs)
+- 建模：[https://fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)
+- 存储数据：[https://fusionauth.io/permify-docs/getting-started/sync-data](https://fusionauth.io/permify-docs/getting-started/sync-data)
+- Snap tokens：[https://fusionauth.io/permify-docs/operations/snap-tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)
+- 缓存机制：[https://fusionauth.io/permify-docs/operations/cache](https://fusionauth.io/permify-docs/operations/cache)
+- Watch 操作：[https://fusionauth.io/permify-docs/operations/watch](https://fusionauth.io/permify-docs/operations/watch)
+- 上下文元组：[https://fusionauth.io/permify-docs/operations/contextual-tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples)
+- 配置：[https://fusionauth.io/permify-docs/setting-up/configuration](https://fusionauth.io/permify-docs/setting-up/configuration)
+- gRPC 服务：[https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)
+- 示例 schema：[https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml)
+- 许可证历史：[https://github.com/Permify/permify/commits/master/LICENSE](https://github.com/Permify/permify/commits/master/LICENSE)
+- 许可证相关提交：[https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7](https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7)、[https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5](https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5)
+- 收购：[https://permify.co/post/fusionauth-acquires-permify/](https://permify.co/post/fusionauth-acquires-permify/)、[https://fusionauth.io/blog/fusionauth-acquires-permify](https://fusionauth.io/blog/fusionauth-acquires-permify)
+- 产品名称：[https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify](https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify)

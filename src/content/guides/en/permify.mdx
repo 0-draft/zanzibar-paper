@@ -1,0 +1,218 @@
+---
+title: Permify
+description: An open-source authorization service modelled on Zanzibar, now owned by FusionAuth and licensed under AGPL-3.0, with a schema language, snap tokens and a PostgreSQL datastore.
+section: ecosystem
+order: 3
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3.2.4"]
+product:
+  name: Permify
+  maintainer: FusionAuth (acquisition announced 2025-11-20)
+  license: AGPL-3.0 (Apache-2.0 until 2025-05-12)
+  language: Go
+  repo: https://github.com/Permify/permify
+  docs: https://fusionauth.io/permify-docs
+  status: Active
+  latest: v1.7.6 (2026-11-05)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+Permify is an authorization service written in Go. Its documentation calls it "an open-source authorization service for creating fine-grained and scalable authorization systems", "inspired by Google's consistent, global authorization system, Google Zanzibar" ([Permify docs](https://fusionauth.io/permify-docs)). You describe entity types and their relations in the Permify Schema, write relationships as tuples, and ask a server over gRPC or HTTP whether a subject has a permission.
+
+FusionAuth's acquisition of Permify was announced on 2025-11-20 ([Permify announcement](https://permify.co/post/fusionauth-acquires-permify/), [FusionAuth announcement](https://fusionauth.io/blog/fusionauth-acquires-permify)). FusionAuth now names the product "FusionAuth FGA by Permify" ([FusionAuth support post](https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify)), and the documentation lives at [fusionauth.io/permify-docs](https://fusionauth.io/permify-docs). The Permify post states that "The core Permify project remains open source and will continue to live on GitHub."
+
+## Paper and Permify side by side
+
+Each row names a concept from the paper and the closest thing Permify documents. Where Permify has nothing comparable, the cell says so.
+
+| In the paper | In Permify |
+| --- | --- |
+| Namespace config (§2.3) | An `entity` block in the Permify Schema, with `relation`, `permission` (or its synonym `action`), `attribute` and `rule` ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling)) |
+| Relation tuple `object#relation@user` (§2.1) | Relational tuple `entity#relation@subject`, for example `doc:readme#owner@user:anne` ([storing data](https://fusionauth.io/permify-docs/getting-started/sync-data)) |
+| `_this` | The stored tuples of a `relation`; a permission includes them by naming the relation |
+| `computed_userset` | Naming another relation or permission of the same entity, as `edit` inside `view = viewer or edit` |
+| `tuple_to_userset` | Dot traversal through a relation, as `parent.view` |
+| Union, intersection, exclusion | `or`, `and`, `not` |
+| Zookie (§2.2, §2.4) | Snap token, the `snap_token` field ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)) |
+| Check (§2.4.4) | `Permission.Check`, plus `BulkCheck` ([service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)) |
+| Read (§2.4.1) | `Data.ReadRelationships`, plus `ReadAttributes` |
+| Write (§2.4.2) | `Data.Write`, `WriteRelationships`, `Delete`, `DeleteRelationships` |
+| Watch (§2.4.3) | `Watch.Watch`, a server stream ([Watch operations](https://fusionauth.io/permify-docs/operations/watch)) |
+| Expand (§2.4.5) | `Permission.Expand` |
+| Leopard (§3.2.4) | No equivalent documented |
+| Spanner (§3.1) | PostgreSQL, or an in-memory engine (the configuration default) ([configuration](https://fusionauth.io/permify-docs/setting-up/configuration)) |
+
+Permify also has lookup calls the paper does not describe: `LookupEntity`, `LookupSubject` and `SubjectPermission`.
+
+## The running example in Permify Schema
+
+The paper's Figure 1 gives documents three concentric relations: owners are editors, editors are viewers, and viewers of the parent folder are viewers of the document (§2.3.1). Here is that model with the running example's types, in Permify Schema.
+
+```text
+entity user {}
+
+entity group {
+    relation member @user
+}
+
+entity folder {
+    relation viewer @user @group#member
+
+    permission view = viewer
+}
+
+entity doc {
+    relation parent @folder
+    relation owner @user
+    relation editor @user @group#member
+    relation viewer @user @group#member
+
+    permission edit = owner or editor
+    permission view = viewer or edit or parent.view
+}
+```
+
+`@group#member` lets a relation hold a userset: "everyone who is a member of this group". `parent.view` follows the `parent` relation to the folder and evaluates the folder's `view` permission there; the docs state that "The same traversal rule applies to both `relation.userset` and `relation.permission`" ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling)).
+
+<Callout title="Checked against the docs, not run">
+This schema follows the documented syntax as of 2026-11-13: the [modeling page](https://fusionauth.io/permify-docs/getting-started/modeling) and the maintainers' sample [google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml). It has not been run through Permify's validator.
+</Callout>
+
+The running example is five tuples:
+
+```text
+doc:readme#owner@user:anne
+group:eng#member@user:beto
+doc:readme#viewer@group:eng#member
+doc:readme#parent@folder:A
+folder:A#viewer@user:chen
+```
+
+Which stored tuples and which rules give each of the three people access to the readme?
+
+<Graph
+  width={600}
+  height={260}
+  title="The running example as Permify relationships"
+  desc="Five relationships. user:anne is owner of doc:readme. user:beto is member of group:eng. group:eng#member is viewer of doc:readme. folder:A is parent of doc:readme. user:chen is viewer of folder:A. The path from Chen through folder A to the readme is highlighted: it is resolved by the rule parent.view."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer (#member)", dashed: true },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Anne views through owner → edit → view, Beto through the group userset, Chen through parent.view. Dashed: a userset, not a single user."
+/>
+
+Notice that the arrow from `folder:A` to the readme is a stored tuple (`doc:readme#parent@folder:A`), while the step from Chen's folder access to the readme is not stored anywhere: the schema's `parent.view` computes it at check time, as `tuple_to_userset` does in the paper.
+
+## Architecture
+
+How do Permify servers share work, and where do tuples live?
+
+<Graph
+  width={620}
+  height={290}
+  title="Permify deployment, as described in the docs"
+  desc="A service calls Permify pods over gRPC on port 3478 or HTTP on port 3476. In distributed mode the pods form a consistent-hash ring, so a request hashed to pod 2 is answered from pod 2's local Ristretto cache. Both pods read and write PostgreSQL, which may be configured with separate writer and reader connections. A Watch consumer holds a stream to one pod."
+  nodes={[
+    { id: "app", x: 95, y: 60, label: "Your service", kind: "client" },
+    { id: "watch", x: 95, y: 235, label: "Watch consumer", kind: "client" },
+    { id: "p1", x: 315, y: 60, label: "Permify pod 1\nlocal cache", kind: "server" },
+    { id: "p2", x: 315, y: 235, label: "Permify pod 2\nlocal cache", kind: "server" },
+    { id: "pg", x: 530, y: 148, label: "PostgreSQL\nwriter + reader", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "p1", label: "Check, Write" },
+    { from: "p1", to: "p2", label: "hash ring", dir: "both", dashed: true },
+    { from: "p1", to: "pg", label: "SQL" },
+    { from: "p2", to: "pg", label: "SQL" },
+    { from: "p2", to: "watch", label: "Watch stream" },
+  ]}
+  caption="Yellow: Permify servers. Green: the datastore. Blue: clients. The ring is optional (distributed mode)."
+/>
+
+The pieces, each from the docs:
+
+- Servers listen on HTTP port 3476 and gRPC port 3478 by default ([configuration](https://fusionauth.io/permify-docs/setting-up/configuration)). The database section accepts separate `writer` and `reader` URIs.
+- Each pod keeps a process-local [Ristretto](https://github.com/dgraph-io/ristretto) cache of check results; "there is no shared cache layer" ([cache](https://fusionauth.io/permify-docs/operations/cache)).
+- With `distributed.enabled`, the pods hash each request onto a consistent-hash ring, so "subsequent API calls with the same hash will retrieve the response from the instance 2, regardless of which instance that API called from". A circuit breaker stops calls to the database while it is down.
+- PostgreSQL stores tuples with MVCC: Permify creates "a separate database snapshot for each write and delete operation", and an optional garbage collector deletes old versions.
+- Each Watch stream "opens a long-lived connection with a continuous polling loop against the database" ([Watch operations](https://fusionauth.io/permify-docs/operations/watch)).
+
+## Consistency
+
+Permify's snap token plays the zookie's part. A Write returns it; the client stores it with the resource and sends it back as `snap_token` on later checks. The docs describe it as "a token that consists of an encoded timestamp", compared in access checks "to ensure that the snapshot of the access control is at least as fresh as the resource timestamp" ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)). That is the paper's guarantee for a check carrying a zookie: "a consistent snapshot no earlier than" the given zookie (§2.4.4).
+
+How does a check made after a sharing change see that change?
+
+<Swimlane
+  lanes={["Your service", "Permify", "PostgreSQL"]}
+  timeLabel="time"
+  title="Snap token round trip"
+  desc="The service writes the tuple doc:readme#viewer@group:eng#member. Permify records it in a new transaction in PostgreSQL and returns a snap token. The service stores the token with the readme. A later check for Beto on the readme sends the token, and Permify evaluates the check at a snapshot no older than the token, so the new viewer tuple is visible."
+  events={[
+    { lane: 0, t: 0, label: "Write: eng#member\nviews readme", kind: "write" },
+    { lane: 1, t: 0, label: "Data.Write", kind: "write" },
+    { lane: 2, t: 0, label: "new transaction\nrecorded", kind: "write" },
+    { lane: 1, t: 1, label: "returns\nsnap_token", kind: "note" },
+    { lane: 0, t: 1, label: "store token\nwith the readme", kind: "write" },
+    { lane: 0, t: 2, label: "Check beto view\n+ snap_token", kind: "read" },
+    { lane: 1, t: 2, label: "snapshot no older\nthan the token", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 0] },
+    { from: [1, 1], to: [0, 1], label: "snap_token" },
+    { from: [0, 2], to: [1, 2] },
+  ]}
+  caption="The token travels with the content, as the paper's zookie does (§2.2)."
+/>
+
+Notice the behaviour without a token. The paper lets Zanzibar "choose a reasonably recent snapshot, possibly offering a lower-latency response" (§2.4.1). Permify instead reads the ID of the latest transaction from its `transactions` table and evaluates at that snapshot; the result is cached under a key that contains that ID ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)). The cache key is `check_{tenant_id}_{schema_version}:{snapshot_token}:{check_request}` ([cache](https://fusionauth.io/permify-docs/operations/cache)), so a new write produces new keys rather than invalidating old ones.
+
+## Differences from the paper
+
+- **Attributes and rules.** Permify Schema adds `attribute` and `rule` for attribute-based checks, such as `permission view = check_ip_range(ip_range) or admin` ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling)). Zanzibar's rewrites work on tuples only (§2.3.1).
+- **Contextual tuples.** Relations "dynamically added to permission request operations" are evaluated with the stored ones and never written ([contextual tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples)).
+- **Tenants.** A `Tenancy` service creates, lists and deletes tenants ([service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)); the paper has no tenant concept.
+- **Storage.** PostgreSQL with MVCC snapshots, instead of Spanner, whose TrueTime mechanism timestamps every ACL write (§2.2, §3.1). The distributed cache works "across availability zones (within an AWS region)" ([cache](https://fusionauth.io/permify-docs/operations/cache)).
+- **No denormalized index.** The paper answers deeply nested group checks with Leopard (§3.2.4). Permify documents result caching and consistent hashing, not a set index.
+- **Lookups.** `LookupEntity` and `LookupSubject` answer "which resources" and "which subjects" questions that the paper's API does not cover.
+
+## Status
+
+- First release v0.0.0-alpha1 on 2022-08-03; latest v1.7.6 on 2026-11-05; last commit to the default branch on 2026-11-10; about 6.0k stars ([releases](https://github.com/Permify/permify/releases), GitHub API, 2026-11-13).
+- License: the LICENSE file was replaced with the Apache-2.0 text on 2023-02-14 ([commit 97285f9](https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7)) and with the AGPL-3.0 text on 2025-05-12, in a commit titled "docs: update license" ([commit 26912d9](https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5)). Before that, in 2022, the file held Apache-2.0 text (2022-07-14), then GPL-3.0 (2022-08-25), then AGPL-3.0 (2022-08-26) ([LICENSE history](https://github.com/Permify/permify/commits/master/LICENSE)).
+- Ownership: acquired by FusionAuth, announced 2025-11-20 on the Permify blog ([post](https://permify.co/post/fusionauth-acquires-permify/)); the FusionAuth announcement page shows no date ([post](https://fusionauth.io/blog/fusionauth-acquires-permify)). Both are vendor-authored.
+- Documentation moved from docs.permify.co to [fusionauth.io/permify-docs](https://fusionauth.io/permify-docs).
+
+## Sources
+
+- Permify repository: [https://github.com/Permify/permify](https://github.com/Permify/permify)
+- Permify docs (FusionAuth): [https://fusionauth.io/permify-docs](https://fusionauth.io/permify-docs)
+- Modeling: [https://fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)
+- Storing data: [https://fusionauth.io/permify-docs/getting-started/sync-data](https://fusionauth.io/permify-docs/getting-started/sync-data)
+- Snap tokens: [https://fusionauth.io/permify-docs/operations/snap-tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)
+- Cache mechanisms: [https://fusionauth.io/permify-docs/operations/cache](https://fusionauth.io/permify-docs/operations/cache)
+- Watch operations: [https://fusionauth.io/permify-docs/operations/watch](https://fusionauth.io/permify-docs/operations/watch)
+- Contextual tuples: [https://fusionauth.io/permify-docs/operations/contextual-tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples)
+- Configuration: [https://fusionauth.io/permify-docs/setting-up/configuration](https://fusionauth.io/permify-docs/setting-up/configuration)
+- gRPC services: [https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)
+- Sample schema: [https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml)
+- License history: [https://github.com/Permify/permify/commits/master/LICENSE](https://github.com/Permify/permify/commits/master/LICENSE)
+- License commits: [https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7](https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7), [https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5](https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5)
+- Acquisition: [https://permify.co/post/fusionauth-acquires-permify/](https://permify.co/post/fusionauth-acquires-permify/), [https://fusionauth.io/blog/fusionauth-acquires-permify](https://fusionauth.io/blog/fusionauth-acquires-permify)
+- Product name: [https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify](https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify)

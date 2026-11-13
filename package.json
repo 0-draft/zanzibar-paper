@@ -21,6 +21,7 @@
     "figures": "node scripts/extract-figures.mjs"
   },
   "dependencies": {
+    "@astrojs/mdx": "^8.1.2",
     "@astrojs/sitemap": "^3.7.4",
     "@fontsource-variable/literata": "^5.3.0",
     "@fontsource/ibm-plex-mono": "^5.3.0",

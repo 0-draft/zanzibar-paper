@@ -1,0 +1,74 @@
+---
+title: Common misconceptions
+description: Twelve things people often get wrong about Zanzibar, from "it does login" to "you need atomic clocks", each corrected with the paper section or a primary source.
+section: guide
+part: reference
+order: 15
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.2", "2.3.1", "2.4.4", "2.4.5", "3", "3.1.1", "3.2.3", "3.2.4", "3.2.5", "4.1", "4.2", "4.3", "5"]
+---
+
+The misconceptions below come from public discussions of the paper: Hacker News threads, blog posts and vendor material, linked where they appear. Each heading states the misconception; the text under it is the correction. Terms are explained in the [glossary](../glossary/).
+
+## Zanzibar handles login
+
+It does not. The paper presents "a system for storing permissions and performing authorization checks based on the stored permissions" (§1). Identity arrives already established: a Check names "a putative user, often represented by an authentication token" (§2.4.4), so some other system has authenticated the user first. In the 2019 HN thread on the paper, the same correction came up: "This isn't a login service, this is an ACL service" ([HN 20132520](https://news.ycombinator.com/item?id=20132520)).
+
+## You can buy Zanzibar from Google
+
+You cannot buy Zanzibar itself. The paper describes an internal system used by Google services "including Calendar, Cloud, Drive, Maps, Photos, and YouTube" (§1), and in a 2023 HN thread a commenter noted that "Google doesn't actually offer Zanzibar as a product/service (in GCP or otherwise) to customers" ([HN 36470943](https://news.ycombinator.com/item?id=36470943)). Google Cloud customers use it indirectly: "Google's Cloud IAM system is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (§5). What others sell or publish are reimplementations, compared on [Zanzibar-style systems compared](../../ecosystem/compare/).
+
+## "Zanzibar-inspired" means the whole paper is implemented
+
+Usually it means the data model and API shape. Tom MacWright separates the model (objects, usersets, rewrite rules) from the machinery for consistency and scale, and notes that zookies, "very clearly important to Google", have no equivalent in some products ([Reading Zanzibar](https://macwright.com/2025/05/02/reading-zanzibar.html)). Leopard (§3.2.4) is another part that open-source projects mostly leave out; SpiceDB's Leopard-like index is part of AuthZed's commercial offering ([SpiceDB page](../../ecosystem/spicedb/)). Check each product against the paper concern by concern before relying on a guarantee.
+
+## 99.999% availability means about five minutes of downtime a year
+
+The paper does not measure clock time. "We define availability as the fraction of 'qualified' RPCs the service answers successfully within latency thresholds: 5 seconds for a Safe request, and 15 seconds for a Recent request" (§4.3). It is measured by replaying sampled requests with probers and aggregating "success ratios over 90-day windows averaged across clusters"; in time terms the paper says "for every quarter, Zanzibar has less than 2 minutes of global downtime and fewer than 13 minutes when the global error ratio exceeds 10%" (§4.3). In the 2019 HN thread, a reader who had converted the figure to minutes per year was corrected with the §4.3 definition ([HN 20132520](https://news.ycombinator.com/item?id=20132520)).
+
+## The paper only reports p95 latency
+
+The abstract mentions only the 95th percentile, but the evaluation goes further. Table 2 gives the 50th, 95th and 99th percentiles for Check, Read, Expand and Write; for Safe checks they are 3.0, 9.46 and 15.0 ms (§4.2). Figure 4 adds the 99.9th: "At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively" (§4.2). The Recent rows are much slower at the tail (60.0 ms at p95 for Check), which is why the paper reports the two kinds separately (§4.1).
+
+## The order of ACL entries matters, and denial is a negative entry
+
+Neither is part of the model. A tuple is identified by ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩ and ⟨*user*⟩ (§2.1), so an object's tuples form a set with no position. Denial is expressed in the namespace config: rewrite rules combine usersets "by operations such as union, intersection, and exclusion" (§2.3.1), and an exclusion removes a set, for example viewers minus a blocklist. What does matter is order in *time*: "ACL checks must respect the order in which users modify ACLs and object contents" (§2.2); see [Consistency, snapshots and zookies](../consistency/).
+
+## Running Check in a loop, or calling Expand, gives you a list
+
+Neither returns "every document Anne can see". Expand goes the other way, from one object to its users, and returns a *userset tree* whose leaves may be "usersets pointing to other ⟨*object#relation*⟩ pairs" (§2.4.5), not a flat list. A loop of Checks only filters candidates you already have; the paper's search use case needs "tens to hundreds of checks" per page (§1). Products added list APIs, such as SpiceDB's LookupResources and OpenFGA's ListObjects, whose cost OpenFGA says can "vary drastically depending on the model complexity" ([OpenFGA docs](https://openfga.dev/docs/getting-started/perform-list-objects)); AuthZed describes lookup, bulk-check and denormalized approaches ([AuthZed docs](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)).
+
+## You should store every user–permission pair as a tuple
+
+That is what the model is designed to avoid. Storing a derived tuple per object "would be wasteful and make it hard to make modifications across all objects" (§2.3.1); rewrite rules derive it instead, and a userset lets ACLs "refer to groups and thus supports representing nested group membership" (§2.1). Zanzibar "avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)" (§3.2.5), the exception being the [Leopard](../leopard/) group index. In a 2025 HN thread a commenter made the same point from experience: enumerate user permissions and you get a combinatorial explosion, so grant to groups ([HN 45661547](https://news.ycombinator.com/item?id=45661547)).
+
+## You need a graph database
+
+Zanzibar itself does not use one: "Zanzibar stores ACLs and their metadata in Spanner databases", with tuples in rows keyed by "(shard ID, object ID, relation, user, commit timestamp)" (§3, §3.1.1). The graph is traversed by the servers at query time, not by the storage engine. Open-source implementations also run on relational stores: SpiceDB supports CockroachDB, Cloud Spanner, PostgreSQL and MySQL ([SpiceDB datastores](https://authzed.com/docs/spicedb/concepts/datastores)), and OpenFGA supports Postgres, MySQL and SQLite besides an in-memory store ([OpenFGA configuration](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)).
+
+## It is the same as AWS IAM
+
+They share a philosophy but not the group model. The paper places the IAM systems of Amazon, Google and Microsoft in the same family: "What all of these systems have in common is unified ACL storage and an RPC-based API, a philosophy also core to Zanzibar's design" (§5). But in AWS IAM "User groups can't be nested; they can contain only users, not other IAM groups" ([AWS IAM docs](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html)), while Zanzibar usersets nest and are followed recursively at check time (§2.1, §3.2.3). AWS IAM is also a policy language attached to identities and resources, not a store of relationships.
+
+## Zanzibar can't do any ABAC, or does ABAC natively
+
+Both are off. The paper has no attribute conditions: its relation configs combine usersets with union, intersection and exclusion (§2.3.1), and a tuple has no field for context (§2.1). Products added conditions as extensions: SpiceDB caveats in CEL, OpenFGA conditions, Permify attributes and rules (see [ACL, RBAC, ABAC, ReBAC](../access-control-models/)). In the 2021 HN thread on Oso's "Why Authorization Is Hard", an AuthZed founder disputed the claim that ABAC cannot be done with ReBAC systems, and the article's author agreed a Zanzibar-style system can be paired with a policy engine ([HN 28543457](https://news.ycombinator.com/item?id=28543457)).
+
+## You need TrueTime or atomic clocks
+
+You need a way to order writes and read consistent snapshots; TrueTime is how Google got one. The paper "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness" (§5). AuthZed describes how SpiceDB gets the same ordering elsewhere: on CockroachDB, which provides external consistency only for overlapping keys, its default strategy makes "all relationship writes touch the same row"; PostgreSQL gives external consistency directly but needs snapshot reads added on top ([AuthZed blog, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). Whether a given product preserves the new-enemy guarantee depends on these details, not on the clock hardware; see [Consistency, snapshots and zookies](../consistency/).
+
+## Sources
+
+- Zanzibar paper, §1, §2.1, §2.2, §2.3.1, §2.4.4, §2.4.5, §3, §3.1.1, §3.2.3, §3.2.4, §3.2.5, §4.1, §4.2, §4.3, §5 (this site's transcription)
+- Hacker News, "Zanzibar: Consistent, Global Authorization System" (2019-06-08): [news.ycombinator.com/item?id=20132520](https://news.ycombinator.com/item?id=20132520)
+- Hacker News, "Why Google Zanzibar shines at building authorization" (2023-06-25): [news.ycombinator.com/item?id=36470943](https://news.ycombinator.com/item?id=36470943)
+- Hacker News, "Why Authorization Is Hard" (2021-09-15): [news.ycombinator.com/item?id=28543457](https://news.ycombinator.com/item?id=28543457)
+- Hacker News, "We rewrote OpenFGA in pure Postgres" (2025-10-21): [news.ycombinator.com/item?id=45661547](https://news.ycombinator.com/item?id=45661547)
+- Tom MacWright, Reading Zanzibar (2025-05-02): [macwright.com/2025/05/02/reading-zanzibar.html](https://macwright.com/2025/05/02/reading-zanzibar.html)
+- OpenFGA, Perform a List Objects call: [openfga.dev/docs/getting-started/perform-list-objects](https://openfga.dev/docs/getting-started/perform-list-objects)
+- AuthZed, Protecting a List Endpoint: [authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)
+- AuthZed, SpiceDB datastores: [authzed.com/docs/spicedb/concepts/datastores](https://authzed.com/docs/spicedb/concepts/datastores)
+- OpenFGA, Configure OpenFGA: [openfga.dev/docs/getting-started/setup-openfga/configure-openfga](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)
+- AWS, IAM user groups: [docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html)
+- AuthZed, The One Crucial Difference Between Spanner and CockroachDB (2021-10-14): [authzed.com/blog/prevent-newenemy-cockroachdb](https://authzed.com/blog/prevent-newenemy-cockroachdb)

@@ -1,0 +1,180 @@
+---
+title: "Topaz"
+description: "一套將 Open Policy Agent 政策與內嵌資料庫中的 Zanzibar 風格目錄結合的開源授權器，在 Aserto 於 2025 年結束營運後由其維護者持續維護。"
+section: ecosystem
+order: 5
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4"]
+product:
+  name: Topaz
+  maintainer: Former Aserto maintainers (Aserto wound down in 2025)
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/aserto-dev/topaz
+  docs: https://www.topaz.sh/docs/intro
+  status: "活躍的開源專案"
+  latest: v0.33.27 (2026-11-10)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+
+Topaz 是一套以 Go 撰寫的授權服務。它 "uses the Open Policy Agent (OPA) as its decision engine, and provides a built-in directory that is inspired by the Google Zanzibar data model"（使用 Open Policy Agent（OPA）作為其決策引擎，並提供一個受 Google Zanzibar 資料模型啟發的內建目錄）（[README](https://github.com/aserto-dev/topaz)）。決策由 Rego 政策做出；政策可以詢問目錄某個主體與某個物件之間是否成立某個關係或權限，這就是與 Zanzibar 相似的部分。目錄資料 "modeled and stored locally in an embedded database"（在本地建模並儲存於內嵌資料庫中）（同一份 README）。
+
+Topaz 由 Aserto 打造。2025-04-27，Aserto 宣布正在 "sunsetting the Aserto SaaS control plane and will shut it down by May 31, 2025"（逐步淘汰 Aserto SaaS 控制平面，並將於 2025 年 5 月 31 日前關閉），將 "wind down Aserto as a commercial entity"（結束 Aserto 作為商業實體的營運），且 "we have a set of maintainers that will continue to support Topaz"（我們有一群維護者會繼續支援 Topaz）（[Aserto blog](https://www.aserto.com/blog/the-final-chapter-for-aserto)，廠商撰寫）。此後仍持續發布新版本。截至 2026-11-13，預設分支上最近的 30 個 commit 全部出自同一位作者 Gert Drapers，他也是那篇結束營運文章的署名者（[commits](https://github.com/aserto-dev/topaz/commits/main)）。
+
+## 論文與 Topaz 並列對照
+
+| 論文中 | Topaz 中 |
+| --- | --- |
+| 命名空間設定（§2.3） | manifest 中 `types` 底下的一個物件型別；manifest 是一個含 `model: version: 3` 的 YAML 檔案（[manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)） |
+| 關係元組 `object#relation@user`（§2.1） | 一筆 relation 紀錄：`object_type`、`object_id`、`relation`、`subject_type`、`subject_id`，以及選擇性的 `subject_relation` |
+| `_this` | 一個 relation 所儲存的紀錄；relation 列出它接受的主體型別，例如 `viewer: user \| group#member` |
+| `computed_userset` | 在 permission 中指名同一型別的另一個 relation 或 permission |
+| `tuple_to_userset` | 箭頭，例如 `parent->can_read` |
+| 聯集、交集、排除 | `\|`、`&`、`-` |
+| zookie（§2.2、§2.4） | 文件中未記載 |
+| Check（§2.4.4） | 目錄的 `Reader.Check` 與 `Checks`；政策決策則透過 `Authorizer.Is`（[reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto)、[authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)） |
+| Read（§2.4.1） | `Reader.GetRelation`、`GetRelations` |
+| Write（§2.4.2） | `Writer.SetRelation`、`DeleteRelation`（[writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto)）；大量載入則透過 `Importer.Import`（[importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)） |
+| Watch（§2.4.3） | 目錄 API 中沒有 |
+| Expand（§2.4.5） | 沒有 Expand 呼叫；最接近的是 `Reader.GetGraph`（"get object relationship graph"，取得物件關係圖） |
+| Leopard（§3.2.4） | 文件中未記載對應物 |
+| Spanner（§3.1） | 一個內嵌的 BoltDB 檔案（[architecture](https://www.topaz.sh/docs/architecture)） |
+
+## 以 Topaz manifest 表示貫穿全站的範例
+
+論文的圖 1 讓擁有者成為編輯者、編輯者成為檢視者，並讓上層資料夾的檢視者成為文件的檢視者（§2.3.1）。Topaz manifest 將存放儲存紀錄的 `relations`，與由 relation 及其他 permission 計算而來的 `permissions` 分開。
+
+```yaml
+model:
+  version: 3
+
+types:
+  user: {}
+
+  group:
+    relations:
+      member: user
+
+  folder:
+    relations:
+      viewer: user | group#member
+    permissions:
+      can_read: viewer
+
+  doc:
+    relations:
+      parent: folder
+      owner: user
+      editor: user | group#member
+      viewer: user | group#member
+    permissions:
+      can_write: owner | editor
+      can_read: viewer | can_write | parent->can_read
+```
+
+`group#member` 將該 relation 授予 "everyone with the `member` relation to a specified `group`"（與指定 `group` 具有 `member` 關係的所有人），而箭頭 "allows a permission to be granted to subjects who have a specified relation or permission with another object"（允許將權限授予與另一個物件具有指定關係或權限的主體）（[manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)）。名稱必須為小寫，且最多 64 個字元。
+
+<Callout title="已對照文件查核，未實際執行">
+此 manifest 依照截至 2026-11-13 的文件語法撰寫：[manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)，以及維護者的 Google Drive 風格範例 [assets/v34/gdrive/manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml)，該範例同樣使用型別名稱 `doc`。它尚未被載入 Topaz。
+</Callout>
+
+貫穿全站範例的五筆 relation，採用維護者範例資料的 JSON Lines 格式（[gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)）：
+
+```json
+{"object_type":"doc","object_id":"readme","relation":"owner","subject_type":"user","subject_id":"anne"}
+{"object_type":"group","object_id":"eng","relation":"member","subject_type":"user","subject_id":"beto"}
+{"object_type":"doc","object_id":"readme","relation":"viewer","subject_type":"group","subject_id":"eng","subject_relation":"member"}
+{"object_type":"doc","object_id":"readme","relation":"parent","subject_type":"folder","subject_id":"A"}
+{"object_type":"folder","object_id":"A","relation":"viewer","subject_type":"user","subject_id":"chen"}
+```
+
+哪一筆紀錄與哪一個 permission 運算式決定了每個人對 readme 的 `can_read`？
+
+<Graph
+  width={600}
+  height={260}
+  title="以 Topaz relation 表示貫穿全站的範例"
+  desc="五筆 relation。user anne 是 doc readme 的 owner。user beto 是 group eng 的 member。group eng#member 是 doc readme 的 viewer。folder A 是 doc readme 的 parent。user chen 是 folder A 的 viewer。從 Chen 經由 folder A 的路徑被標出：它由箭頭 parent->can_read 解析。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer (#member)", dashed: true },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Anne：owner → can_write → can_read。Beto：subject relation group#member。Chen：parent->can_read。虛線：subject relation，而非單一使用者。"
+/>
+
+請注意，目錄可以自行透過 `Reader.Check` 回答這個問題。Topaz 在其上加入的是政策層：Rego 規則可以呼叫目錄，並將其答案與請求的屬性結合。
+
+## 架構
+
+決策在哪裡執行，關係資料又存放在哪裡？
+
+<Graph
+  width={620}
+  height={280}
+  title="依文件描述的 Topaz 元件"
+  desc="你的應用程式透過 REST 或 gRPC 呼叫授權器的 is、query 或 decisiontree API。授權器評估一條 OPA 政策，政策透過 ds.check 之類的內建函式呼叫目錄。目錄將物件與 relation 存放在一個 BoltDB 檔案中。負責載入資料的程式透過目錄的 Writer 或 Importer API 寫入 relation。授權器為每一個決策記錄一筆決策日誌。"
+  nodes={[
+    { id: "app", x: 95, y: 60, label: "你的應用程式", kind: "client" },
+    { id: "loader", x: 85, y: 220, label: "資料寫入者\n（你的程式碼或 CLI）", kind: "client" },
+    { id: "authz", x: 320, y: 60, label: "授權器\nOPA 政策", kind: "server" },
+    { id: "dir", x: 320, y: 220, label: "目錄", kind: "server" },
+    { id: "logs", x: 545, y: 60, label: "決策日誌", kind: "store" },
+    { id: "bolt", x: 545, y: 220, label: "BoltDB 檔案", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "authz", label: "is / query" },
+    { from: "authz", to: "dir", label: "ds.check" },
+    { from: "loader", to: "dir", label: "SetRelation\nImport", labelOffset: -20 },
+    { from: "dir", to: "bolt" },
+    { from: "authz", to: "logs" },
+  ]}
+  caption="黃色：Topaz 元件。綠色：儲存。藍色：呼叫端。一個 Topaz 實例以 sidecar 或微服務的形式在應用程式旁執行。"
+/>
+
+- "The Authorizer exposes three APIs to the calling application"（授權器向呼叫它的應用程式提供三個 API）：`authz/is`、`authz/query` 與 `authz/decisiontree`，每一個都是 "a POST or gRPC API"（POST 或 gRPC API）（[architecture](https://www.topaz.sh/docs/architecture)）。
+- 政策透過 OPA 內建函式存取目錄，包括 `ds.check`、`ds.check_relation` 與 `ds.check_permission`（同一頁面）。
+- "The directory is implemented as a BoltDB instance"（目錄以一個 BoltDB 實例實作）（同一頁面）。"Directory objects are loaded on-demand, in contrast to `data.json` files"（目錄物件是依需求載入的，這與 `data.json` 檔案不同），後者是隨政策一起載入的。
+- "The authorizer captures and stores decision logs for every decision that it evaluates"（授權器會為它評估的每一個決策擷取並儲存決策日誌）（同一頁面）。
+- Topaz 可以部署為 "as a sidecar or a microservice in your cloud"（你雲端中的 sidecar 或微服務）（[intro](https://www.topaz.sh/docs/intro)）。
+
+## 一致性
+
+論文的 zookie 讓客戶端可以要求在 "at a consistent snapshot no earlier than the given zookie"（不早於給定 zookie 的一致性快照上）進行檢查（§2.4.4）。Topaz 沒有記載任何可比較的東西：manifest reference 與 architecture 頁面對一致性沒有任何陳述，而目錄的 Reader 與 Writer 訊息也沒有任何權杖或快照欄位（[reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto)、[writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto)）。檢查讀取的是它所在之 Topaz 實例的 BoltDB 檔案。此處查核的頁面並未說明多個實例如何共用或複製資料。
+
+## 與論文的差異
+
+- **以政策為先。** 決策 API 是 `Is`，它評估一條 Rego 政策；Zanzibar 風格的檢查只是政策可以使用的一項輸入。在論文中，對使用者集合的 Check 本身就是決策（§2.4.4）。
+- **本地內嵌儲存。** 每個實例一個 BoltDB 檔案，而非複製到全球的 Spanner（§3.1）。
+- **沒有 zookie、Watch 或 Leopard。** 文件中皆未記載。
+- **萬用字元。** `viewer: user | user:*` 允許對 ID 為 `*` 的主體建立 relation（[manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)）。
+- **決策日誌。** 每一個決策都會為稽核而記錄，論文並未為 Zanzibar 描述這一點。
+
+## 狀態
+
+- 首個版本 v0.20.3 發布於 2022-10-25；最新版本 v0.33.27 發布於 2026-11-10；預設分支最後一次 commit 於 2026-11-10；GitHub 星數約 1.4k（[releases](https://github.com/aserto-dev/topaz/releases)、GitHub API，2026-11-13）。
+- Aserto 於 2025-04-27 宣布結束營運，並於 2025-05-31 前終止其 SaaS 控制平面；維護者繼續維護 Topaz（[Aserto blog](https://www.aserto.com/blog/the-final-chapter-for-aserto)）。儲存庫仍位於 `aserto-dev` 組織之下。
+
+## 資料來源
+
+- Topaz repository and README: [github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
+- Topaz docs, introduction: [topaz.sh/docs/intro](https://www.topaz.sh/docs/intro)
+- Architecture: [topaz.sh/docs/architecture](https://www.topaz.sh/docs/architecture)
+- Manifest reference: [topaz.sh/docs/directory/manifest-reference](https://www.topaz.sh/docs/directory/manifest-reference)
+- Sample manifest and relations: [manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml), [gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)
+- Directory API: [reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto), [importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)
+- Recent commits: [github.com/aserto-dev/topaz/commits/main](https://github.com/aserto-dev/topaz/commits/main)
+- Authorizer API: [authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)
+- Aserto wind-down: [aserto.com/blog/the-final-chapter-for-aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto)

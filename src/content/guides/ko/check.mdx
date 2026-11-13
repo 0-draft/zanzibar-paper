@@ -1,0 +1,279 @@
+---
+title: "Check 하나의 내부"
+description: "Zanzibar가 Check 하나를 하위 문제의 트리로 바꾸고, 리프를 동시에 평가하고, 일찍 멈추고, 알아낸 것을 스냅샷 단위로 캐시하는 방법, 그리고 깊이 제한처럼 논문에는 없지만 제품들이 추가하는 것."
+section: guide
+part: mechanisms
+order: 6
+checked: "2026-11-13"
+paper: ["3.2.3", "3.2.4", "3.2.5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Check는 질문 하나를 던진다. 이 사용자는 이 스냅샷에서 이 유저셋에 속하는가. 이에 답하려면 여러 서버에 걸친 수십 건의 읽기가 필요할 수 있다. 이 페이지는 Check 하나를 안쪽에서 따라간다. 그것이 되는 불리언 표현식, 그 부분들이 실행되는 순서, 일찍 멈출 수 있는 시점, 캐시에 남기는 것, 그리고 포기하는 지점이다.
+
+인접한 내용은 다른 두 페이지가 다룬다. [관계 튜플과 유저셋](../relation-tuples/#그래프-탐색으로서의-check)은 같은 질문을 그래프 탐색으로서 가지 하나씩 따라간다. [아키텍처](../architecture/#check-하나를-단계별로)는 서버들을 가로지르는 요청을 따라간다. 일관된 해싱, 캐시 트리, 락 테이블, 읽기 풀링, 헤징이다. 이 페이지는 평가 내부에 머문다.
+
+## Check는 불리언 표현식이다
+
+논문은 재작성 규칙이 없는 경우에서 시작한다. "Zanzibar evaluates ACL checks by converting check requests to boolean expressions"(Zanzibar는 검사 요청을 불리언 표현식으로 변환하여 ACL 검사를 평가한다)(§3.2.3). 사용자 `U`와 유저셋 ⟨*object#relation*⟩에 대해 논문의 식은 다음과 같다.
+
+```text
+CHECK(U, ⟨object#relation⟩) =   ∃ tuple ⟨object#relation@U⟩
+                              ∨ ∃ tuple ⟨object#relation@U′⟩, where
+                                U′ = ⟨object′#relation′⟩ s.t. CHECK(U, U′)
+```
+
+첫 줄은 직접 일치다. 저장된 튜플이 그 사용자를 지정한다. 둘째 줄은 재귀다. 저장된 튜플이 다른 유저셋을 지정하고, 사용자가 그 유저셋에 속한다. 논문은 이러한 참조를 따라가는 것을 "포인터 추적(pointer chasing)"이라고 부르며, 이것이 "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide"(대부분의 ACL 및 그룹 유형에서 잘 작동하지만, 간접 ACL이나 그룹이 깊거나 넓으면 비용이 커질 수 있다)라고 지적한다(§3.2.3). 재작성 규칙도 같은 표현식에 합류한다. "Userset rewrite rules are also translated to boolean expressions as part of check evaluation."(유저셋 재작성 규칙도 검사 평가의 일부로 불리언 표현식으로 변환된다.)
+
+논문의 그림 1에 있는 `doc` 설정을 보자(§2.3.1). `viewer`는 자신의 튜플, `editor`, 그리고 상위 폴더의 열람자의 합집합이고, `editor`는 자신의 튜플과 `owner`의 합집합이다. 다른 페이지들과 마찬가지로 `folder#viewer`에 재작성 규칙이 없다고 가정하고 Chen과 readme에 대해 풀어 쓰면 다음과 같다.
+
+```text
+viewer(readme, chen) =   this(readme#viewer, chen)
+                       ∨ editor(readme, chen)
+                       ∨ ∃ parent tuple readme#parent@folder:X : viewer(folder:X, chen)
+
+editor(readme, chen) =   this(readme#editor, chen)
+                       ∨ this(readme#owner, chen)
+```
+
+각 `this(…)`는 튜플 조회이고, 각 `∨`는 트리의 노드다. "Chen은 `doc:readme`를 열람할 수 있는가?"는 어떤 하위 문제로 나뉘는가?
+
+<Graph
+  width={640}
+  height={380}
+  minWidth={540}
+  title="Check 하나의 하위 문제 트리"
+  desc="1: OR 노드인 doc:readme#viewer는 자식이 셋이다. 2: _this, readme의 viewer 튜플. 3: editor, 자식이 둘인 OR 노드로, 4a는 readme의 editor 튜플, 4b는 owner로 readme의 owner 튜플이다. 5: parent에 대한 tuple_to_userset으로, 6에서 readme의 parent 튜플을 읽어 folder:A를 찾고, 7에서 Chen이 folder:A#viewer에 속하는지 묻는다. 7이 참이며, 강조된 경로 1, 5, 6, 7이 예라고 답한다."
+  nodes={[
+    { id: "root", x: 320, y: 40, label: "① doc:readme#viewer\nOR", kind: "group", on: true },
+    { id: "this", x: 90, y: 140, label: "② _this\nviewer 튜플", kind: "object" },
+    { id: "ed", x: 270, y: 140, label: "③ editor\nOR", kind: "group" },
+    { id: "ttu", x: 520, y: 140, label: "⑤ tuple_to_userset\nparent → viewer", kind: "group", on: true },
+    { id: "edthis", x: 180, y: 250, label: "④a _this\neditor 튜플", kind: "object" },
+    { id: "owner", x: 355, y: 250, label: "④b owner\nowner 튜플", kind: "object" },
+    { id: "par", x: 520, y: 250, label: "⑥ readme#parent 읽기\n→ folder:A", kind: "object", on: true },
+    { id: "fold", x: 520, y: 340, label: "⑦ folder:A#viewer\n@user:chen: true", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "root", to: "this" },
+    { from: "root", to: "ed" },
+    { from: "root", to: "ttu", on: true },
+    { from: "ed", to: "edthis" },
+    { from: "ed", to: "owner" },
+    { from: "ttu", to: "par", on: true },
+    { from: "par", to: "fold", label: "새 하위 검사", on: true },
+  ]}
+  caption="Check(user:chen, viewer, doc:readme). 점선 상자는 연산자, 일반 상자는 튜플 읽기다. Chen에 도달하는 것은 가지 ⑤뿐이다."
+/>
+
+번호는 순서가 아니라 하위 문제의 이름이라는 점에 주목하라. 리프 ②, ④a, ④b, ⑥은 readme 자신의 튜플만 필요하다. 논문이 포워딩 키를 객체로 정하는 이유가 이것이다(§3.2.5). 이들은 모두 `doc:readme`를 담당하는 서버가 답할 수 있다. ⑦은 다른 객체에 대한 새로운 Check이므로 `folder:A`의 서버로 포워딩되며, 그 자체가 트리이고 여기서는 `_this` 조회 하나다.
+
+## 모든 리프를 한꺼번에, 그리고 취소
+
+리프는 어떤 순서로 실행되는가? 논문은 트리를 차례로 걷지 않는다. "To minimize check latency, we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled."(검사 지연 시간을 최소화하기 위해, 우리는 불리언 표현식 트리의 모든 리프 노드를 동시에 평가한다. 한 노드의 결과가 하위 트리의 결과를 결정하면 그 하위 트리의 다른 노드 평가는 취소된다.)(§3.2.3)
+
+Chen의 검사에서 이것은 시간에 따라 어떻게 보이는가?
+
+<Swimlane
+  lanes={["① viewer (OR)", "② viewer 튜플", "③④ editor, owner", "⑤⑥⑦ 상위 폴더"]}
+  laneWidth={138}
+  rowHeight={60}
+  timeLabel="시간"
+  title="리프는 동시에 실행되고, 결정된 OR는 나머지를 취소한다"
+  desc="처음에 루트는 모든 리프를 한꺼번에 시작한다. readme의 viewer 튜플, editor와 owner 튜플, parent 튜플이다. viewer 튜플은 Chen 없이 돌아오므로 그 리프는 거짓이다. parent 읽기는 folder:A를 찾고 folder:A#viewer에 대한 하위 검사를 보낸다. editor와 owner 읽기가 끝나기 전에 폴더 하위 검사가 참을 반환한다. 이제 루트 OR는 참으로 결정되어 답하고, editor와 owner 읽기를 취소한다."
+  events={[
+    { lane: 0, t: 0, label: "모든 리프 시작", kind: "note" },
+    { lane: 1, t: 0, label: "튜플 읽기", kind: "read" },
+    { lane: 2, t: 0, label: "튜플 읽기", kind: "read" },
+    { lane: 3, t: 0, label: "parent 읽기", kind: "read" },
+    { lane: 1, t: 1, label: "Chen 없음: false", kind: "note" },
+    { lane: 3, t: 1, label: "folder:A →\n하위 검사", kind: "read", mono: true },
+    { lane: 2, t: 2, label: "아직 읽는 중", kind: "note" },
+    { lane: 3, t: 2, label: "Chen은\n열람자: true", kind: "good" },
+    { lane: 0, t: 3, label: "결정: true", kind: "good" },
+    { lane: 2, t: 3, label: "취소됨", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [1, 1], to: [0, 1], label: "false", dashed: true },
+    { from: [3, 2], to: [0, 3], label: "true" },
+    { from: [0, 3], to: [2, 3], label: "취소", dashed: true },
+  ]}
+  caption="참인 자식 하나가 OR를 결정한다. ②의 거짓 답은 아무것도 바꾸지 않고, ⑦의 참 답이 트리 전체를 끝낸다."
+/>
+
+지연 시간은 가장 느린 리프가 아니라 결정적인 답에 이르는 가장 빠른 경로가 정한다는 점에 주목하라. parent 가지가 느렸고 Chen이 열람자가 아니었다면, 루트는 모든 자식이 거짓이라고 말할 때까지 기다려야 했을 것이다.
+
+취소는 일을 줄이지만 틈을 남긴다. 취소된 하위 검사는 결과를 캐시에 쓰지 않으며, 다른 요청이 [락 테이블](../architecture/#락-테이블이-동일한-요청을-하나로-합친다)에서 그 결과를 기다리고 있을 수 있다. 논문은 바로 이 문제에 부딪혔다. "indirect ACL checks are frequently cancelled when the result of the parent ACL check is already determined. This leaves the cache key unpopulated."(상위 ACL 검사의 결과가 이미 결정되면 간접 ACL 검사가 자주 취소된다. 그러면 캐시 키가 채워지지 않은 채로 남는다.) 그 해결책은 이것이다. "we delay eager cancellation when there are waiters on the corresponding lock table entry"(해당 락 테이블 항목에 대기자가 있으면 조기 취소를 늦춘다)(§3.2.5).
+
+## 각 연산자는 언제 일찍 멈출 수 있는가
+
+논문은 하위 표현식을 결합하는 세 가지 방법, "union, intersection, and exclusion"(합집합, 교집합, 차집합)을 들고(§2.3.1), 그 모두에 하나의 취소 규칙을 서술한다. 하위 트리가 언제 "결정"되는지는 연산자에 따라 다르다. 각 연산자에는 어떤 답 하나면 충분한가?
+
+<Frames min="12rem">
+
+<Graph
+  width={300}
+  height={210}
+  title="합집합은 첫 참에서 멈춘다"
+  desc="자식 A와 B를 가진 합집합 노드. B가 먼저 참을 답하여 합집합을 참으로 결정하므로 A는 취소된다."
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∪ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A: 실행 중\n→ 취소됨", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B: true", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "결정", on: true },
+  ]}
+  caption="합집합: 참 하나면 충분하다. 거짓은 모든 자식이 필요하다."
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="교집합은 첫 거짓에서 멈춘다"
+  desc="자식 A와 B를 가진 교집합 노드. B가 먼저 거짓을 답하여 교집합을 거짓으로 결정하므로 A는 취소된다."
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∩ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A: 실행 중\n→ 취소됨", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B: false", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "결정", on: true },
+  ]}
+  caption="교집합: 거짓 하나면 충분하다. 참은 모든 자식이 필요하다."
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="차집합은 기준이 거짓이거나 제외 대상이 참이면 멈춘다"
+  desc="A에서 B를 뺀 차집합 노드. 제외 대상인 B가 먼저 참을 답하여 차집합을 거짓으로 결정하므로 기준인 A는 취소된다. 기준이 거짓이어도 결정된다."
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A − B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A (기준):\n실행 중\n→ 취소됨", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B (제외 대상):\ntrue", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "결정", on: true },
+  ]}
+  caption="차집합: 기준이 거짓이거나 제외 대상이 참이면 충분하다. 참은 두 답이 모두 필요하다."
+/>
+
+</Frames>
+
+비대칭에 주목하라. 각 연산자에는 일찍 도착할 수 있는 답 하나와 모든 자식이 필요한 답 하나가 있다. 합집합에서 일찍 오는 답은 *예*이고, 교집합과 차집합에서는 *아니요*다. 따라서 합집합으로 작성된 권한은 가장 빠른 경로만큼 빠르게 "허용"이라고 답하지만, 교집합이나 차집합이 있는 권한은 필요한 부분 중 가장 느린 것만큼만 빠르게 "허용"이라고 답한다. 표로 정리하면 다음과 같다.
+
+| 연산자 | 일찍 결정되는 경우 | 모든 자식이 말해야 하는 것 |
+| --- | --- | --- |
+| 합집합 `A ∪ B` | 자식 하나라도 참 → 참 | 거짓이라고 답하려면 거짓 |
+| 교집합 `A ∩ B` | 자식 하나라도 거짓 → 거짓 | 참이라고 답하려면 참 |
+| 차집합 `A − B` | 기준이 거짓, 또는 제외 대상이 참 → 거짓 | 참이라고 답하려면 기준은 참이고 제외 대상은 거짓 |
+
+제품들도 같은 논리를 따른다. OpenFGA의 [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go)(v1.22.1)에서 합집합 리듀서는 첫 허용 결과에서 반환하고("Short-circuit success"), 교집합 리듀서는 첫 불허 결과에서 반환하며("Short-circuit failure"), 차집합 리듀서는 기준과 빼는 쪽을 동시에 실행하고 "base is false"(기준이 거짓)이거나 "subtract is true"(빼는 쪽이 참)일 때 불허를 반환한다. 교집합과 차집합에 관한 AuthZed의 글([2022-03-03](https://authzed.com/blog/check-it-out-2))은 이 연산자들에 대해 "SpiceDB can only partially short-circuit the subproblems"(SpiceDB는 하위 문제를 부분적으로만 단락시킬 수 있다)라고 하며, 그 예에서는 교집합의 한 가지가 아니요라고 하자 "SpiceDB was able to cancel the other `check` immediately"(SpiceDB는 다른 `check`를 즉시 취소할 수 있었다). 합집합에 대해서는 그 이전 글([2021-03-17](https://authzed.com/blog/check-it-out))이 간단히 말한다. "any path found suffices to grant permission!"(경로를 하나라도 찾으면 권한을 부여하기에 충분하다!)
+
+## 하위 결과를 스냅샷 단위로 캐시하기
+
+트리의 모든 노드는 답이 있는 질문이며, 논문은 그 모두를 캐시한다. 서버들은 "form a distributed cache for both reads and check evaluations, including intermediate check results evaluated during pointer chasing"(포인터 추적 중에 평가된 중간 검사 결과를 포함하여, 읽기와 검사 평가 모두를 위한 분산 캐시를 형성한다)(§3.2.5). 위의 ⑦, "Chen은 `folder:A#viewer`에 속하는가"가 그런 중간 결과다. 나중에 같은 질문에 도달하는 검사는 이를 재사용할 수 있다.
+
+재사용을 안전하게 만드는 것은 무엇인가? 결과는 *특정 스냅샷에서만* 참이다. 논문은 스냅샷을 키에 넣는다. "We avoid reusing results evaluated from a different snapshot by encoding snapshot timestamps in cache keys."(우리는 스냅샷 타임스탬프를 캐시 키에 인코딩하여 다른 스냅샷에서 평가된 결과의 재사용을 피한다.) 그런 다음 평가 타임스탬프를 "to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies"(요청 zookie의 오래된 정도 제약을 준수하면서 1초나 10초 같은 거친 단위로) 올림하여, 대부분의 검사가 같은 몇 개의 타임스탬프에 놓이게 한다(§3.2.5. 올림은 [일관성 페이지](../consistency/#왜-정확히-그-시점이-아니라-최소한-그만큼은-최신인가)에 그려져 있다).
+
+캐시된 하위 결과는 언제 도움이 되고, 언제 미스가 되는가?
+
+<Graph
+  width={640}
+  height={300}
+  minWidth={540}
+  title="하위 결과는 스냅샷별로 캐시된다"
+  desc="T=13 s에서 평가된 Chen의 readme 검사는 하위 결과 folder:A#viewer@user:chen @ 13 s = true를 저장한다. 같은 구간 안에서 역시 13 s로 올림된 두 번째 검사는 그 항목에 히트한다. 다음 경계를 넘어 T=14 s에서 평가된 세 번째 검사는 다른 키를 쓰므로 미스가 나고, Spanner에서 폴더 튜플을 다시 읽는다."
+  nodes={[
+    { id: "c1", x: 95, y: 50, label: "Chen의 검사\nT = 13 s", kind: "client" },
+    { id: "c2", x: 95, y: 145, label: "같은 검사,\n0.4 s 후\nT = 13 s", kind: "client" },
+    { id: "c3", x: 95, y: 250, label: "같은 검사,\n1.2 s 후\nT = 14 s", kind: "client" },
+    { id: "k13", x: 350, y: 95, label: "key: folder:A#viewer\n@user:chen @ 13 s\n= true", kind: "server", mono: true, on: true },
+    { id: "k14", x: 350, y: 250, label: "key: … @ 14 s\n(아직 캐시 안 됨)", kind: "server", mono: true },
+    { id: "db", x: 565, y: 250, label: "folder 튜플\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "c1", to: "k13", label: "채움" },
+    { from: "c2", to: "k13", label: "히트", on: true },
+    { from: "c3", to: "k14", label: "미스" },
+    { from: "k14", to: "db", label: "14 s에서 읽기" },
+  ]}
+  caption="13 s 항목은 무효화되지도 않고 14 s에서 재사용되지도 않는다. 타임스탬프는 설명을 위한 것이다."
+/>
+
+무효화 단계가 없다는 점에 주목하라. 스냅샷을 키로 하는 항목은 결코 틀린 값이 될 수 없다. 13 s 시점의 데이터는 바뀌지 않기 때문이다. 평가가 나중 타임스탬프로 옮겨 가면 그 항목은 더 이상 요청되지 않을 뿐이다. SpiceDB의 같은 방식에 관한 AuthZed의 글([2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb))도 같은 생각을 밝힌다. "For any given problem or sub-problem, at a specified time, the result to the check is immutable"(어떤 문제나 하위 문제든 지정된 시각에서 검사 결과는 불변이다), 그리고 "if we were to change the evaluation timestamp, the cache keys would change as well"(평가 타임스탬프를 바꾸면 캐시 키도 바뀐다).
+
+§3.2.5의 메커니즘 두 가지가 이 캐시를 둘러싸고 있으며, 둘 다 아키텍처 페이지에 그려져 있다. "at both the caller and the callee of internal RPCs"(내부 RPC의 호출자와 피호출자 양쪽에서) 캐시하여 형성되는 [캐시 트리](../architecture/#호출의-양쪽-끝이-답을-캐시한다), 그리고 "Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated."(같은 캐시 키를 공유하는 요청 중 하나만 처리를 시작하고, 나머지는 캐시가 채워질 때까지 대기한다.)인 [락 테이블](../architecture/#락-테이블이-동일한-요청을-하나로-합친다)이다.
+
+제품에서는 다음과 같다.
+
+- SpiceDB는 `--datastore-revision-quantization-interval`(기본값 `5s`)이 정하는 구간으로 리비전을 올림하고([`dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go), v1.57.1), 디스패처를 [`singleflight`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go) 계층으로 감싸 "dispatch requests that were single flighted"(single flight된 디스패치 요청)를 센다. 이 계층이 락 테이블의 역할을 한다.
+- OpenFGA의 검사 캐시는 기본적으로 꺼져 있다(`checkQueryCache.enabled`는 `false`, 켜면 TTL `10s`)([configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)). 그 항목은 스냅샷에 속하는 대신 TTL이 지나면 만료되며, 그래서 OpenFGA는 캐시를 건너뛰기 위한 `HIGHER_CONSISTENCY` 모드가 필요하다([consistency](https://openfga.dev/docs/interacting/consistency). [TrueTime 없이 순서 정하기](../without-truetime/) 참조).
+
+## 읽기는 검사별로 풀링된다
+
+리프 ②, ④a, ④b, ⑥은 모두 `doc:readme`의 행을 읽는다. 각 읽기를 따로 보내는 대신 "We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner"(우리는 Spanner로 가는 읽기 RPC 수를 최소화하기 위해 같은 ACL 검사에 대한 읽기를 묶는 풀링 메커니즘을 적용한다)(§3.2.3). 논문은 이 문장 이상으로 메커니즘을 설명하지 않는다. [아키텍처 페이지](../architecture/#spanner로-가는-읽기는-풀링된다)는 네 읽기가 한 서버에서 만나는 것을 그린다. 객체와 관계 순으로 정렬된 저장소 배치(§3.1.1)가 이 읽기들을 인접한 행에 대한 범위 읽기로 만들 수 있게 한다.
+
+## 얼마나 깊이 갈 수 있는가
+
+`CHECK(U, U′)`의 재귀에는 내장된 한계가 없다. 그룹은 그룹을 포함하는 그룹을 포함할 수 있고, 데이터 모델의 어떤 것도 순환을 금지하지 않는다. 검사가 순환을 만나면 무엇을 하는가?
+
+<Graph
+  width={640}
+  height={290}
+  minWidth={540}
+  title="중첩 그룹의 순환"
+  desc="가상의 잘못된 설정: group:all#member가 group:eng#member를 포함하고, group:eng#member가 group:all#member를 포함한다. doc:readme#viewer에 대한 Anne의 검사는 group:eng#member에, 이어서 group:all#member에, 다시 group:eng#member에 도달하며 이를 반복한다. SpiceDB는 깊이 제한 50까지 디스패치를 계속하고 오류를 반환한다. OpenFGA는 방문한 튜플 키를 기억하여 반복을 감지하고 그 가지를 불허로 취급한다. 별도로 깊이 25에서 오류를 낸다."
+  nodes={[
+    { id: "doc", x: 90, y: 60, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "eng", x: 320, y: 60, label: "group:eng#member", kind: "group", mono: true },
+    { id: "all", x: 320, y: 200, label: "group:all#member", kind: "group", mono: true },
+    { id: "sdb", x: 540, y: 60, label: "SpiceDB: 50홉\n→ 오류", kind: "note" },
+    { id: "fga", x: 540, y: 200, label: "OpenFGA: 이미 본 키\n→ 순환,\n불허", kind: "note" },
+  ]}
+  edges={[
+    { from: "doc", to: "eng", label: "1홉" },
+    { from: "eng", to: "all", label: "2, 3, 4홉 …", dir: "both", on: true },
+    { from: "eng", to: "sdb", dashed: true },
+    { from: "all", to: "fga", dashed: true },
+  ]}
+  caption="두 그룹 튜플은 가상의 것이며 예제에 포함되지 않는다. 화살표는 검사가 탐색하는 방향을 따른다."
+/>
+
+논문은 수치를 정하지 않는다. 깊고 넓은 중첩은 "selected namespaces that exhibit such structure"(그러한 구조를 보이는 일부 선택된 네임스페이스)에 대해 Leopard로 처리하며(§3.2.4. [Leopard 페이지](../leopard/) 참조), §5는 "safe pointer chasing despite potentially deep recursion (e.g. membership checks on hierarchical groups)"(잠재적으로 깊은 재귀(예: 계층적 그룹에 대한 멤버십 검사)에도 불구하고 안전한 포인터 추적)을 주장하지만 무엇이 그것을 안전하게 하는지는 그 이상 말하지 않는다. §3.2.6의 클라이언트별 한도는 CPU와 처리 중인 RPC를 제한할 뿐 깊이를 제한하지 않는다. 제품들은 명시적인 한도를 정한다.
+
+| 시스템 | 한도 | 기본값 | 도달했을 때 | 출처 |
+| --- | --- | --- | --- | --- |
+| 논문 | 명시 없음 | 없음 | 기술되지 않음 | §3.2.4, §5 |
+| SpiceDB | `--dispatch-max-depth` | 50 | 오류: "the check request has exceeded the allowable maximum depth of 50" | [Cyclical relationships and traversal limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), [`serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go) |
+| OpenFGA | `resolveNodeLimit` | 25 | 오류. 순환은 먼저 감지되어 불허로 답한다 | [configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration), [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go) |
+| OpenFGA | `resolveNodeBreadthLimit` | 10 | "how many nodes on a given level can be evaluated concurrently"(한 수준에서 동시에 평가할 수 있는 노드 수)를 제한 | [configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
+| Ory Keto | `limit.max_read_depth` | 5 | 전역 최댓값. 요청은 이를 낮추기만 할 수 있다 | [`config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json) |
+
+SpiceDB 문서에 따르면 SpiceDB에는 별도의 순환 감지기가 없다. 순환은 깊이 제한에 걸릴 때까지 실행되어 매우 깊은 계층과 같은 오류를 반환하며, 문서는 방문한 객체를 추적하는 방식을 의미론과 성능상의 이유로 피했다고 설명한다([recursion and max depth](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)). OpenFGA의 `LocalChecker`는 요청마다 방문한 튜플 키의 집합을 유지하고, 키가 반복되면 `CycleDetected`와 함께 불허를 반환한다([`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go), `hasCycle`). 두 한도 모두 한 경로를 따른 홉 수를 세며, 이는 첫 번째 그림의 트리 깊이에 해당한다. 논문의 "evaluate all leaf nodes … concurrently"(모든 리프 노드를 … 동시에 평가)를 제한하는 것은 이 가운데 `resolveNodeBreadthLimit`뿐이다.
+
+<Callout kind="note" title="확인하지 않음">
+
+이 사이트의 조사 노트에는 Hacker News에서 전직 Google 직원 한 명이 Zanzibar의 최대 재귀 깊이를 언급한 기록이 있다. 이 주장은 논문에 없고 Google의 어떤 출처와도 대조하지 않았으므로, 이 페이지는 Zanzibar에 대한 수치를 옮기지 않는다.
+
+</Callout>
+
+## 출처
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.3.1, §3.1.1, §3.2.3, §3.2.4, §3.2.5, §3.2.6, §5.
+- AuthZed, [Check it out: How permissions are answered in SpiceDB and Authzed](https://authzed.com/blog/check-it-out), 2021-03-17 (vendor blog).
+- AuthZed, [Check it out #2: How intersections and exclusions are computed in SpiceDB and Authzed](https://authzed.com/blog/check-it-out-2), 2022-03-03 (vendor blog).
+- AuthZed, [Hotspot Caching in Google Zanzibar and SpiceDB](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb), 2023-05-10 (vendor blog).
+- AuthZed, [Cyclical Relationships and Traversal Limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), SpiceDB docs.
+- SpiceDB v1.57.1 source: [`pkg/cmd/serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go), [`pkg/cmd/datastore/dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go), [`internal/dispatch/singleflight/singleflight.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go).
+- OpenFGA, [Configuring OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configuration) and [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency).
+- OpenFGA v1.22.1 source: [`internal/graph/check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go).
+- Ory Keto, [`.schema/config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json) (`limit.max_read_depth`).

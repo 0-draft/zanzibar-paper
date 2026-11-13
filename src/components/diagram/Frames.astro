@@ -1,0 +1,13 @@
+---
+// Small multiples: two or more figures side by side, read left to right
+// (stacked on narrow screens). For "before / after" and step sequences.
+interface Props {
+  /** Minimum width of one frame before the row wraps */
+  min?: string;
+}
+const { min = "20rem" } = Astro.props;
+---
+
+<div class="frames" style={`--frame-min: ${min}`}>
+  <slot />
+</div>

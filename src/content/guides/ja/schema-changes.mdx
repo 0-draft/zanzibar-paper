@@ -1,0 +1,385 @@
+---
+title: "スキーマを変更し、テストする"
+description: "論文が 1 つのリクエストの中で名前空間設定の変更をどう一貫させるか、今日の製品で関係の削除に 3 つのステップが必要な理由、CI でアサーションファイルを使ってモデルをテストする方法。"
+section: guide
+part: practice
+order: 13
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "3.1.3", "3.2.2", "4"]
+---
+
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+スキーマは、認可システムの中で最も変更の頻度が低く、変更したときに最も壊れやすい部分である。論文ではこれは *名前空間設定* にあたる。"A namespace configuration specifies its relations as well as its storage parameters" (名前空間設定は、その関係とストレージパラメータを指定する) (§2.3)。Google には "more than 1,500 namespaces" (1,500 を超える名前空間) があり、その設定ファイルは "range from tens of lines to thousands of lines, with the median near 500 lines" (数十行から数千行に及び、中央値は 500 行前後である) (§4)。このページでは 3 つのことを扱う。論文が設定の変更によって 1 つのリクエストが 2 つに割れるのをどう防ぐか、今日の製品が関係の削除をどのように段階的に行わせるか、そしてモデルを出荷する前にどうテストするかである。
+
+リレーション設定そのもの (`_this`、`computed_userset`、`tuple_to_userset`) は [リレーションタプルとユーザーセット](../relation-tuples/) で説明している。このページはそれを変更することについてである。
+
+## 論文は名前空間設定をどうバージョン管理するか
+
+設定は専用の Spanner データベースに置かれる。"There is one database to store relation tuples for each client namespace, one database to hold all namespace configurations, and one changelog database shared across all namespaces" (クライアントの名前空間ごとにリレーションタプルを格納するデータベースが 1 つ、すべての名前空間設定を保持するデータベースが 1 つ、そしてすべての名前空間で共有される変更ログデータベースが 1 つある) (§3)。設定データベースは、テーブルとログから成る。
+
+<Callout kind="paper" title="§3.1.3 名前空間設定のストレージ">
+
+Namespace configs are stored in a database with two tables. One table contains the configs and is keyed by namespace IDs. The other is a changelog of config updates and is keyed by commit timestamps. This structure allows a Zanzibar server to load all configs upon startup and monitor the changelog to refresh configs continuously.
+
+(名前空間設定は 2 つのテーブルを持つデータベースに格納される。一方のテーブルは設定を保持し、名前空間 ID をキーとする。もう一方は設定更新の変更ログであり、コミットタイムスタンプをキーとする。この構造により、Zanzibar サーバーは起動時にすべての設定を読み込み、変更ログを監視して設定を継続的に更新できる。)
+
+</Callout>
+
+したがって、設定のどのバージョンもコミットタイムスタンプを持ち、各サーバーはある範囲のバージョンを保持している。危険なのはファンアウトするリクエストである ([アーキテクチャ](../architecture/) を参照)。リクエストを受けたサーバーが新しい設定を読み込み済みで、委譲先のサーバーがまだ読み込んでいなければ、1 つの Check の 2 つの半分が異なるルールで評価されてしまう。論文はこれを排除している。"Zanzibar chooses a single snapshot timestamp for config metadata when evaluating each client request. All `aclservers` in a cluster use that same timestamp for the same request, including for any subrequests that fan out from the original client request" (Zanzibar は各クライアントリクエストを評価する際に、設定メタデータに対して単一のスナップショットタイムスタンプを選ぶ。クラスタ内のすべての `aclservers` は、元のクライアントリクエストからファンアウトするサブリクエストも含め、同じリクエストに対して同じタイムスタンプを用いる) (§3.2.2)。
+
+クラスタ内のサーバーが異なる設定バージョンを読み込んでいるとき、リクエストはどのタイムスタンプを使えるか。
+
+<Swimlane
+  lanes={["設定ストレージ", "監視ジョブ", "aclserver 1", "aclserver 2"]}
+  laneWidth={140}
+  rowHeight={62}
+  timeLabel="時間"
+  title="リクエストごとに 1 つの設定タイムスタンプ"
+  desc="新しい設定バージョンがタイムスタンプ T2 で設定ストレージにコミットされる。aclserver 1 は変更ログからそれを読み、T2 までのバージョンを保持するようになる。aclserver 2 は遅れており、まだ T1 までのバージョンしか保持していない。両者は自分の範囲を監視ジョブに報告し、監視ジョブは T1 で終わるグローバルに利用可能な範囲を報告する。リクエストが aclserver 1 に届き、aclserver 1 はその範囲内、つまり T1 以下の時刻を選び、同じ設定タイムスタンプでサブリクエストを aclserver 2 に送る。その後 aclserver 2 が T2 を読み込み、グローバルな範囲が T2 を含むように広がる。"
+  events={[
+    { lane: 0, t: 0, label: "設定 v2 を\nT2 でコミット", kind: "write" },
+    { lane: 2, t: 1, label: "v2 を読み込み:\n≤ T2 を保持", kind: "note" },
+    { lane: 3, t: 1, label: "遅れ:\n≤ T1 を保持", kind: "note" },
+    { lane: 1, t: 2, label: "グローバルな範囲は\nT1 まで", kind: "note" },
+    { lane: 2, t: 3, label: "リクエスト:\n≤ T1 の時刻を選ぶ", kind: "read" },
+    { lane: 3, t: 4, label: "同じ時刻で\nサブリクエスト", kind: "good" },
+    { lane: 3, t: 5, label: "v2 を読み込み:\n≤ T2 を保持", kind: "note" },
+    { lane: 1, t: 6, label: "グローバルな範囲に\nT2 が入る", kind: "note" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 1], label: "変更ログ" },
+    { from: [2, 1], to: [1, 2], dashed: true },
+    { from: [3, 1], to: [1, 2], label: "範囲", dashed: true },
+    { from: [1, 2], to: [2, 3], label: "範囲" },
+    { from: [2, 3], to: [3, 4], label: "ファンアウト" },
+    { from: [0, 0], to: [3, 5], label: "変更ログ", dashed: true },
+  ]}
+  caption="v2 はまだすべてのサーバーで利用可能ではないため、リクエストは両方のサーバーで v1 のもとで評価される。"
+/>
+
+新しい設定は、コミットされた瞬間に使われるわけではない点に注目してほしい。クラスタ内のすべてのサーバーがそれを提供できるようになった時点で使えるようになる。論文の言葉では、"each server in a cluster may have access to a different range of config timestamps due to restarts or network latency. Zanzibar must pick a timestamp that is available across all of them. To facilitate this, a monitoring job tracks the timestamp range available to every server and aggregates them, reporting a globally available range to every other server. On each incoming request the server picks a time from this range, ensuring that all servers can continue serving even if they are no longer able to read from the config storage" (クラスタ内の各サーバーは、再起動やネットワークレイテンシのために、異なる範囲の設定タイムスタンプにアクセスできる場合がある。Zanzibar はそのすべてで利用可能なタイムスタンプを選ばなければならない。これを容易にするため、監視ジョブがすべてのサーバーで利用可能なタイムスタンプの範囲を追跡して集約し、グローバルに利用可能な範囲を他のすべてのサーバーに報告する。サーバーは受け取った各リクエストに対してこの範囲から時刻を選ぶので、設定ストレージから読み取れなくなっても、すべてのサーバーが処理を続けられる) (§3.2.2)。
+
+論文の記述はここまでである。関係を削除するときにクライアントがタプルをどう移行するか、設定の書き込みが既存のタプルと照合されるかどうか、設定タイムスタンプが同じリクエストのために選ばれたタプルのスナップショットとどう関係するかは述べていない。述べているのは、⟨*namespace*⟩ と ⟨*relation*⟩ が "are predefined in client configurations" (クライアントの設定で事前に定義される) こと (§2.1) と、関係がすべてのタプルの主キーの一部であること (§2.1、§3.1.1) だけである。このページの残りは、オープンソースのシステムがこの空白をどう扱っているかについてである。
+
+## 2 つの製品におけるスキーマのバージョン
+
+最も文書が充実している 2 つの製品は、異なる選択をした。
+
+- **SpiceDB** はデプロイメントごとに現在のスキーマを 1 つ持ち、`WriteSchema` で置き換える。AuthZed のドキュメントによれば、SpiceDB は "processes all calls to the WriteSchema in a **safe** manner: it is not possible to break the type safety of a schema" (WriteSchema へのすべての呼び出しを **安全な** 方法で処理する。スキーマの型安全性を壊すことはできない)。これは "it is not possible to accidentally remove a relation that is still referenced by one or more relationships" (1 つ以上のリレーションシップからまだ参照されている関係を誤って削除することはできない) ことを意味する ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema))。2022 年の AuthZed の記事は、スキーマの書き込みは完全に一貫しており、スキーマの書き込み後のリレーションシップの書き込みは新しいスキーマのもとで評価される、と付け加えている ([online schema migrations](https://authzed.com/blog/online-schema-migrations))。
+- **OpenFGA** はすべてのバージョンを保持する。"Authorization Models in OpenFGA are immutable, they are created once and then can no longer be deleted or modified. Each time you write an authorization model, a new version is created." (OpenFGA の認可モデルはイミュータブルであり、一度作成されると削除も変更もできない。認可モデルを書き込むたびに新しいバージョンが作成される。) リクエストは `authorization_model_id` を指定でき、指定しなければ "OpenFGA will use the last created Authorization Model for that store" (OpenFGA はそのストアで最後に作成された認可モデルを使う) ([immutable models](https://openfga.dev/docs/getting-started/immutable-models))。ドキュメントは設定で ID を固定することを推奨しており、そうすると切り替える前に新しいモデルに対するシャドーチェックもできる。
+
+論文の設計はこの 2 つの間に位置する。OpenFGA のバージョン履歴のようにコミットタイムスタンプをキーとする変更ログを持つが、SpiceDB のようにサーバーは常に最新のバージョンへ移る。各製品の詳細は [SpiceDB](../../ecosystem/spicedb/)、[OpenFGA](../../ecosystem/openfga/) を参照。
+
+## 関係の削除には 3 つのステップが必要である
+
+追加は簡単である。SpiceDB では "Adding a new `relation` to a `definition` is always allowed, as it cannot change any existing types or computation" (`definition` に新しい `relation` を追加することは常に許される。既存の型や計算を変えることがないからである)。また、権限の計算方法の変更も、定義済みの関係や権限を参照している限り許される ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema))。
+
+削除はそうではない。同じページには "For type safety reasons, any removal of a `relation` with data, or a `relation` or `permission` referenced by _another_ `relation` or `permission` is disallowed." (型安全性の理由から、データを持つ `relation` の削除、あるいは _別の_ `relation` や `permission` から参照されている `relation` や `permission` の削除は禁止される。) とある。関係を削除できるのはそのタプルがなくなってからであり、タプルを安全に削除できるのは、それをもとにアクセスを計算するものがなくなってからである。したがって削除には順序がある。
+
+共通の例の `doc` に、チームが廃止したい仮の追加の関係 `editor` があるとする。SpiceDB のスキーマ言語では、最初は次のようになっている。
+
+```text
+definition doc {
+  relation parent: folder
+  relation owner: user
+  relation editor: user
+  relation viewer: user | group#member
+  permission view = owner + editor + viewer + parent->view
+}
+```
+
+各ステップは何を変え、なぜどれも飛ばせないのか。
+
+<Frames>
+
+<Graph
+  width={300}
+  height={230}
+  title="開始"
+  desc="doc の権限 view は 4 つの関係 owner、editor、viewer、parent を指している。editor 関係には格納されたリレーションシップがあり、その下のストレージの箱として描かれている。"
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, on: true },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "editor のタプル", kind: "store", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "e", on: true },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+    { from: "e", to: "t", dir: "none", on: true },
+  ]}
+  caption="開始: view は editor を読み、editor はデータを持つ。"
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="ステップ 1: editor の参照をやめる"
+  desc="スキーマを書き直し、view を owner、viewer、parent だけから計算する。editor 関係はまだ存在し、リレーションシップもまだ保持しているが、それを読むものはない。"
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, kind: "group" },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "editor のタプル", kind: "store", mono: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+    { from: "e", to: "t", dir: "none" },
+  ]}
+  caption="ステップ 1 (WriteSchema): editor はここで view によるアクセスを失う。"
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="ステップ 2: editor のタプルを削除する"
+  desc="DeleteRelationships の呼び出しで editor 関係のリレーションシップをすべて削除する。関係はまだスキーマで宣言されているが、空であり、どこからも参照されていない。"
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, kind: "group" },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "タプルなし", kind: "group", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+  ]}
+  caption="ステップ 2 (DeleteRelationships): 関係は空になる。"
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="ステップ 3: 関係を削除する"
+  desc="editor 関係を除いてスキーマを 3 回目に書き込む。view は owner、viewer、parent を読む。"
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 60, y: 110, label: "owner", mono: true },
+    { id: "v", x: 150, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 240, y: 110, label: "parent", mono: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+  ]}
+  caption="ステップ 3 (WriteSchema): editor はなくなる。"
+/>
+
+</Frames>
+
+アクセスが実際に変わるのはどこかに注目してほしい。ステップ 3 ではなくステップ 1 である。権限が `editor` を読まなくなった時点で、owner でも viewer でもない editor は拒否される。タプルはまだディスク上にある。ここが立ち止まって様子を見るべき地点である。AuthZed の記事はステップの番号付けが異なるが、データを削除する前のこの状態について "You can stay at step 2 for as long as desired, in production, to retain your ability to roll back the change" (変更をロールバックできる状態を保つため、本番環境でステップ 2 に好きなだけ留まってよい) と述べている ([online schema migrations](https://authzed.com/blog/online-schema-migrations))。ステップ 1 のロールバックはスキーマの書き込みで済むが、ステップ 2 のロールバックはタプルの復元を意味する。3 つのステップは [AuthZed の移行ドキュメント](https://authzed.com/docs/spicedb/modeling/migrating-schema) によるもので、そこでは関係から許可されたサブジェクト型を 1 つ削除する場合にも同じパターン (先にそのリレーションシップを削除し、次にスキーマを編集する) が説明されている。
+
+関係の名前変更は、削除と追加の組み合わせである。SpiceDB のドキュメントはその手順を順に説明している。新しい関係を追加して権限に含め、アプリケーションに両方を書き込ませ、バックフィルし、古い関係を権限から外し、その書き込みをやめ、最後に上の 3 つのステップで削除する ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema))。OpenFGA で同じ作業を行う場合はイミュータブルなモデルに頼る。新しいモデルを書き込み (本番環境がまだ使っていない新しい ID になる)、アプリケーションを更新し、タプルを新しい関係名にコピーし、そのうえで新しいモデル ID を指すアプリケーションをデプロイする ([immutable models](https://openfga.dev/docs/getting-started/immutable-models))。
+
+<Callout kind="warn" title="権限の削除">
+
+SpiceDB は、スキーマ内の他のどこからも参照されていない権限の削除を許すが、それが "*can* break API callers if they are making checks or other API requests against the permission. It is up to your own CI system to verify that removed permissions are no longer referenced externally" (その権限に対してチェックやその他の API リクエストを行っている API の呼び出し元を壊す *可能性がある*。削除した権限が外部からもう参照されていないことを確認するのは、各自の CI システムの役目である) と警告している ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema))。スキーマからはアプリケーションのコードは見えない。
+
+</Callout>
+
+## アサーションファイルでモデルをテストする
+
+どちらの製品も、モデル、いくつかのタプル、期待する答えを保持する YAML ファイルを読み込む。以下の例は共通の例 (Anne が readme を所有し、Beto は eng に属し、eng のメンバーは readme を閲覧でき、Chen は folder A を閲覧できる) を表している。各製品の文書化された形式に従っているが、このページのために書いたものであり、実行はしていない。
+
+### OpenFGA: `.fga.yaml`
+
+`.fga.yaml` ファイルは `model` (または `model_file`)、省略可能な `tuples`、そして `tests` を持つ。テストは `check`、`list_objects`、`list_users` のブロックを持つことができ、それぞれに `assertions` がある ([testing models](https://openfga.dev/docs/modeling/testing))。
+
+```yaml
+name: Running example
+model: |
+  model
+    schema 1.1
+
+  type user
+
+  type group
+    relations
+      define member: [user]
+
+  type folder
+    relations
+      define viewer: [user]
+
+  type doc
+    relations
+      define parent: [folder]
+      define owner: [user]
+      define viewer: [user, group#member] or owner or viewer from parent
+
+tuples:
+  - user: user:anne
+    relation: owner
+    object: doc:readme
+  - user: user:beto
+    relation: member
+    object: group:eng
+  - user: group:eng#member
+    relation: viewer
+    object: doc:readme
+  - user: folder:A
+    relation: parent
+    object: doc:readme
+  - user: user:chen
+    relation: viewer
+    object: folder:A
+
+tests:
+  - name: readme access
+    check:
+      - user: user:anne
+        object: doc:readme
+        assertions:
+          owner: true
+          viewer: true
+      - user: user:chen
+        object: doc:readme
+        assertions:
+          owner: false
+          viewer: true
+    list_objects:
+      - user: user:beto
+        type: doc
+        assertions:
+          viewer:
+            - doc:readme
+```
+
+OpenFGA CLI は `fga model test --tests <filename>.fga.yaml` でこれを実行し、テストの種類ごとに合格数を表示する ([testing models](https://openfga.dev/docs/modeling/testing))。
+
+### SpiceDB: バリデーションファイル
+
+SpiceDB のバリデーションファイルは、`schema` (または `schemaFile`)、YAML のリストではなく 1 つの複数行文字列として書く `relationships`、`assertTrue` と `assertFalse` を持つ `assertions`、そして省略可能な `validation` ブロックを持つ。`validation` ブロックは *expected relations* (期待される関係) のブロックで、アクセスを持つすべてのサブジェクトと、それがどのように得られたかを列挙する ([validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging))。
+
+```yaml
+schema: |-
+  definition user {}
+
+  definition group {
+    relation member: user
+  }
+
+  definition folder {
+    relation viewer: user
+    permission view = viewer
+  }
+
+  definition doc {
+    relation parent: folder
+    relation owner: user
+    relation viewer: user | group#member
+    permission view = owner + viewer + parent->view
+  }
+
+relationships: |-
+  doc:readme#owner@user:anne
+  group:eng#member@user:beto
+  doc:readme#viewer@group:eng#member
+  doc:readme#parent@folder:A
+  folder:A#viewer@user:chen
+
+assertions:
+  assertTrue:
+    - doc:readme#view@user:anne
+    - doc:readme#view@user:beto
+    - doc:readme#view@user:chen
+  assertFalse:
+    - doc:readme#owner@user:chen
+```
+
+`zed validate` はこれを "using the same parsing logic that the SpiceDB binary uses" (SpiceDB のバイナリが使うのと同じパースロジックを用いて) 実行し、zed v0.25.0 からは複数のファイルを一度に受け付ける (`zed validate validations/*`) ([validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging))。グループのユーザーセットに対する正確な出力を確認していないため、このページでは `validation` ブロックを省いている。ドキュメントには `"[user:you] is <document:validation-testing-debugging#reader>"` という形が示されている。
+
+どちらのファイルも、自分で作ったタプルに対して *モデル* をテストする。これはスキーマの単体テストであり、本番データのチェックではない。
+
+## CI で実行する
+
+プルリクエストから本番環境までの間で、それぞれの種類のチェックはどこに置くべきか。
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={520}
+  title="デリバリーパイプラインにおけるスキーマのテスト"
+  desc="スキーマの変更とそのテストファイルを含むプルリクエストは CI に送られ、CI はテストファイル内のタプルに対して zed validate または fga model test を実行する。合格すると、デプロイのステップが WriteSchema または WriteAuthorizationModel で稼働中のサービスにスキーマを書き込み、サービスはそれを自身のデータストアに格納する。OpenFGA の場合は、その後新しいモデル ID をアプリケーションの設定に固定する。デプロイのステップの横の注記は、関係を削除する前にタプルを削除するといったデータに依存するステップは CI のテストでは扱えないことを示している。"
+  nodes={[
+    { id: "pr", x: 90, y: 60, label: "プルリクエスト:\nスキーマ + テスト", kind: "client" },
+    { id: "ci", x: 310, y: 60, label: "CI: zed validate /\nfga model test", kind: "server", on: true },
+    { id: "dep", x: 310, y: 170, label: "デプロイ: WriteSchema /\nWriteAuthorizationModel", kind: "server" },
+    { id: "db", x: 530, y: 170, label: "認可の\nデータストア", kind: "store" },
+    { id: "cfg", x: 310, y: 265, label: "アプリの設定: 固定した\nモデル ID (OpenFGA)", kind: "note" },
+    { id: "gap", x: 90, y: 170, label: "対象外:\n既存のタプル", kind: "note" },
+  ]}
+  edges={[
+    { from: "pr", to: "ci", label: "push 時", on: true },
+    { from: "ci", to: "dep", label: "テスト合格" },
+    { from: "dep", to: "db" },
+    { from: "dep", to: "cfg", dashed: true },
+    { from: "gap", to: "dep", dashed: true, dir: "none" },
+  ]}
+  caption="CI はテスト用のタプルに対してモデルをチェックする。実データに対して書き込みが成功するかどうかは、デプロイ時にしかわからない。"
+/>
+
+左側の注記に注目してほしい。AuthZed ははっきりそう述べている。"a schema write can still fail if a relation is removed and there are still instances of that relation in your database. `zed` doesn't know about your data" (関係を削除し、データベースにその関係のインスタンスがまだ残っている場合、スキーマの書き込みは失敗しうる。`zed` はあなたのデータを知らない) ([validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging))。上の 3 ステップの削除はデプロイの手順であり、テストファイルで証明できるものではない。
+
+どちらのプロジェクトも GitHub Actions を公開している。SpiceDB の `authzed/action-spicedb-validate` は、ファイルに対して zed のバリデーションを実行する。AuthZed はこれを "highly recommended because it can prevent deployments of unverified changes" (検証されていない変更のデプロイを防げるので強く推奨する) としている ([docs](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging))。OpenFGA の `openfga/action-openfga-test` は CLI をインストールし、`test_path` 以下で `*.fga.yaml` にマッチするすべてのファイルに対して `fga model test` を実行する ([action.yml](https://github.com/openfga/action-openfga-test/blob/main/action.yml))。両方を使う最小限のワークフローは次のとおりである。
+
+```yaml
+name: Authorization model
+on:
+  pull_request:
+    paths: ["authz/**"]
+
+jobs:
+  spicedb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: authzed/action-spicedb-validate@v1
+        with:
+          validationfile: authz/spicedb.yaml
+
+  openfga:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: openfga/action-openfga-test@v0.1.1
+        with:
+          test_path: authz/
+```
+
+<Callout kind="note" title="どの入力名を使うか">
+
+OpenFGA のテストのページは、入力名を今も `v0.1.0` とともに `store-file-path` として示している。2026-11-13 に確認したアクション自身の `action.yml` は `test_path` と `test_files_pattern` を定義しており、`store-file-path` はない。Auth0 の 2025 年 12 月の解説記事も `v0.1.1` で `test_path` を使っている ([Auth0 blog](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/))。このページは `action.yml` に従う。自分で確認したバージョンに固定すること。
+
+</Callout>
+
+より大きな変更に対しては、SpiceDB は統合テスト用のサーバー (`spicedb serve-testing`、または `authzed/action-spicedb` アクション) も提供している。これは事前共有鍵ごとに "an isolated, empty datastore" (隔離された空のデータストア) を与えるので、アプリケーションのテストを 1 つのインスタンスに対して並行して実行できる ([docs](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging))。OpenFGA ではモデル ID を固定できるので、シャドーチェックができる。切り替える前に、同じチェックを古いモデルと新しいモデルに送って比較する ([immutable models](https://openfga.dev/docs/getting-started/immutable-models))。
+
+論文の該当節: 名前空間設定 §2.3、設定のストレージ §3.1.3、リクエストごとに 1 つの設定タイムスタンプ §3.2.2、名前空間の数と設定の大きさ §4。用語は [用語集](../glossary/#namespace-config) にある。
+
+## 出典
+
+- Zanzibar paper, §2.1, §2.3, §3, §3.1.3, §3.2.2, §4 (this site's transcription)
+- AuthZed, Migrating a Schema in SpiceDB: [authzed.com/docs/spicedb/modeling/migrating-schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)
+- AuthZed blog, Online Schema Migrations in SpiceDB (2022-02-03): [authzed.com/blog/online-schema-migrations](https://authzed.com/blog/online-schema-migrations)
+- AuthZed, Validation, Testing, Debugging SpiceDB Schemas: [authzed.com/docs/spicedb/modeling/validation-testing-debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)
+- OpenFGA, Testing Models: [openfga.dev/docs/modeling/testing](https://openfga.dev/docs/modeling/testing)
+- OpenFGA, Immutable Authorization Models: [openfga.dev/docs/getting-started/immutable-models](https://openfga.dev/docs/getting-started/immutable-models)
+- OpenFGA Model Testing Action, action.yml: [github.com/openfga/action-openfga-test](https://github.com/openfga/action-openfga-test/blob/main/action.yml)
+- Carla Urrea Stabile, Continuous Authorization Testing: FGA, GitHub Actions, and CI/CD, Auth0 blog (2025-12-17): [auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/)

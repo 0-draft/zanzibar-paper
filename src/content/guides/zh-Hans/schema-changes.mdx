@@ -1,0 +1,385 @@
+---
+title: "修改与测试 schema"
+description: "论文如何让命名空间配置的变更在单个请求内保持一致，为什么在当今的产品中移除一个关系需要三步，以及如何在 CI 中用断言文件测试模型。"
+section: guide
+part: practice
+order: 13
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "3.1.3", "3.2.2", "4"]
+---
+
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+schema 是授权系统中变化最少、而一旦变化就最容易出问题的部分。在论文中它是*命名空间配置*："A namespace configuration specifies its relations as well as its storage parameters"（命名空间配置指定其关系以及存储参数）（§2.3）。Google 有 "more than 1,500 namespaces"（1,500 多个命名空间），其配置文件 "range from tens of lines to thousands of lines, with the median near 500 lines"（从几十行到几千行不等，中位数接近 500 行）（§4）。本页涵盖三件事：论文如何防止一次配置变更把一个请求一分为二，当今的产品如何让你分步移除一个关系，以及如何在上线之前测试模型。
+
+关系配置本身（`_this`、`computed_userset`、`tuple_to_userset`）在[关系元组与用户集](../relation-tuples/)中解释。本页讨论的是如何修改它们。
+
+## 论文如何对命名空间配置进行版本管理
+
+配置存放在自己的 Spanner 数据库中："There is one database to store relation tuples for each client namespace, one database to hold all namespace configurations, and one changelog database shared across all namespaces"（每个客户端命名空间有一个存储关系元组的数据库，有一个存放所有命名空间配置的数据库，还有一个在所有命名空间之间共享的变更日志数据库）（§3）。配置数据库由一张表加一份日志组成：
+
+<Callout kind="paper" title="§3.1.3 命名空间配置存储">
+
+Namespace configs are stored in a database with two tables. One table contains the configs and is keyed by namespace IDs. The other is a changelog of config updates and is keyed by commit timestamps. This structure allows a Zanzibar server to load all configs upon startup and monitor the changelog to refresh configs continuously.
+
+（命名空间配置存储在一个包含两张表的数据库中。一张表存放配置，以命名空间 ID 为键。另一张是配置更新的变更日志，以提交时间戳为键。这种结构使 Zanzibar 服务器能够在启动时加载所有配置，并监视变更日志以持续刷新配置。）
+
+</Callout>
+
+因此，每个配置版本都有一个提交时间戳，每台服务器都持有某个范围的版本。危险在于会扇出的请求（见[架构](../architecture/)）：如果接收请求的服务器已经加载了新配置，而它委托的服务器还没有，同一次 Check 的两半就会在不同的规则下被评估。论文排除了这种情况："Zanzibar chooses a single snapshot timestamp for config metadata when evaluating each client request. All `aclservers` in a cluster use that same timestamp for the same request, including for any subrequests that fan out from the original client request"（Zanzibar 在评估每个客户端请求时，为配置元数据选择单一的快照时间戳。集群中的所有 `aclservers` 对同一请求都使用相同的时间戳，包括从原始客户端请求扇出的所有子请求）（§3.2.2）。
+
+当集群中的服务器加载了不同的配置版本时，一个请求可以使用哪个时间戳？
+
+<Swimlane
+  lanes={["配置存储", "监控作业", "aclserver 1", "aclserver 2"]}
+  laneWidth={140}
+  rowHeight={62}
+  timeLabel="时间"
+  title="每个请求一个配置时间戳"
+  desc="一个新配置版本在时间戳 T2 提交到配置存储。aclserver 1 从变更日志读取它，现在持有直到 T2 的版本；aclserver 2 落后，仍然只持有直到 T1 的版本。两者都向监控作业报告各自的范围，监控作业报告一个截止于 T1 的全局可用范围。一个请求到达 aclserver 1，后者在该范围内选择一个时间，即至多 T1，并以相同的配置时间戳向 aclserver 2 发送子请求。之后 aclserver 2 加载了 T2，全局范围扩大到包含 T2。"
+  events={[
+    { lane: 0, t: 0, label: "配置 v2\n在 T2 提交", kind: "write" },
+    { lane: 2, t: 1, label: "加载 v2：\n持有 ≤ T2", kind: "note" },
+    { lane: 3, t: 1, label: "落后：\n持有 ≤ T1", kind: "note" },
+    { lane: 1, t: 2, label: "全局范围\n截止于 T1", kind: "note" },
+    { lane: 2, t: 3, label: "请求：选择\n≤ T1 的时间", kind: "read" },
+    { lane: 3, t: 4, label: "以相同时间\n发出子请求", kind: "good" },
+    { lane: 3, t: 5, label: "加载 v2：\n持有 ≤ T2", kind: "note" },
+    { lane: 1, t: 6, label: "全局范围\n现在包含 T2", kind: "note" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 1], label: "变更日志" },
+    { from: [2, 1], to: [1, 2], dashed: true },
+    { from: [3, 1], to: [1, 2], label: "范围", dashed: true },
+    { from: [1, 2], to: [2, 3], label: "范围" },
+    { from: [2, 3], to: [3, 4], label: "扇出" },
+    { from: [0, 0], to: [3, 5], label: "变更日志", dashed: true },
+  ]}
+  caption="该请求在两台服务器上都按 v1 评估，因为 v2 尚未在每台服务器上可用。"
+/>
+
+注意，新配置并不是一提交就被使用。只有当集群中的每台服务器都能使用它时，它才变得可用。用论文的话说，"each server in a cluster may have access to a different range of config timestamps due to restarts or network latency. Zanzibar must pick a timestamp that is available across all of them. To facilitate this, a monitoring job tracks the timestamp range available to every server and aggregates them, reporting a globally available range to every other server. On each incoming request the server picks a time from this range, ensuring that all servers can continue serving even if they are no longer able to read from the config storage"（由于重启或网络延迟，集群中的每台服务器可访问的配置时间戳范围可能各不相同。Zanzibar 必须选择一个在所有服务器上都可用的时间戳。为此，一个监控作业跟踪每台服务器可用的时间戳范围并加以汇总，向所有其他服务器报告一个全局可用的范围。对于每个到来的请求，服务器从该范围中选择一个时间，从而确保即使服务器无法再从配置存储中读取，所有服务器也都能继续提供服务）（§3.2.2）。
+
+论文到此为止。它没有说明客户端在移除一个关系时如何迁移元组，配置写入是否会对照现有元组进行检查，也没有说明配置时间戳与为同一请求选择的元组快照之间是什么关系。它只说 ⟨*namespace*⟩ 和 ⟨*relation*⟩ "are predefined in client configurations"（在客户端配置中预先定义）（§2.1），以及关系是每个元组主键的一部分（§2.1、§3.1.1）。本页的其余部分讨论开源系统如何处理这一缺口。
+
+## 两个产品中的 schema 版本
+
+文档最完善的两个产品作出了不同的选择。
+
+- **SpiceDB** 每个部署只有一个当前 schema，用 `WriteSchema` 替换。AuthZed 的文档说 SpiceDB "processes all calls to the WriteSchema in a **safe** manner: it is not possible to break the type safety of a schema"（以**安全**的方式处理所有 WriteSchema 调用：不可能破坏 schema 的类型安全），这意味着 "it is not possible to accidentally remove a relation that is still referenced by one or more relationships"（不可能意外移除仍被一个或多个关系引用的关系）（[migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)）。AuthZed 2022 年的一篇文章补充说，schema 写入是完全一致的，因此 schema 写入之后的关系写入会按新 schema 评估（[online schema migrations](https://authzed.com/blog/online-schema-migrations)）。
+- **OpenFGA** 保留每一个版本。"Authorization Models in OpenFGA are immutable, they are created once and then can no longer be deleted or modified. Each time you write an authorization model, a new version is created."（OpenFGA 中的授权模型是不可变的，它们创建一次之后就不能再删除或修改。每次写入授权模型，都会创建一个新版本。）请求可以指定一个 `authorization_model_id`；不指定时，"OpenFGA will use the last created Authorization Model for that store"（OpenFGA 会使用该 store 中最后创建的授权模型）（[immutable models](https://openfga.dev/docs/getting-started/immutable-models)）。文档建议在配置中固定该 ID，这也使得在切换之前可以针对新模型进行影子检查。
+
+论文的设计介于两者之间：一份以提交时间戳为键的变更日志，类似 OpenFGA 的版本历史，但服务器总是移向最新版本，类似 SpiceDB。各产品的更多信息：[SpiceDB](../../ecosystem/spicedb/)、[OpenFGA](../../ecosystem/openfga/)。
+
+## 移除一个关系需要三步
+
+添加很容易。在 SpiceDB 中，"Adding a new `relation` to a `definition` is always allowed, as it cannot change any existing types or computation"（向 `definition` 添加一个新的 `relation` 总是允许的，因为它不会改变任何现有的类型或计算），而修改权限的计算方式也是允许的，只要它引用的是已定义的关系或权限（[migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)）。
+
+移除则不然。同一页面写道："For type safety reasons, any removal of a `relation` with data, or a `relation` or `permission` referenced by _another_ `relation` or `permission` is disallowed."（出于类型安全的原因，不允许移除任何带有数据的 `relation`，也不允许移除被*另一个* `relation` 或 `permission` 引用的 `relation` 或 `permission`。）一个关系只有在其元组消失后才能移除，而其元组只有在没有任何东西再根据它们计算访问权之后才能安全地移除。因此移除是有顺序的。
+
+以贯穿示例中的 `doc` 为例，假设它有一个额外的关系 `editor`，团队想去掉它。用 SpiceDB 的 schema 语言，它起初是这样的：
+
+```text
+definition doc {
+  relation parent: folder
+  relation owner: user
+  relation editor: user
+  relation viewer: user | group#member
+  permission view = owner + editor + viewer + parent->view
+}
+```
+
+每一步改变了什么，为什么每一步都不能跳过？
+
+<Frames>
+
+<Graph
+  width={300}
+  height={230}
+  title="起点"
+  desc="doc 上的权限 view 指向四个关系：owner、editor、viewer 和 parent。editor 关系有已存储的关系数据，画成其下方的一个存储框。"
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, on: true },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "editor 元组", kind: "store", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "e", on: true },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+    { from: "e", to: "t", dir: "none", on: true },
+  ]}
+  caption="起点：view 读取 editor，而 editor 存有数据。"
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="第 1 步：不再引用 editor"
+  desc="重新写入 schema，view 只由 owner、viewer 和 parent 计算。editor 关系仍然存在，也仍然存有关系数据，但没有任何东西读取它。"
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, kind: "group" },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "editor 元组", kind: "store", mono: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+    { from: "e", to: "t", dir: "none" },
+  ]}
+  caption="第 1 步（WriteSchema）：编辑者此时失去了经由 view 的访问权。"
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="第 2 步：删除 editor 元组"
+  desc="一次 DeleteRelationships 调用删除 editor 关系的所有关系数据。该关系仍在 schema 中声明，但它是空的，也没有被引用。"
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, kind: "group" },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "没有元组", kind: "group", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+  ]}
+  caption="第 2 步（DeleteRelationships）：该关系为空。"
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="第 3 步：去掉该关系"
+  desc="第三次写入 schema，不再包含 editor 关系。view 读取 owner、viewer 和 parent。"
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 60, y: 110, label: "owner", mono: true },
+    { id: "v", x: 150, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 240, y: 110, label: "parent", mono: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+  ]}
+  caption="第 3 步（WriteSchema）：editor 已经不存在。"
+/>
+
+</Frames>
+
+注意访问权实际改变的位置：在第 1 步，而不是第 3 步。一旦权限不再读取 `editor`，一个不同时是所有者或查看者的编辑者就会被拒绝，而此时元组仍然在磁盘上。这正是应该停下来观察的时机。AuthZed 的文章对步骤的编号不同，它谈到在删除任何数据之前的这一状态时说："You can stay at step 2 for as long as desired, in production, to retain your ability to roll back the change"（你可以在生产环境中按需在第 2 步停留任意长的时间，以保留回滚该变更的能力）（[online schema migrations](https://authzed.com/blog/online-schema-migrations)）：回滚第 1 步是一次 schema 写入，而回滚第 2 步意味着恢复元组。这三个步骤来自 [AuthZed 的迁移文档](https://authzed.com/docs/spicedb/modeling/migrating-schema)，文档还描述了从关系中移除一种允许的主体类型时的相同模式（先删除那些关系数据，再编辑 schema）。
+
+重命名一个关系就是一次移除加一次添加。SpiceDB 的文档详细讲解了这一过程：添加新关系并把它纳入权限，让应用同时写入两者，回填数据，从权限中去掉旧关系，停止写入旧关系，然后用上面的三个步骤移除它（[migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)）。OpenFGA 完成同样工作的方式依赖于不可变模型：写入新模型（一个生产环境尚未使用的新 ID），更新应用，把元组复制到新的关系名下，然后部署指向新模型 ID 的应用（[immutable models](https://openfga.dev/docs/getting-started/immutable-models)）。
+
+<Callout kind="warn" title="移除一个权限">
+
+SpiceDB 允许移除 schema 中没有其他东西引用的权限，但警告说这 "*can* break API callers if they are making checks or other API requests against the permission. It is up to your own CI system to verify that removed permissions are no longer referenced externally"（*可能*会破坏针对该权限进行检查或其他 API 请求的 API 调用方。需要由你自己的 CI 系统来验证被移除的权限不再被外部引用）（[migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)）。schema 看不到应用代码。
+
+</Callout>
+
+## 用断言文件测试模型
+
+两个产品都读取一个 YAML 文件，其中包含一个模型、一些元组以及你期望的答案。下面的示例编码了贯穿示例（Anne 拥有 readme；Beto 属于 eng；eng 的成员可以查看 readme；Chen 可以查看文件夹 A）。它们遵循各产品文档中的格式，但是专为本页编写的，没有运行过。
+
+### OpenFGA：`.fga.yaml`
+
+`.fga.yaml` 文件包含一个 `model`（或 `model_file`）、可选的 `tuples` 以及 `tests`；一个测试可以包含 `check`、`list_objects` 和 `list_users` 块，每个块都带有 `assertions`（[testing models](https://openfga.dev/docs/modeling/testing)）。
+
+```yaml
+name: Running example
+model: |
+  model
+    schema 1.1
+
+  type user
+
+  type group
+    relations
+      define member: [user]
+
+  type folder
+    relations
+      define viewer: [user]
+
+  type doc
+    relations
+      define parent: [folder]
+      define owner: [user]
+      define viewer: [user, group#member] or owner or viewer from parent
+
+tuples:
+  - user: user:anne
+    relation: owner
+    object: doc:readme
+  - user: user:beto
+    relation: member
+    object: group:eng
+  - user: group:eng#member
+    relation: viewer
+    object: doc:readme
+  - user: folder:A
+    relation: parent
+    object: doc:readme
+  - user: user:chen
+    relation: viewer
+    object: folder:A
+
+tests:
+  - name: readme access
+    check:
+      - user: user:anne
+        object: doc:readme
+        assertions:
+          owner: true
+          viewer: true
+      - user: user:chen
+        object: doc:readme
+        assertions:
+          owner: false
+          viewer: true
+    list_objects:
+      - user: user:beto
+        type: doc
+        assertions:
+          viewer:
+            - doc:readme
+```
+
+OpenFGA CLI 用 `fga model test --tests <filename>.fga.yaml` 运行它，并按测试种类分别打印通过数（[testing models](https://openfga.dev/docs/modeling/testing)）。
+
+### SpiceDB：验证文件
+
+SpiceDB 验证文件包含一个 `schema`（或 `schemaFile`）、作为单个多行字符串而非 YAML 列表的 `relationships`、带有 `assertTrue` 和 `assertFalse` 的 `assertions`，以及一个可选的 `validation` 块，即*预期关系*，列出每个拥有访问权的主体及其获得途径（[validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)）。
+
+```yaml
+schema: |-
+  definition user {}
+
+  definition group {
+    relation member: user
+  }
+
+  definition folder {
+    relation viewer: user
+    permission view = viewer
+  }
+
+  definition doc {
+    relation parent: folder
+    relation owner: user
+    relation viewer: user | group#member
+    permission view = owner + viewer + parent->view
+  }
+
+relationships: |-
+  doc:readme#owner@user:anne
+  group:eng#member@user:beto
+  doc:readme#viewer@group:eng#member
+  doc:readme#parent@folder:A
+  folder:A#viewer@user:chen
+
+assertions:
+  assertTrue:
+    - doc:readme#view@user:anne
+    - doc:readme#view@user:beto
+    - doc:readme#view@user:chen
+  assertFalse:
+    - doc:readme#owner@user:chen
+```
+
+`zed validate` 运行它时 "using the same parsing logic that the SpiceDB binary uses"（使用与 SpiceDB 二进制文件相同的解析逻辑），并且自 zed v0.25.0 起可以一次接受多个文件（`zed validate validations/*`）（[validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)）。本页省略了 `validation` 块，因为没有核对它对组用户集的确切输出；文档展示的形式是 `"[user:you] is <document:validation-testing-debugging#reader>"`。
+
+两种文件测试的都是*模型*，所针对的是你编造的元组。它们是 schema 的单元测试，而不是对生产数据的检查。
+
+## 在 CI 中运行它们
+
+在从拉取请求到生产环境的过程中，每种检查各自属于哪个环节？
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={520}
+  title="交付流水线中的 schema 测试"
+  desc="一个包含 schema 变更及其测试文件的拉取请求进入 CI，CI 针对测试文件中的元组运行 zed validate 或 fga model test。如果通过，部署步骤用 WriteSchema 或 WriteAuthorizationModel 把 schema 写入运行中的服务，服务把它存储在其数据存储中。对于 OpenFGA，新的模型 ID 随后被固定在应用的配置中。部署步骤旁的一条注释说明，依赖数据的步骤，例如在移除关系之前删除元组，不在 CI 测试的覆盖范围内。"
+  nodes={[
+    { id: "pr", x: 90, y: 60, label: "拉取请求：\nschema + 测试", kind: "client" },
+    { id: "ci", x: 310, y: 60, label: "CI：zed validate /\nfga model test", kind: "server", on: true },
+    { id: "dep", x: 310, y: 170, label: "部署：WriteSchema /\nWriteAuthorizationModel", kind: "server" },
+    { id: "db", x: 530, y: 170, label: "授权\n数据存储", kind: "store" },
+    { id: "cfg", x: 310, y: 265, label: "应用配置：固定的\n模型 ID（OpenFGA）", kind: "note" },
+    { id: "gap", x: 90, y: 170, label: "未覆盖：\n现有元组", kind: "note" },
+  ]}
+  edges={[
+    { from: "pr", to: "ci", label: "推送时", on: true },
+    { from: "ci", to: "dep", label: "测试通过" },
+    { from: "dep", to: "db" },
+    { from: "dep", to: "cfg", dashed: true },
+    { from: "gap", to: "dep", dashed: true, dir: "none" },
+  ]}
+  caption="CI 针对测试元组检查模型。写入在真实数据上能否成功，只有在部署时才能知道。"
+/>
+
+注意左侧的注释。AuthZed 直言："a schema write can still fail if a relation is removed and there are still instances of that relation in your database. `zed` doesn't know about your data"（如果移除了一个关系，而数据库中仍有该关系的实例，schema 写入仍然可能失败。`zed` 不知道你的数据）（[validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)）。上面的三步移除是一个部署流程，而不是测试文件能够证明的东西。
+
+两个项目都发布了 GitHub Actions。对于 SpiceDB，`authzed/action-spicedb-validate` 对一个文件运行 zed 的验证；AuthZed 称其 "highly recommended because it can prevent deployments of unverified changes"（强烈推荐，因为它可以阻止未经验证的变更被部署）（[文档](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)）。对于 OpenFGA，`openfga/action-openfga-test` 安装 CLI，并对 `test_path` 下每个匹配 `*.fga.yaml` 的文件运行 `fga model test`（[action.yml](https://github.com/openfga/action-openfga-test/blob/main/action.yml)）。同时包含两者的最小工作流：
+
+```yaml
+name: Authorization model
+on:
+  pull_request:
+    paths: ["authz/**"]
+
+jobs:
+  spicedb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: authzed/action-spicedb-validate@v1
+        with:
+          validationfile: authz/spicedb.yaml
+
+  openfga:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: openfga/action-openfga-test@v0.1.1
+        with:
+          test_path: authz/
+```
+
+<Callout kind="note" title="用哪个输入名？">
+
+OpenFGA 的测试页面仍然把输入写作 `store-file-path`，版本为 `v0.1.0`。该 action 自己的 `action.yml`（于 2026-11-13 核对）定义的是 `test_path` 和 `test_files_pattern`，没有 `store-file-path`；Auth0 2025 年 12 月的演练文章也使用 `test_path` 和 `v0.1.1`（[Auth0 博客](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/)）。本页以 `action.yml` 为准。请固定一个你核对过的版本。
+
+</Callout>
+
+对于较大的变更，SpiceDB 还提供一个集成测试服务器（`spicedb serve-testing`，或 `authzed/action-spicedb` action），它为每个预共享密钥提供 "an isolated, empty datastore"（一个隔离的空数据存储），使应用测试可以针对同一实例并行运行（[文档](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)）。OpenFGA 固定的模型 ID 使影子检查成为可能：在切换之前，把同一检查分别发给旧模型和新模型并比较结果（[immutable models](https://openfga.dev/docs/getting-started/immutable-models)）。
+
+论文章节：命名空间配置 §2.3；配置存储 §3.1.3；每个请求一个配置时间戳 §3.2.2；命名空间数量与配置大小 §4。术语见[术语表](../glossary/#namespace-config)。
+
+## 来源
+
+- Zanzibar 论文，§2.1、§2.3、§3、§3.1.3、§3.2.2、§4（本站的转录）
+- AuthZed，Migrating a Schema in SpiceDB：[authzed.com/docs/spicedb/modeling/migrating-schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)
+- AuthZed 博客，Online Schema Migrations in SpiceDB（2022-02-03）：[authzed.com/blog/online-schema-migrations](https://authzed.com/blog/online-schema-migrations)
+- AuthZed，Validation, Testing, Debugging SpiceDB Schemas：[authzed.com/docs/spicedb/modeling/validation-testing-debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)
+- OpenFGA，Testing Models：[openfga.dev/docs/modeling/testing](https://openfga.dev/docs/modeling/testing)
+- OpenFGA，Immutable Authorization Models：[openfga.dev/docs/getting-started/immutable-models](https://openfga.dev/docs/getting-started/immutable-models)
+- OpenFGA Model Testing Action，action.yml：[github.com/openfga/action-openfga-test](https://github.com/openfga/action-openfga-test/blob/main/action.yml)
+- Carla Urrea Stabile，Continuous Authorization Testing: FGA, GitHub Actions, and CI/CD，Auth0 博客（2025-12-17）：[auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/)

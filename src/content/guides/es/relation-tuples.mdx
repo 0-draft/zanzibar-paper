@@ -1,0 +1,386 @@
+---
+title: "Tuplas de relación y usersets"
+description: "Cómo Zanzibar almacena cada permiso como un hecho pequeño, cómo la configuración de un espacio de nombres convierte esos hechos en ACL efectivas y cómo Check recorre el resultado como un grafo."
+section: guide
+part: mechanisms
+order: 3
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "2.3.1", "2.4.1", "2.4.5", "3.2.3"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar almacena los permisos como *tuplas de relación*: un hecho por fila, que se lee como “este usuario tiene esta relación con este objeto”. Todo lo demás en esta página, las reglas de reescritura, Check y Expand, se calcula a partir de esas filas.
+
+El ejemplo de referencia: Anne, Beto y Chen (`user:anne`, `user:beto`, `user:chen`); el documento `doc:readme` en `folder:A`; el grupo `group:eng`. Anne es propietaria del readme, Beto pertenece a eng, los miembros de eng ven el readme y Chen ve la carpeta A.
+
+## La gramática
+
+El artículo (§2.1) da la notación textual en cuatro reglas:
+
+```text
+⟨tuple⟩   ::= ⟨object⟩ ‘#’ ⟨relation⟩ ‘@’ ⟨user⟩
+⟨object⟩  ::= ⟨namespace⟩ ‘:’ ⟨object_id⟩
+⟨user⟩    ::= ⟨user_id⟩ | ⟨userset⟩
+⟨userset⟩ ::= ⟨object⟩ ‘#’ ⟨relation⟩
+```
+
+Una tupla tiene tres partes. El *objeto* es un espacio de nombres más un ID, como `doc:readme`. La *relación* es un nombre que define el espacio de nombres, como `owner` o `viewer`. El *usuario* es un único ID de usuario o un *userset*. En el artículo, un ID de usuario es un entero; este sitio escribe `user:anne` para que el ejemplo siga siendo legible.
+
+¿Qué dice una sola tupla?
+
+<Graph
+  width={560}
+  height={150}
+  title="Una tupla de relación"
+  desc="Una píldora con la etiqueta user:anne y una flecha con la etiqueta owner que apunta a una caja con la etiqueta doc:readme. Es la tupla doc:readme#owner@user:anne."
+  nodes={[
+    { id: "anne", x: 110, y: 75, label: "user:anne", kind: "subject", mono: true },
+    { id: "doc", x: 450, y: 75, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner" }]}
+  caption="doc:readme#owner@user:anne, dibujada como una arista del usuario al objeto."
+/>
+
+Dice una sola cosa: Anne tiene la relación `owner` con `doc:readme`. El artículo enumera las claves primarias que identifican una tupla: espacio de nombres, ID de objeto, relación y usuario.
+
+## Usersets: una tupla que apunta a un grupo
+
+La cuarta regla de la gramática es la interesante. Un userset es a su vez un objeto más una relación: `group:eng#member` significa “todo usuario que tiene la relación `member` con `group:eng`”. Cuando el usuario de una tupla es un userset, una sola fila concede algo a todo un conjunto de usuarios, y ese conjunto lo definen otras filas.
+
+¿Cómo da una sola tupla acceso al readme a todos los miembros de eng?
+
+<Graph
+  width={600}
+  height={170}
+  minWidth={480}
+  title="Una tupla cuyo usuario es un userset"
+  desc="user:beto tiene una flecha con la etiqueta member hacia una caja discontinua group:eng#member. Esa caja discontinua tiene una flecha con la etiqueta viewer hacia doc:readme. Beto llega al readme solo a través del grupo."
+  nodes={[
+    { id: "beto", x: 80, y: 85, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 85, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 515, y: 85, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+  ]}
+  caption="Dos tuplas: group:eng#member@user:beto y doc:readme#viewer@group:eng#member. La caja discontinua es un userset, no un único usuario."
+/>
+
+Obsérvese que ninguna fila menciona juntos a Beto y el readme. Beto es lector porque está en el conjunto al que apunta la segunda tupla. Si se añade un miembro a eng, ese miembro puede ver el readme sin ningún cambio en la ACL del readme.
+
+El mismo recurso se anida. Un miembro de un grupo puede ser otro userset, por ejemplo `group:eng#member@group:sre#member` (un subequipo hipotético, que no forma parte del ejemplo de referencia), y la pertenencia se extiende entonces a través de tantos niveles como describan las tuplas. El artículo lo resume en una línea: "a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership" (un ⟨*userset*⟩ permite que las ACL hagan referencia a grupos y, por tanto, admite la representación de pertenencias a grupos anidados) (§2.1). También explica la ventaja: modelar con tuplas en lugar de ACL por objeto "allows us to unify the concepts of ACLs and groups" (nos permite unificar los conceptos de ACL y de grupo) (§2.1). Un grupo no es más que un objeto cuya relación `member` es una ACL.
+
+## La Tabla 1 como un solo grafo
+
+La Tabla 1 del artículo enumera cuatro tuplas de ejemplo. Con los usuarios 10 y 11 renombrados como Anne y Beto, y una tupla añadida para Chen, son:
+
+| Tupla | Se lee como |
+| --- | --- |
+| `doc:readme#owner@user:anne` | Anne es propietaria del readme |
+| `group:eng#member@user:beto` | Beto es miembro de eng |
+| `doc:readme#viewer@group:eng#member` | Los miembros de eng son lectores del readme |
+| `doc:readme#parent@folder:A#...` | El readme está en la carpeta A |
+| `folder:A#viewer@user:chen` | Chen es lector de la carpeta A (no está en la Tabla 1) |
+
+El `#...` de la cuarta fila es la notación del artículo para "a relation that does not affect the semantics of the tuple" (una relación que no afecta a la semántica de la tupla) (leyenda de la Tabla 1): la tupla apunta a la propia carpeta, no a un conjunto de sus usuarios.
+
+¿Qué aspecto tienen las cinco filas juntas?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="La Tabla 1 y la tupla de Chen como un solo grafo"
+  desc="Tres usuarios a la izquierda. user:anne tiene una flecha con la etiqueta owner directamente hacia doc:readme, a la derecha. user:beto tiene una flecha con la etiqueta member hacia el userset discontinuo group:eng#member, que tiene una flecha con la etiqueta viewer hacia doc:readme. user:chen tiene una flecha con la etiqueta viewer hacia folder:A, que tiene una flecha con la etiqueta parent hacia doc:readme."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="Cada tupla almacenada es una arista, dibujada del usuario (o userset) al objeto."
+/>
+
+Obsérvese que la arista `parent` no dice nada sobre el acceso. Como dice el artículo, algunas relaciones "only define abstract relations between objects. These abstract relations may indirectly affect access control given userset rewrite rules specified in namespace configs" (solo definen relaciones abstractas entre objetos. Estas relaciones abstractas pueden afectar indirectamente al control de acceso en virtud de las reglas de reescritura de usersets especificadas en las configuraciones de los espacios de nombres) (§2.1). Que Chen pueda ver el readme depende de una regla así, que es el tema de la sección siguiente.
+
+## Configuración del espacio de nombres
+
+Antes de almacenar tuplas, un cliente configura un *espacio de nombres* como `doc` o `folder` (§2.3). La configuración enumera las relaciones del espacio de nombres, cada una con un nombre y una *configuración de relación*, además de parámetros de almacenamiento: ajustes de fragmentación y una codificación de los ID de objeto.
+
+Las tuplas por sí solas no definen la ACL efectiva. Muchos clientes quieren que todo editor sea también lector. Almacenar una tupla `viewer` adicional para cada editor de cada objeto sería, en palabras del artículo, "wasteful and make it hard to make modifications across all objects" (un derroche y dificultaría realizar modificaciones en todos los objetos) (§2.3.1). En su lugar, una configuración de relación puede llevar una *regla de reescritura de usersets*: una función que toma un ID de objeto y devuelve un árbol de expresiones de usersets.
+
+Esta es la Figura 1 del artículo, literalmente:
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+
+relation {
+ name: "editor"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "owner" } }
+} } }
+
+relation {
+ name: "viewer"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "editor" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+> Figure 1: Simple namespace configuration with concentric relations on documents. All owners are editors, and all editors are viewers. Further, viewers of the parent folder are also viewers of the document.
+>
+> (Figura 1: Configuración sencilla de un espacio de nombres con relaciones concéntricas sobre documentos. Todos los propietarios son editores y todos los editores son lectores. Además, los lectores de la carpeta padre también son lectores del documento.)
+
+Las hojas de un árbol de reescritura son de tres tipos (§2.3.1):
+
+| Hoja | Qué devuelve | En la Figura 1 |
+| --- | --- | --- |
+| `_this` | Los usuarios de las tuplas almacenadas para este objeto y esta relación, incluidos los usersets a los que apuntan esas tuplas. Es el valor predeterminado cuando una relación no tiene regla. | Las tuplas `viewer` almacenadas en `doc:readme` |
+| `computed_userset` | El userset de otra relación sobre el mismo objeto. | `editor` sobre el mismo documento; para `editor`, `owner` |
+| `tuple_to_userset` | Lee un *conjunto de tuplas* a partir del objeto y luego calcula un userset a partir de cada tupla que encuentra. | Leer las tuplas `parent` del documento y luego tomar `viewer` en cada carpeta padre |
+
+Las hojas se combinan mediante unión, intersección y exclusión (§2.3.1). La Figura 1 solo usa la unión. Una intersección exigiría que un usuario estuviera en todos los hijos, por ejemplo “editores que además están en eng”; una exclusión quitaría un conjunto, por ejemplo “lectores excepto una lista de bloqueados”. Esos dos ejemplos son ilustraciones, no proceden del artículo.
+
+¿Qué árbol construye la regla `viewer` para un documento?
+
+<Graph
+  width={620}
+  height={380}
+  minWidth={540}
+  title="Árbol de expresiones de doc:readme#viewer"
+  desc="Raíz doc:readme#viewer y, debajo, un nodo union discontinuo. La unión tiene tres hijos: _this, que lee las tuplas viewer almacenadas; computed_userset con relation editor; y tuple_to_userset con tupleset parent y computed_userset viewer, que llega a los lectores de la carpeta padre. El hijo editor se expande, mediante la regla propia de editor, en otra unión de _this y computed_userset con relation owner."
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "this1", x: 90, y: 180, label: "_this", kind: "group", mono: true },
+    { id: "cue", x: 310, y: 180, label: "computed_userset\nrelation: editor", kind: "group", mono: true },
+    { id: "ttu", x: 520, y: 180, label: "tuple_to_userset\ntupleset: parent\nthen: viewer", kind: "group", mono: true },
+    { id: "n1", x: 90, y: 250, label: "tuplas viewer\nalmacenadas en el doc", kind: "note" },
+    { id: "n3", x: 520, y: 270, label: "lectores de\ncada carpeta padre", kind: "note" },
+    { id: "u2", x: 310, y: 262, label: "union", kind: "group", mono: true },
+    { id: "this2", x: 200, y: 345, label: "_this", kind: "group", mono: true },
+    { id: "cuo", x: 420, y: 345, label: "computed_userset\nrelation: owner", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "this1" },
+    { from: "u1", to: "cue" },
+    { from: "u1", to: "ttu" },
+    { from: "cue", to: "u2", label: "regla de editor", dashed: true, labelOffset: 48 },
+    { from: "u2", to: "this2" },
+    { from: "u2", to: "cuo" },
+  ]}
+  caption="La regla viewer de la Figura 1, con la rama editor expandida mediante la regla propia de editor. Las cajas discontinuas se calculan, no se almacenan."
+/>
+
+Obsérvese que `owner` queda dos niveles más abajo: los propietarios son editores y los editores son lectores. Eso es lo que la leyenda de la Figura 1 llama "concentric relations" (relaciones concéntricas). La rama derecha es la única que sale del documento: sigue una arista `parent` almacenada hacia otro objeto.
+
+## Check como búsqueda en un grafo
+
+Una solicitud Check nombra un userset ⟨*object#relation*⟩ y un usuario, y pregunta si el usuario está en él (§2.4.4). Sin reglas de reescritura, el artículo escribe la evaluación como una fórmula recursiva (§3.2.3): el usuario está en ⟨*object#relation*⟩ si existe una tupla ⟨*object#relation@U*⟩, o si existe una tupla ⟨*object#relation@U′*⟩ donde U′ es un userset y el usuario está en U′. El artículo llama a esta recursión "pointer chasing" (persecución de punteros). Las reglas de reescritura "are also translated to boolean expressions as part of check evaluation" (también se traducen a expresiones booleanas como parte de la evaluación de la comprobación) (§3.2.3), de modo que el árbol de expresiones anterior se convierte en un OR de tres ramas.
+
+La pregunta de las cuatro figuras siguientes: ¿puede Chen ver `doc:readme`? Cada viñeta usa el mismo grafo y resalta las aristas que lee la rama en curso. La configuración del espacio de nombres `folder` no aparece en el artículo; estas viñetas suponen que `folder#viewer` no tiene regla de reescritura, así que es simplemente `_this`.
+
+<Callout kind="note" title="Viñetas, no una línea temporal">
+
+Las viñetas avanzan rama a rama para que cada una pueda leerse por separado. Zanzibar no espera de esta manera: evalúa "all leaf nodes of the boolean expression tree concurrently" (todos los nodos hoja del árbol de expresiones booleanas de forma concurrente) y cancela el resto de un subárbol en cuanto un nodo lo decide (§3.2.3).
+
+</Callout>
+
+### Paso 1: `_this`
+
+¿Incluye a Chen alguna tupla `viewer` almacenada en el readme?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Paso 1 de Check: la rama _this"
+  desc="El mismo grafo que la Tabla 1. Resaltados: la arista viewer de group:eng#member a doc:readme, el nodo del grupo y la arista member de user:beto hacia el grupo. user:chen no está en el camino resaltado. Resultado de esta rama: no."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="_this encuentra una tupla viewer, que apunta a group:eng#member. Al seguirla solo se encuentra a Beto. Resultado de la rama: no."
+/>
+
+El único lector almacenado es un userset, así que Check entra recursivamente en `group:eng#member`. Su único miembro es Beto. Esta rama responde que no.
+
+### Paso 2: `computed_userset` editor y luego owner
+
+¿Es Chen editor o propietario?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Paso 2 de Check: la rama de editor y owner"
+  desc="El mismo grafo. Resaltada: la arista owner de user:anne a doc:readme. No hay tuplas editor. user:chen no está en el camino resaltado. Resultado de esta rama: no."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="editor = _this ∪ owner. No hay tuplas editor; la única propietaria es Anne. Resultado de la rama: no."
+/>
+
+La reescritura pasa de `viewer` a `editor` y a `owner` sobre el mismo objeto. Los dos primeros saltos no necesitan ninguna tupla almacenada: salen de la configuración. La única propietaria es Anne, así que esta rama también responde que no.
+
+### Paso 3: `tuple_to_userset`, encontrar la carpeta padre
+
+¿En qué carpeta está el readme?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Paso 3 de Check: lectura del conjunto de tuplas parent"
+  desc="El mismo grafo. Resaltados: la arista parent de folder:A a doc:readme y el nodo folder:A. Este paso solo encuentra la carpeta; todavía no decide nada."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="El conjunto de tuplas doc:readme#parent contiene una tupla, que apunta a folder:A. La regla pregunta ahora por folder:A#viewer."
+/>
+
+La tupla `parent` es la "abstract relation" (relación abstracta) de la Tabla 1. Por sí sola no concede nada; la regla de reescritura la convierte en una nueva pregunta sobre otro objeto.
+
+### Paso 4: `folder:A#viewer`
+
+¿Es Chen lector de la carpeta A?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Paso 4 de Check: el camino que responde que sí"
+  desc="El mismo grafo. Resaltados: user:chen, la arista viewer de user:chen a folder:A, folder:A, la arista parent hacia doc:readme y doc:readme. Es un camino completo de Chen al readme. Resultado: sí."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="folder:A#viewer@user:chen está almacenada. La unión tiene un hijo verdadero, así que Check responde que sí."
+/>
+
+El camino user:chen → folder:A → doc:readme responde a la pregunta. Obsérvese que las aristas apuntan en el mismo sentido en todas las viñetas, pero la búsqueda partió del readme hacia fuera: Check empieza en ⟨*object#relation*⟩ y busca al usuario.
+
+Una persecución de punteros como esta "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide" (funciona bien para la mayoría de los tipos de ACL y grupos, pero puede resultar costosa cuando las ACL o los grupos indirectos son profundos o anchos) (§3.2.3). Para esos espacios de nombres, Zanzibar utiliza el índice Leopard, descrito en [la página de Leopard](../leopard/).
+
+## Read y Expand
+
+Dos llamadas de la API miran los mismos datos desde alturas distintas.
+
+**Read** (§2.4.1) devuelve solo las tuplas almacenadas. Una solicitud nombra uno o varios *conjuntos de tuplas*: una única clave de tupla, o todas las tuplas de un ID de objeto o de un userset dentro de un espacio de nombres, opcionalmente restringidas a una relación. El artículo es explícito: "Read results only depend on contents of relation tuples and do not reflect userset rewrite rules" (los resultados de lectura dependen únicamente del contenido de las tuplas de relación y no reflejan las reglas de reescritura de usersets) (§2.4.1). Leer `doc:readme` con la relación `viewer` en el ejemplo de referencia devuelve una fila:
+
+```text
+doc:readme#viewer@group:eng#member
+```
+
+Falta Anne aunque todo propietario es lector, y falta Chen aunque puede ver el readme.
+
+**Expand** (§2.4.5) "follows indirect references expressed through userset rewrite rules" (sigue las referencias indirectas expresadas mediante reglas de reescritura de usersets). Devuelve un *árbol de usersets*: las hojas son ID de usuario o usersets que apuntan a otros pares ⟨*object#relation*⟩, y los nodos internos son unión, intersección o exclusión.
+
+¿Qué devuelve Expand para `doc:readme#viewer`?
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={540}
+  title="Resultado de Expand para doc:readme#viewer"
+  desc="Un árbol. Raíz doc:readme#viewer y luego una unión con tres hijos. El primer hijo es la hoja de userset group:eng#member. El segundo es una unión para editor con una hoja, user:anne, procedente de owner. El tercero es la hoja de userset folder:A#viewer. Las hojas de userset son discontinuas; user:anne es una píldora."
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 100, y: 180, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 310, y: 180, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 520, y: 180, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "anne", x: 310, y: 262, label: "user:anne", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "eng", label: "_this" },
+    { from: "u1", to: "ed", label: "editor" },
+    { from: "u1", to: "fold", label: "parent → viewer" },
+    { from: "ed", to: "anne", label: "owner" },
+  ]}
+  caption="Expand aplica las reglas de reescritura; Read solo habría devuelto la fila group:eng#member."
+/>
+
+Obsérvense las dos hojas discontinuas. Según §2.4.5, una hoja puede ser un userset que apunta a otro sitio, de modo que un cliente que quiera a cada individuo (Beto, Chen) expande a su vez esas hojas. El artículo no dice hasta qué profundidad recurre una sola llamada Expand; esta figura se detiene en los usersets a los que llegan las reglas propias del documento. El artículo nombra el caso de uso: Expand permite a los clientes "reason about the complete set of users and groups that have access to their objects, which allows them to build efficient search indices for access-controlled content" (razonar sobre el conjunto completo de usuarios y grupos que tienen acceso a sus objetos, lo que les permite construir índices de búsqueda eficientes para contenido con control de acceso) (§2.4.5).
+
+<Callout kind="paper" title="En el artículo">
+
+Las tuplas y la gramática: §2.1 y Tabla 1. Configuraciones de los espacios de nombres: §2.3. Reglas de reescritura y Figura 1: §2.3.1. Read: §2.4.1. Check: §2.4.4. Expand: §2.4.5. Evaluación de las comprobaciones y persecución de punteros: §3.2.3. Los términos se recogen en el [glosario](../glossary/).
+
+</Callout>
+
+## Fuentes
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

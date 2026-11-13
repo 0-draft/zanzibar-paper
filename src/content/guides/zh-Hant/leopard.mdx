@@ -1,0 +1,247 @@
+---
+title: "Leopard：群組索引"
+description: "Zanzibar 如何以一次集合交集回答深層巢狀群組中的成員資格，以及這在每次寫入時付出的代價。"
+section: guide
+part: mechanisms
+order: 7
+checked: "2026-11-13"
+paper: ["3.2.4", "4.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar 通常以一次一次查找、從物件沿著元組走向使用者的方式回答 Check。對大多數資料而言這很快。但對於巢狀多層的群組則不然，Zanzibar 會把這些檢查交給 Leopard，一個預先計算巢狀關係的索引。
+
+## 為什麼巢狀很慢
+
+擴充貫穿全站的範例。`group:eng` 現在位於 `group:product` 之內，而 `group:product` 又位於 `group:all` 之內，readme 則分享給整個 `group:all`。要得知 Beto 能檢視 readme，需要幾次查找？
+
+<Graph
+  width={640}
+  height={380}
+  title="巢狀群組鏈"
+  desc="user:beto 是 group:eng 的成員，group:eng 的成員是 group:product 的成員，group:product 的成員是 group:all 的成員，而 group:all 的成員是 doc:readme 的檢視者。檢查 Beto 的存取權從 doc:readme 開始，每一步讀取一個物件：doc:readme、group:all、group:product 與 group:eng，依序共四次讀取。"
+  nodes={[
+    { id: "doc", x: 200, y: 30, label: "doc:readme", kind: "object", mono: true },
+    { id: "all", x: 200, y: 110, label: "group:all", kind: "group", mono: true },
+    { id: "prod", x: 200, y: 190, label: "group:product", kind: "group", mono: true },
+    { id: "eng", x: 200, y: 270, label: "group:eng", kind: "group", mono: true, on: true },
+    { id: "beto", x: 200, y: 350, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "n1", x: 470, y: 30, label: "1. 讀取 doc:readme：檢視者是 group:all", kind: "note" },
+    { id: "n2", x: 470, y: 110, label: "2. 讀取 group:all：包含 group:product", kind: "note" },
+    { id: "n3", x: 470, y: 190, label: "3. 讀取 group:product：包含 group:eng", kind: "note" },
+    { id: "n4", x: 470, y: 270, label: "4. 讀取 group:eng：Beto 是成員", kind: "note" },
+  ]}
+  edges={[
+    { from: "all", to: "doc", label: "viewer" },
+    { from: "prod", to: "all", label: "member" },
+    { from: "eng", to: "prod", label: "member" },
+    { from: "beto", to: "eng", label: "member", on: true },
+  ]}
+  caption="每一步都指出下一步要讀的物件，因此這四次讀取無法同時開始。每個物件也可能位於不同的伺服器上（見架構頁面）。"
+/>
+
+圖背後的元組如下：
+
+```text
+doc:readme#viewer@group:all#member
+group:all#member@group:product#member
+group:product#member@group:eng#member
+group:eng#member@user:beto
+```
+
+請注意，第 *n* 步必須等第 *n* − 1 步傳回之後才能開始。論文將此稱為指標追蹤，並說它 "can be expensive when indirect ACLs or groups are deep or wide"（當間接 ACL 或群組很深或很寬時，成本可能很高）（§3.2.3）。寬也同樣有害：若 `group:all` 擁有一百個子群組，第 2 步就會分岔成一百條路。因此："Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation."（檢查評估期間的遞迴指標追蹤，對於深層巢狀或擁有大量子群組的群組，難以維持低延遲。對於呈現此類結構的特定命名空間，Zanzibar 使用 Leopard 處理檢查，這是一種支援高效率集合運算的專用索引。）（§3.2.4）
+
+## 兩種集合
+
+Leopard 儲存 "a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID"（以 `(T, s, e)` 元組表示的一組具名集合，其中 *T* 是代表集合類型的列舉值，*s* 與 *e* 是代表集合 ID 與元素 ID 的 64 位元整數）（§3.2.4）。群組成員資格使用兩種集合類型：
+
+- `GROUP2GROUP(s)`：「*直接或間接*」（"*directly or indirectly*"）為祖先群組 *s* 之子群組的群組。
+- `MEMBER2GROUP(s)`：使用者 *s* 為其「*直接*」（"*direct*"）成員的群組。
+
+在這個範例中，這些集合存放了什麼？
+
+<Graph
+  width={640}
+  height={330}
+  title="範例中的 GROUP2GROUP 與 MEMBER2GROUP"
+  desc="GROUP2GROUP(group:all) 是 group:all、group:product 與 group:eng。GROUP2GROUP(group:product) 是 group:product 與 group:eng。GROUP2GROUP(group:eng) 是 group:eng。MEMBER2GROUP(user:beto) 是 group:eng。MEMBER2GROUP(user:anne) 是空集合。"
+  nodes={[
+    { id: "g1", x: 125, y: 40, label: "GROUP2GROUP(group:all)", kind: "object", mono: true },
+    { id: "g2", x: 125, y: 100, label: "GROUP2GROUP(group:product)", kind: "object", mono: true },
+    { id: "g3", x: 125, y: 160, label: "GROUP2GROUP(group:eng)", kind: "object", mono: true },
+    { id: "m1", x: 125, y: 240, label: "MEMBER2GROUP(user:beto)", kind: "object", mono: true },
+    { id: "m2", x: 125, y: 300, label: "MEMBER2GROUP(user:anne)", kind: "object", mono: true },
+    { id: "s1", x: 455, w: 330, y: 40, label: "{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "s2", x: 455, w: 330, y: 100, label: "{ group:product, group:eng }", kind: "group", mono: true },
+    { id: "s3", x: 455, w: 330, y: 160, label: "{ group:eng }", kind: "group", mono: true },
+    { id: "s4", x: 455, w: 330, y: 240, label: "{ group:eng }", kind: "group", mono: true, on: true },
+    { id: "s5", x: 455, w: 330, y: 300, label: "{ }", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "g1", to: "s1" },
+    { from: "g2", to: "s2" },
+    { from: "g3", to: "s3" },
+    { from: "m1", to: "s4", on: true },
+    { from: "m2", to: "s5" },
+  ]}
+  caption="GROUP2GROUP 是攤平的：雖然 eng 位於下兩層，group:all 仍列出 group:eng。MEMBER2GROUP 則不是：它只列出直接成員資格。每個群組都畫在它自己的 GROUP2GROUP 集合中；論文並未這麼說，見下方說明。"
+/>
+
+請注意其中的不對稱。所有的巢狀關係都被收進 `GROUP2GROUP`，因此使用者這一側只需要記錄使用者被直接加入的地方。用論文的話來說，"Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard"（攤平群組對群組的路徑，讓 Leopard 能高效率地評估可達性）（§3.2.4）。
+
+<Callout kind="warn" title="群組包含它自己嗎？">
+論文將 `GROUP2GROUP(s)` 定義為 *s* 的子群組，並未說明 *s* 本身是否在集合中。要讓 *G* 的直接成員通過下方的檢驗，*G* 必須在 `GROUP2GROUP(G)` 中，或另行處理。圖中假設是前者；這是推論，並非論文的陳述。
+</Callout>
+
+## 成員資格即非空交集
+
+"To evaluate whether user *U* is a member of group *G*, we check whether"（為了評估使用者 *U* 是否為群組 *G* 的成員，我們檢查）（§3.2.4）
+
+```text
+(MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
+```
+
+也就是說：使用者被直接加入的群組中，是否有任何一個也位於 *G* 底下的某處？對 `group:all` 而言，Beto 與 Anne 的結果是什麼？
+
+<Graph
+  width={640}
+  height={330}
+  title="以交集表示成員資格"
+  desc="MEMBER2GROUP(user:beto)，即 group:eng，與 GROUP2GROUP(group:all)，即 group:all、group:product 與 group:eng，取交集得到 group:eng：非空，因此 Beto 是 group:all 的成員。MEMBER2GROUP(user:anne) 為空，與同一集合取交集得到空集合，因此 Anne 不是成員。"
+  nodes={[
+    { id: "mb", x: 190, y: 50, label: "MEMBER2GROUP(user:beto)\n{ group:eng }", kind: "group", mono: true },
+    { id: "ga", x: 190, y: 130, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "rb", x: 530, y: 90, label: "∩ = { group:eng }\n非空：是成員", kind: "object", on: true },
+    { id: "ma", x: 190, y: 220, label: "MEMBER2GROUP(user:anne)\n{ }", kind: "group", mono: true },
+    { id: "gb", x: 190, y: 295, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "ra", x: 530, y: 257, label: "∩ = { }\n空：不是成員", kind: "object" },
+  ]}
+  edges={[
+    { from: "mb", to: "rb", on: true },
+    { from: "ga", to: "rb", on: true },
+    { from: "ma", to: "ra" },
+    { from: "gb", to: "ra" },
+  ]}
+  caption="無論巢狀多深，都是兩次查找加一次交集。Beto 是成員；Anne 不是。"
+/>
+
+第一張圖中依序進行的四次讀取，變成了兩次集合查找與一次交集。要回答原本的問題，Zanzibar 仍需讀取 readme 上指名 `group:all#member` 的元組；Leopard 省去的是其下的深度。論文並未詳細說明一次 Check 如何在一般評估與 Leopard 查詢之間分工，因此這種分工是對 §3.2.4 的解讀，而非引文。
+
+## 在已排序的串列上取交集
+
+交集的成本有多低？"Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets. For example, evaluating the intersection between two sets, *A* and *B*, requires only O(min(|A|, |B|)) skip-list seeks."（索引元組以有序整數串列的形式，儲存在跳躍串列之類的結構中，因此集合之間的聯集與交集都很有效率。例如，計算兩個集合 *A* 與 *B* 的交集，只需要 O(min(|A|, |B|)) 次跳躍串列搜尋。）（§3.2.4）
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={520}
+  title="將短的已排序串列與長的串列取交集"
+  desc="串列 A 存有 17、42 與 90。串列 B 存有 3、8、17、21、30、42、55、61、77、84、93 與 99。對 A 中的每個元素，在 B 中進行一次搜尋，找到第一個不小於它的元素：17 找到 17，42 找到 42，90 落在 93，不相符。交集是 17 與 42，以三次搜尋找到。"
+  nodes={[
+    { id: "la", x: 30, y: 50, label: "A", kind: "note" },
+    { id: "lb", x: 30, y: 200, label: "B", kind: "note" },
+    { id: "a1", x: 182, y: 50, label: "17", mono: true, w: 38, on: true },
+    { id: "a2", x: 320, y: 50, label: "42", mono: true, w: 38, on: true },
+    { id: "a3", x: 527, y: 50, label: "90", mono: true, w: 38 },
+    { id: "b0", x: 90, y: 200, label: "3", mono: true, w: 38 },
+    { id: "b1", x: 136, y: 200, label: "8", mono: true, w: 38 },
+    { id: "b2", x: 182, y: 200, label: "17", mono: true, w: 38, on: true },
+    { id: "b3", x: 228, y: 200, label: "21", mono: true, w: 38 },
+    { id: "b4", x: 274, y: 200, label: "30", mono: true, w: 38 },
+    { id: "b5", x: 320, y: 200, label: "42", mono: true, w: 38, on: true },
+    { id: "b6", x: 366, y: 200, label: "55", mono: true, w: 38 },
+    { id: "b7", x: 412, y: 200, label: "61", mono: true, w: 38 },
+    { id: "b8", x: 458, y: 200, label: "77", mono: true, w: 38 },
+    { id: "b9", x: 504, y: 200, label: "84", mono: true, w: 38 },
+    { id: "b10", x: 550, y: 200, label: "93", mono: true, w: 38 },
+    { id: "b11", x: 596, y: 200, label: "99", mono: true, w: 38 },
+  ]}
+  edges={[
+    { from: "a1", to: "b2", label: "搜尋 1：命中", on: true },
+    { from: "a2", to: "b5", label: "搜尋 2：命中", on: true },
+    { from: "a3", to: "b10", label: "搜尋 3：未命中", dashed: true },
+  ]}
+  caption="A 中有三個元素，在 B 中進行三次搜尋。B 的十二個元素從未被逐一掃描。讓每次搜尋變快的跳躍串列上層並未畫出。"
+/>
+
+請注意，工作量取決於較短的串列。當一位使用者只是少數幾個群組的直接成員時，`MEMBER2GROUP(U)` 很短，即使 `GROUP2GROUP(G)` 非常龐大，檢驗的成本仍然很低。論文沒有給出集合大小；這種情況是一項假設。索引 "is sharded by element IDs"（依元素 ID 分片），而分片 "are usually served entirely from memory"（通常完全從記憶體提供服務）（§3.2.4）。
+
+## 三個部分
+
+"The Leopard system consists of three discrete parts: a serving system capable of consistent and low-latency operations across sets; an offline, periodic index building system; and an online real-time layer capable of continuously updating the serving system as tuple changes occur."（Leopard 系統由三個獨立的部分組成：一個能對集合進行一致且低延遲操作的服務系統；一個離線、定期執行的索引建構系統；以及一個線上即時層，能在元組發生變更時持續更新服務系統。）（§3.2.4）它們如何連接？
+
+<Graph
+  width={640}
+  height={350}
+  title="Leopard 的三個部分"
+  desc="離線索引建構器讀取 Zanzibar 元組與設定的快照，產生索引分片，這些分片被複製並換入 Leopard 服務系統。同時，增量索引器讀取 Zanzibar 的 Watch 串流，並將帶有時間戳記的更新寫入服務系統的增量層。aclserver 查詢服務系統，而服務系統在查詢時間戳記上將增量層合併到離線索引之上。"
+  nodes={[
+    { id: "snap", x: 85, y: 60, label: "元組 + 設定\n快照", kind: "store" },
+    { id: "build", x: 310, y: 60, label: "離線索引建構器\n（定期）", kind: "server" },
+    { id: "serve", x: 480, y: 185, label: "Leopard 服務\n離線索引\n+ 增量層", kind: "server", on: true },
+    { id: "watch", x: 85, y: 300, label: "Watch API", kind: "server" },
+    { id: "inc", x: 290, y: 300, label: "增量\n索引器", kind: "server" },
+    { id: "acl", x: 560, y: 315, label: "aclservers", kind: "server" },
+  ]}
+  edges={[
+    { from: "snap", to: "build" },
+    { from: "build", to: "serve", label: "新分片" },
+    { from: "watch", to: "inc", label: "元組變更" },
+    { from: "inc", to: "serve", label: "(T, s, e, t, d)", labelOffset: -22 },
+    { from: "acl", to: "serve", label: "查詢", dir: "both" },
+  ]}
+  caption="離線路徑完整但陳舊；增量路徑新鮮，但只涵蓋上次快照以來的變更。服務系統將兩者合併。"
+/>
+
+- **離線索引建構器。** 它 "generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples."（從 Zanzibar 關係元組與設定的快照產生索引分片，並將分片複製到全球。它遵循使用者集合改寫規則，並遞迴展開 ACL 圖中的邊，以形成 Leopard 索引元組。）伺服器 "swap old shards with new ones when they become available"（在新分片可用時，以新分片替換舊分片）。
+- **增量層。** 僅靠離線索引 "cannot do so at a fresh and consistent snapshot"（無法在新鮮且一致的快照上做到這一點），因此伺服器維護 "an incremental layer that indexes all updates since the offline snapshot"（一個為離線快照以來所有更新建立索引的增量層），每筆更新都是一個 `(T, s, e, t, d)` 元組，"where *t* is the timestamp of the update and *d* is a deletion marker"（其中 *t* 是更新的時間戳記，*d* 是刪除標記）。"Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing."（時間戳記小於或等於查詢時間戳記的更新，會在查詢處理期間合併到離線索引之上。）
+- **資料來源。** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions."（Leopard 增量索引器呼叫 Zanzibar 的 Watch API，以接收依時間排序的 Zanzibar 元組修改串流，並將這些更新轉換為依時間排序的 Leopard 元組新增、更新與刪除串流。）
+
+此清單中的所有引文都出自 §3.2.4。由於更新帶有時間戳記，並合併到查詢時間戳記為止，Leopard 的答案可以反映與 Check 其餘部分相同的快照；論文所陳述的增量層用途是 "To support consistent ACL evaluation"（為了支援一致的 ACL 評估）。
+
+## 代價：一次寫入，許多次索引更新
+
+攤平的代價在寫入時支付。回到 eng 被加入 product 之前，並假設 `group:eng` 自己有兩個子群組 `group:infra` 與 `group:web`。現在有人將 eng 加入 product。會有多少筆索引元組改變？
+
+<Graph
+  width={640}
+  height={380}
+  title="一次元組寫入扇出為許多次索引更新"
+  desc="新增元組 group:product#member@group:eng#member，使 group:eng、group:infra 與 group:web 成為 group:product 與 group:all 兩者的新後代。增量索引器將這一筆元組轉為六筆 GROUP2GROUP 新增：product 獲得 eng、infra 與 web，all 也獲得 eng、infra 與 web。"
+  nodes={[
+    { id: "t", x: 110, y: 40, label: "group:product#member\n@group:eng#member", kind: "store", mono: true },
+    { id: "inc", x: 110, y: 190, label: "增量\n索引器", kind: "server" },
+    { id: "e1", x: 520, y: 30, w: 190, label: "+ G2G(product, eng)", kind: "group", mono: true },
+    { id: "e2", x: 520, y: 94, w: 190, label: "+ G2G(product, infra)", kind: "group", mono: true },
+    { id: "e3", x: 520, y: 158, w: 190, label: "+ G2G(product, web)", kind: "group", mono: true },
+    { id: "e4", x: 520, y: 222, w: 190, label: "+ G2G(all, eng)", kind: "group", mono: true },
+    { id: "e5", x: 520, y: 286, w: 190, label: "+ G2G(all, infra)", kind: "group", mono: true },
+    { id: "e6", x: 520, y: 350, w: 190, label: "+ G2G(all, web)", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "t", to: "inc", label: "1 次寫入" },
+    { from: "inc", to: "e1" },
+    { from: "inc", to: "e2" },
+    { from: "inc", to: "e3" },
+    { from: "inc", to: "e4" },
+    { from: "inc", to: "e5" },
+    { from: "inc", to: "e6" },
+  ]}
+  caption="1 筆 Zanzibar 元組，6 筆 Leopard 元組（省略 group: 前綴）：product 的每個祖先（product、all）乘以 eng 的每個後代（eng、infra、web）。MEMBER2GROUP 不變。"
+/>
+
+數量是一側的祖先數乘以另一側的後代數，因此會隨深度與寬度一起增加。為了計算它，"Generating updates for the GROUP2GROUP tuples requires the incremental indexer to maintain group-to-group membership for denormalizing the effects of a relation tuple update to potentially multiple index updates."（為 GROUP2GROUP 元組產生更新，需要增量索引器維護群組對群組的成員資格，以便將一次關係元組更新的影響反正規化為可能多次的索引更新。）在 Google 的規模下："In practice, a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events."（實務上，單一 Zanzibar 元組的新增或刪除，可能產生數萬個獨立的 Leopard 元組事件。）（§3.2.4）
+
+刪除比圖中所示更微妙：只有在沒有其他路徑仍連接兩個群組時，才能移除一筆索引元組。論文並未說明索引器如何判斷這一點。
+
+這也是 Leopard 屬於例外的原因。在其他地方，"Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)"（Zanzibar 避免儲存層的反正規化，只依賴正規化的資料（§3.2.4 所述的情況除外））（§3.2.5），而 Leopard 只用於 "that exhibit such structure"（呈現此類結構的）特定命名空間（§3.2.4）。
+
+## 正式環境中的表現
+
+依 §4.4，在 7 天期間內："The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile"（Leopard 索引在中位數時執行 156 萬 QPS，在第 99 百分位時執行 222 萬 QPS），以及 "Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile."（Leopard 伺服器在中位數時於 150 微秒內回應，在第 99 百分位時於 1 毫秒內回應。）增量層 "writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile."（在中位數時每秒寫入約 500 次索引更新，在第 99 百分位時每秒約 1,500 次更新。）對 Leopard 的呼叫與對 Spanner 的呼叫一樣會進行對沖（§3.2.7）。
+
+## 資料來源
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3.2.3, §3.2.4, §3.2.5, §3.2.7, §4.4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

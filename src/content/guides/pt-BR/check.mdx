@@ -1,0 +1,279 @@
+---
+title: "Por dentro de um Check"
+description: "Como o Zanzibar transforma um Check em uma árvore de subproblemas, avalia as folhas ao mesmo tempo, encerra cedo, armazena em cache o que aprendeu em um snapshot, e o que os produtos acrescentam e o artigo deixa de fora, como limites de profundidade."
+section: guide
+part: mechanisms
+order: 6
+checked: "2026-11-13"
+paper: ["3.2.3", "3.2.4", "3.2.5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Um Check faz uma única pergunta: este usuário está neste userset neste snapshot? Respondê-la pode exigir dezenas de leituras espalhadas por vários servidores. Esta página acompanha um Check por dentro: a expressão booleana em que ele se transforma, a ordem em que suas partes são executadas, quando ele pode encerrar cedo, o que ele deixa no cache e onde ele desiste.
+
+Duas outras páginas cobrem o terreno vizinho. [Tuplas de relação e usersets](../relation-tuples/#check-como-uma-busca-em-grafo) percorre a mesma pergunta um ramo de cada vez, como uma busca em grafo. [Arquitetura](../architecture/#um-check-passo-a-passo) acompanha a requisição entre servidores: consistent hashing, árvores de cache, a tabela de locks (lock table), o agrupamento de leituras e o hedging. Esta página permanece dentro da avaliação.
+
+## Um Check é uma expressão booleana
+
+O artigo parte do caso sem regras de reescrita: "Zanzibar evaluates ACL checks by converting check requests to boolean expressions" (“O Zanzibar avalia verificações de ACL convertendo requisições de verificação em expressões booleanas”, §3.2.3). Para um usuário `U` e um userset ⟨*object#relation*⟩, a fórmula do artigo é:
+
+```text
+CHECK(U, ⟨object#relation⟩) =   ∃ tuple ⟨object#relation@U⟩
+                              ∨ ∃ tuple ⟨object#relation@U′⟩, where
+                                U′ = ⟨object′#relation′⟩ s.t. CHECK(U, U′)
+```
+
+A primeira linha é um acerto direto: uma tupla armazenada nomeia o usuário. A segunda linha é a recursão: uma tupla armazenada nomeia outro userset, e o usuário está nesse outro. O artigo chama o ato de seguir essas referências de "pointer chasing" e observa que ele "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide" (“funciona bem para a maioria dos tipos de ACLs e grupos, mas pode ser custoso quando ACLs indiretas ou grupos são profundos ou largos”, §3.2.3). As regras de reescrita entram na mesma expressão: "Userset rewrite rules are also translated to boolean expressions as part of check evaluation." (“As regras de reescrita de userset também são traduzidas em expressões booleanas como parte da avaliação da verificação.”)
+
+Tome a configuração da Figura 1 do artigo para `doc` (§2.3.1). `viewer` é a união de suas próprias tuplas, de `editor` e dos visualizadores da pasta pai; `editor` é a união de suas próprias tuplas e de `owner`. Escrita por extenso para Chen e o readme, supondo, como fazem as outras páginas, que `folder#viewer` não tem regra de reescrita:
+
+```text
+viewer(readme, chen) =   this(readme#viewer, chen)
+                       ∨ editor(readme, chen)
+                       ∨ ∃ parent tuple readme#parent@folder:X : viewer(folder:X, chen)
+
+editor(readme, chen) =   this(readme#editor, chen)
+                       ∨ this(readme#owner, chen)
+```
+
+Cada `this(…)` é uma consulta de tupla, e cada `∨` é um nó de uma árvore. Em quais subproblemas se divide a pergunta "Chen pode visualizar `doc:readme`?"?
+
+<Graph
+  width={640}
+  height={380}
+  minWidth={540}
+  title="A árvore de subproblemas de um Check"
+  desc="1: doc:readme#viewer, um nó OR, tem três filhos. 2: _this, as tuplas viewer do readme. 3: editor, um nó OR com dois filhos, 4a: as tuplas editor do readme, e 4b: owner, as tuplas owner do readme. 5: tuple_to_userset sobre parent, em que 6 lê as tuplas parent do readme e encontra folder:A, e então 7 pergunta se Chen está em folder:A#viewer. O passo 7 é verdadeiro, e o caminho destacado 1, 5, 6, 7 responde sim."
+  nodes={[
+    { id: "root", x: 320, y: 40, label: "① doc:readme#viewer\nOR", kind: "group", on: true },
+    { id: "this", x: 90, y: 140, label: "② _this\ntuplas viewer", kind: "object" },
+    { id: "ed", x: 270, y: 140, label: "③ editor\nOR", kind: "group" },
+    { id: "ttu", x: 520, y: 140, label: "⑤ tuple_to_userset\nparent → viewer", kind: "group", on: true },
+    { id: "edthis", x: 180, y: 250, label: "④a _this\ntuplas editor", kind: "object" },
+    { id: "owner", x: 355, y: 250, label: "④b owner\ntuplas owner", kind: "object" },
+    { id: "par", x: 520, y: 250, label: "⑥ ler readme#parent\n→ folder:A", kind: "object", on: true },
+    { id: "fold", x: 520, y: 340, label: "⑦ folder:A#viewer\n@user:chen: true", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "root", to: "this" },
+    { from: "root", to: "ed" },
+    { from: "root", to: "ttu", on: true },
+    { from: "ed", to: "edthis" },
+    { from: "ed", to: "owner" },
+    { from: "ttu", to: "par", on: true },
+    { from: "par", to: "fold", label: "nova subverificação", on: true },
+  ]}
+  caption="Check(user:chen, viewer, doc:readme). Caixas tracejadas são operadores; caixas simples são leituras de tuplas. Somente o ramo ⑤ alcança Chen."
+/>
+
+Observe que os números nomeiam subproblemas, não uma sequência. As folhas ②, ④a, ④b e ⑥ precisam apenas das tuplas do próprio readme, e é por isso que o artigo usa o objeto como chave do encaminhamento (§3.2.5): todas elas podem ser respondidas pelo servidor responsável por `doc:readme`. O passo ⑦ é um novo Check sobre outro objeto, então é encaminhado ao servidor de `folder:A`, e é, ele próprio, uma árvore, aqui uma única consulta `_this`.
+
+## Todas as folhas de uma vez, e cancelamento
+
+Em que ordem as folhas são executadas? O artigo não percorre a árvore: "To minimize check latency, we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled." (“Para minimizar a latência da verificação, avaliamos todos os nós folha da árvore de expressão booleana simultaneamente. Quando o resultado de um nó determina o resultado de uma subárvore, a avaliação dos demais nós da subárvore é cancelada.”, §3.2.3)
+
+Como isso se desenrola no tempo para a verificação de Chen?
+
+<Swimlane
+  lanes={["① viewer (OR)", "② tuplas viewer", "③④ editor, owner", "⑤⑥⑦ pasta pai"]}
+  laneWidth={138}
+  rowHeight={60}
+  timeLabel="tempo"
+  title="As folhas rodam simultaneamente; um OR decidido cancela o resto"
+  desc="No início, a raiz dispara todas as folhas de uma vez: as tuplas viewer do readme, suas tuplas editor e owner e suas tuplas parent. As tuplas viewer voltam sem Chen, então essa folha é falsa. A leitura de parent encontra folder:A e envia uma subverificação sobre folder:A#viewer. Antes que as leituras de editor e owner terminem, a subverificação da pasta retorna verdadeiro. O OR da raiz agora está decidido como verdadeiro, responde e cancela as leituras de editor e owner."
+  events={[
+    { lane: 0, t: 0, label: "dispara todas\nas folhas", kind: "note" },
+    { lane: 1, t: 0, label: "lê tuplas", kind: "read" },
+    { lane: 2, t: 0, label: "lê tuplas", kind: "read" },
+    { lane: 3, t: 0, label: "lê parent", kind: "read" },
+    { lane: 1, t: 1, label: "sem Chen: false", kind: "note" },
+    { lane: 3, t: 1, label: "folder:A →\nsubverificação", kind: "read", mono: true },
+    { lane: 2, t: 2, label: "ainda lendo", kind: "note" },
+    { lane: 3, t: 2, label: "Chen é\nviewer: true", kind: "good" },
+    { lane: 0, t: 3, label: "decidido: true", kind: "good" },
+    { lane: 2, t: 3, label: "cancelado", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [1, 1], to: [0, 1], label: "false", dashed: true },
+    { from: [3, 2], to: [0, 3], label: "true" },
+    { from: [0, 3], to: [2, 3], label: "cancela", dashed: true },
+  ]}
+  caption="Um filho verdadeiro decide um OR. A resposta falsa de ② não muda nada; a resposta verdadeira de ⑦ encerra a árvore inteira."
+/>
+
+Observe que a latência é determinada pelo caminho mais rápido até uma resposta decisiva, e não pela folha mais lenta. Se o ramo da pasta pai fosse lento e Chen não fosse visualizador, a raiz teria de esperar que todos os filhos respondessem falso.
+
+O cancelamento economiza trabalho, mas deixa uma lacuna. Uma subverificação cancelada nunca grava seu resultado no cache, e outras requisições podem estar aguardando esse resultado na [tabela de locks](../architecture/#a-tabela-de-locks-reúne-requisições-idênticas). O artigo se deparou exatamente com isso: "indirect ACL checks are frequently cancelled when the result of the parent ACL check is already determined. This leaves the cache key unpopulated." (“verificações de ACL indiretas são frequentemente canceladas quando o resultado da verificação de ACL pai já está determinado. Isso deixa a chave de cache sem preenchimento.”) A correção: "we delay eager cancellation when there are waiters on the corresponding lock table entry" (“adiamos o cancelamento antecipado quando há requisições aguardando na entrada correspondente da tabela de locks”, §3.2.5).
+
+## Quando cada operador pode encerrar cedo
+
+O artigo lista três maneiras de combinar subexpressões, "union, intersection, and exclusion" (“união, interseção e exclusão”, §2.3.1), e enuncia uma única regra de cancelamento para todas elas. Quando uma subárvore está "determinada" depende do operador. Qual resposta isolada basta para cada um?
+
+<Frames min="12rem">
+
+<Graph
+  width={300}
+  height={210}
+  title="A união encerra no primeiro verdadeiro"
+  desc="Um nó de união com filhos A e B. B responde verdadeiro primeiro, o que decide a união como verdadeira, então A é cancelado."
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∪ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A: em execução\n→ cancelado", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B: true", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "decide", on: true },
+  ]}
+  caption="União: um verdadeiro basta. Falso exige todos os filhos."
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="A interseção encerra no primeiro falso"
+  desc="Um nó de interseção com filhos A e B. B responde falso primeiro, o que decide a interseção como falsa, então A é cancelado."
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∩ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A: em execução\n→ cancelado", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B: false", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "decide", on: true },
+  ]}
+  caption="Interseção: um falso basta. Verdadeiro exige todos os filhos."
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="A exclusão encerra com base falsa ou excluído verdadeiro"
+  desc="Um nó de exclusão, A menos B. O lado excluído B responde verdadeiro primeiro, o que decide a exclusão como falsa, então a base A é cancelada. Uma base falsa também a decidiria."
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A − B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A (base):\nem execução\n→ cancelado", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B (excluído):\ntrue", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "decide", on: true },
+  ]}
+  caption="Exclusão: uma base falsa ou um lado excluído verdadeiro basta. Verdadeiro exige as duas respostas."
+/>
+
+</Frames>
+
+Observe a assimetria. Cada operador tem uma resposta que pode chegar cedo e outra que exige todos os filhos. Para a união, a resposta antecipada é *sim*; para a interseção e a exclusão, é *não*. Assim, uma permissão escrita como união responde "permitido" tão rápido quanto seu caminho mais rápido, enquanto uma permissão com interseção ou exclusão responde "permitido" apenas tão rápido quanto sua parte obrigatória mais lenta. A tabela detalha:
+
+| Operador | Decidido cedo por | Exige que todos os filhos digam |
+| --- | --- | --- |
+| União `A ∪ B` | qualquer filho verdadeiro → verdadeiro | falso, para responder falso |
+| Interseção `A ∩ B` | qualquer filho falso → falso | verdadeiro, para responder verdadeiro |
+| Exclusão `A − B` | base falsa, ou excluído verdadeiro → falso | base verdadeira e excluído falso, para responder verdadeiro |
+
+Os produtos seguem a mesma lógica. No [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go) do OpenFGA (v1.22.1), o redutor de união retorna no primeiro resultado permitido ("Short-circuit success"), o redutor de interseção no primeiro resultado não permitido ("Short-circuit failure"), e o redutor de exclusão executa a base e o lado subtraído simultaneamente e retorna não permitido quando "base is false" (“a base é falsa”) ou quando "subtract is true" (“o lado subtraído é verdadeiro”). O post da AuthZed sobre interseções e exclusões ([2022-03-03](https://authzed.com/blog/check-it-out-2)) diz que, para esses operadores, "SpiceDB can only partially short-circuit the subproblems" (“o SpiceDB só consegue fazer curto-circuito parcial dos subproblemas”), e, em seu exemplo, "SpiceDB was able to cancel the other `check` immediately" (“o SpiceDB conseguiu cancelar o outro `check` imediatamente”) assim que um ramo de uma interseção disse não. Para uniões, o post anterior ([2021-03-17](https://authzed.com/blog/check-it-out)) diz de forma simples: "any path found suffices to grant permission!" (“qualquer caminho encontrado basta para conceder a permissão!”)
+
+## Armazenar sub-resultados em cache por snapshot
+
+Cada nó da árvore é uma pergunta com uma resposta, e o artigo armazena todas em cache: os servidores "form a distributed cache for both reads and check evaluations, including intermediate check results evaluated during pointer chasing" (“formam um cache distribuído tanto para leituras quanto para avaliações de verificação, incluindo resultados intermediários de verificação avaliados durante o pointer chasing”, §3.2.5). O passo ⑦ acima, "Chen está em `folder:A#viewer`?", é um desses resultados intermediários. Qualquer verificação posterior que chegue à mesma pergunta pode reutilizá-lo.
+
+O que torna a reutilização segura? Um resultado só é verdadeiro *em um snapshot*. O artigo coloca o snapshot na chave: "We avoid reusing results evaluated from a different snapshot by encoding snapshot timestamps in cache keys." (“Evitamos reutilizar resultados avaliados em um snapshot diferente codificando os timestamps de snapshot nas chaves de cache.”) Em seguida, arredonda os timestamps de avaliação para cima, "to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies" (“para uma granularidade grossa, como um ou dez segundos, respeitando as restrições de defasagem dos zookies das requisições”), de modo que a maioria das verificações caia nos mesmos poucos timestamps (§3.2.5; o arredondamento é desenhado na [página de consistência](../consistency/#por-que-pelo-menos-tão-atual-quanto-e-não-exatamente-em)).
+
+Quando um sub-resultado em cache ajuda, e quando é um miss?
+
+<Graph
+  width={640}
+  height={300}
+  minWidth={540}
+  title="Sub-resultados ficam em cache por snapshot"
+  desc="Uma verificação de Chen sobre o readme avaliada em T=13 s armazena o sub-resultado folder:A#viewer@user:chen em 13 s, verdadeiro. Uma segunda verificação na mesma janela, também arredondada para 13 s, acerta essa entrada. Uma terceira verificação avaliada após a fronteira seguinte, em T=14 s, usa uma chave diferente, erra e lê novamente as tuplas da pasta no Spanner."
+  nodes={[
+    { id: "c1", x: 95, y: 50, label: "verificação de Chen\nT = 13 s", kind: "client" },
+    { id: "c2", x: 95, y: 145, label: "mesma verificação,\n0,4 s depois\nT = 13 s", kind: "client" },
+    { id: "c3", x: 95, y: 250, label: "mesma verificação,\n1,2 s depois\nT = 14 s", kind: "client" },
+    { id: "k13", x: 350, y: 95, label: "key: folder:A#viewer\n@user:chen @ 13 s\n= true", kind: "server", mono: true, on: true },
+    { id: "k14", x: 350, y: 250, label: "key: … @ 14 s\n(not cached yet)", kind: "server", mono: true },
+    { id: "db", x: 565, y: 250, label: "tuplas da pasta\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "c1", to: "k13", label: "preenche" },
+    { from: "c2", to: "k13", label: "hit", on: true },
+    { from: "c3", to: "k14", label: "miss" },
+    { from: "k14", to: "db", label: "leitura em 14 s" },
+  ]}
+  caption="A entrada de 13 s nunca é invalidada e nunca é reutilizada em 14 s. Os timestamps são ilustrativos."
+/>
+
+Observe que não há etapa de invalidação. Uma entrada com o snapshot na chave nunca pode se tornar errada, porque os dados em 13 s nunca mudam; ela apenas deixa de ser consultada quando a avaliação passa para timestamps posteriores. O post da AuthZed sobre a versão do SpiceDB desse mecanismo ([2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)) expressa a mesma ideia: "For any given problem or sub-problem, at a specified time, the result to the check is immutable" (“Para qualquer problema ou subproblema, em um instante especificado, o resultado da verificação é imutável”), e "if we were to change the evaluation timestamp, the cache keys would change as well" (“se mudássemos o timestamp de avaliação, as chaves de cache também mudariam”).
+
+Mais dois mecanismos da §3.2.5 cercam esse cache, e ambos são desenhados na página de arquitetura: as [árvores de cache](../architecture/#as-duas-pontas-de-uma-chamada-armazenam-a-resposta-em-cache) formadas ao armazenar em cache "at both the caller and the callee of internal RPCs" (“tanto no chamador quanto no chamado das RPCs internas”), e a [tabela de locks](../architecture/#a-tabela-de-locks-reúne-requisições-idênticas), em que "Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated." (“Entre as requisições que compartilham a mesma chave de cache, apenas uma começará a ser processada; as demais ficam bloqueadas até que o cache seja preenchido.”)
+
+Nos produtos:
+
+- O SpiceDB arredonda revisões em janelas definidas por `--datastore-revision-quantization-interval`, padrão `5s` ([`dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go), v1.57.1), e envolve seu dispatcher em uma camada [`singleflight`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go) que conta "dispatch requests that were single flighted" (“requisições de dispatch que passaram pelo single flight”), o que cumpre o papel da tabela de locks.
+- O cache de verificação do OpenFGA vem desativado por padrão (`checkQueryCache.enabled` é `false`, TTL de `10s` quando ativado) ([configuração](https://openfga.dev/docs/getting-started/setup-openfga/configuration)). Suas entradas expiram após um TTL em vez de pertencerem a um snapshot, e é por isso que o OpenFGA precisa de um modo `HIGHER_CONSISTENCY` para ignorá-lo ([consistência](https://openfga.dev/docs/interacting/consistency); veja [Ordenação sem TrueTime](../without-truetime/)).
+
+## As leituras são agrupadas por verificação
+
+As folhas ②, ④a, ④b e ⑥ leem, todas, linhas de `doc:readme`. Em vez de enviar cada leitura isoladamente, "We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner" (“Aplicamos um mecanismo de agrupamento para reunir as leituras de uma mesma verificação de ACL e minimizar o número de RPCs de leitura ao Spanner”, §3.2.3). O artigo não descreve o mecanismo além dessa frase. A [página de arquitetura](../architecture/#as-leituras-ao-spanner-são-agrupadas) desenha as quatro leituras chegando a um mesmo servidor; o layout de armazenamento, ordenado por objeto e relação (§3.1.1), é o que permite que elas se tornem leituras de intervalo sobre linhas adjacentes.
+
+## Até que profundidade ela pode ir
+
+A recursão em `CHECK(U, U′)` não tem limite embutido: um grupo pode conter um grupo que contém um grupo, e nada no modelo de dados proíbe um ciclo. O que uma verificação faz quando encontra um?
+
+<Graph
+  width={640}
+  height={290}
+  minWidth={540}
+  title="Um ciclo em grupos aninhados"
+  desc="Uma configuração incorreta hipotética: group:all#member contém group:eng#member, e group:eng#member contém group:all#member. Uma verificação de Anne sobre doc:readme#viewer chega a group:eng#member, depois a group:all#member, depois a group:eng#member de novo, e assim por diante. O SpiceDB continua despachando até o limite de profundidade de 50 e retorna um erro. O OpenFGA lembra as chaves de tupla que visitou, detecta a repetição e trata o ramo como não permitido; separadamente, ele retorna erro na profundidade 25."
+  nodes={[
+    { id: "doc", x: 90, y: 60, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "eng", x: 320, y: 60, label: "group:eng#member", kind: "group", mono: true },
+    { id: "all", x: 320, y: 200, label: "group:all#member", kind: "group", mono: true },
+    { id: "sdb", x: 540, y: 60, label: "SpiceDB: salto 50\n→ erro", kind: "note" },
+    { id: "fga", x: 540, y: 200, label: "OpenFGA: chave já\nvista → ciclo,\nnão permitido", kind: "note" },
+  ]}
+  edges={[
+    { from: "doc", to: "eng", label: "salto 1" },
+    { from: "eng", to: "all", label: "saltos 2, 3, 4 …", dir: "both", on: true },
+    { from: "eng", to: "sdb", dashed: true },
+    { from: "all", to: "fga", dashed: true },
+  ]}
+  caption="As duas tuplas de grupo são hipotéticas e não fazem parte do exemplo recorrente. As setas seguem a direção em que a verificação busca."
+/>
+
+O artigo não fixa nenhum número. Ele trata o aninhamento profundo e largo com o Leopard para "selected namespaces that exhibit such structure" (“namespaces selecionados que apresentam tal estrutura”, §3.2.4; veja [a página do Leopard](../leopard/)), e a §5 afirma "safe pointer chasing despite potentially deep recursion (e.g. membership checks on hierarchical groups)" (“pointer chasing seguro apesar de recursão potencialmente profunda (por exemplo, verificações de associação em grupos hierárquicos)”) sem dizer o que o torna seguro além disso. Os limites por cliente da §3.2.6 restringem CPU e RPCs pendentes, não a profundidade. Os produtos escolhem limites explícitos:
+
+| Sistema | Limite | Padrão | Ao ser atingido | Fonte |
+| --- | --- | --- | --- | --- |
+| Artigo | nenhum declarado | nenhum | não descrito | §3.2.4, §5 |
+| SpiceDB | `--dispatch-max-depth` | 50 | erro: "the check request has exceeded the allowable maximum depth of 50" | [Cyclical relationships and traversal limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), [`serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go) |
+| OpenFGA | `resolveNodeLimit` | 25 | erro; ciclos são detectados antes e respondem não permitido | [configuração](https://openfga.dev/docs/getting-started/setup-openfga/configuration), [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go) |
+| OpenFGA | `resolveNodeBreadthLimit` | 10 | limita "how many nodes on a given level can be evaluated concurrently" (quantos nós de um mesmo nível podem ser avaliados simultaneamente) | [configuração](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
+| Ory Keto | `limit.max_read_depth` | 5 | o máximo global; uma requisição só pode reduzi-lo | [`config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json) |
+
+A documentação do SpiceDB diz que ele não tem um detector de ciclos separado: um ciclo é executado até atingir o limite de profundidade e retorna o mesmo erro de uma hierarquia muito profunda, e a documentação explica que o rastreamento de objetos visitados foi evitado por razões de semântica e desempenho ([recursion and max depth](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)). O `LocalChecker` do OpenFGA mantém um conjunto de chaves de tupla visitadas por requisição e retorna não permitido com `CycleDetected` quando uma se repete ([`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go), `hasCycle`). Ambos os limites contam saltos ao longo de um caminho, que é a profundidade da árvore da primeira figura; `resolveNodeBreadthLimit` é o único deles que restringe o "evaluate all leaf nodes … concurrently" (“avaliar todos os nós folha … simultaneamente”) do artigo.
+
+<Callout kind="note" title="Não verificado">
+
+As notas de pesquisa deste site registram um ex-funcionário do Google no Hacker News descrevendo uma profundidade máxima de recursão no Zanzibar. Essa afirmação não está no artigo e não foi conferida com nenhuma fonte do Google, por isso esta página não repete um número para o Zanzibar.
+
+</Callout>
+
+## Fontes
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.3.1, §3.1.1, §3.2.3, §3.2.4, §3.2.5, §3.2.6, §5.
+- AuthZed, [Check it out: How permissions are answered in SpiceDB and Authzed](https://authzed.com/blog/check-it-out), 2021-03-17 (blog do fornecedor).
+- AuthZed, [Check it out #2: How intersections and exclusions are computed in SpiceDB and Authzed](https://authzed.com/blog/check-it-out-2), 2022-03-03 (blog do fornecedor).
+- AuthZed, [Hotspot Caching in Google Zanzibar and SpiceDB](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb), 2023-05-10 (blog do fornecedor).
+- AuthZed, [Cyclical Relationships and Traversal Limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), documentação do SpiceDB.
+- Código-fonte do SpiceDB v1.57.1: [`pkg/cmd/serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go), [`pkg/cmd/datastore/dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go), [`internal/dispatch/singleflight/singleflight.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go).
+- OpenFGA, [Configuring OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configuration) e [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency).
+- Código-fonte do OpenFGA v1.22.1: [`internal/graph/check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go).
+- Ory Keto, [`.schema/config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json) (`limit.max_read_depth`).

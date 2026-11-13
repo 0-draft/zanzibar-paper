@@ -1,0 +1,273 @@
+---
+title: "튜플을 데이터와 맞춰 두기"
+description: "논문이 이중 쓰기를 전혀 다루지 않는 이유, 애플리케이션 데이터베이스와 인가 서비스가 서로 어긋날 때 무엇이 잘못되는지, 그리고 둘을 맞춰 두는 데 쓰이는 패턴."
+section: guide
+part: practice
+order: 9
+checked: "2026-11-13"
+paper: ["1", "2.2", "2.4.2", "2.4.3", "2.4.4", "3.1.2"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+인가 서비스는 전달받은 것만 안다. Anne이 `doc:readme`를 공유하거나 `group:eng`에서 Beto를 제거할 때, 그 사실은 보통 애플리케이션 자신의 데이터베이스에서 시작되며 튜플로서 인가 서비스에 도달해야 한다. 시스템 둘, 쓰기 둘, 공유하는 트랜잭션은 없다. 이 페이지는 논문이 이 문제를 거의 언급하지 않는 이유, 두 쓰기가 어떻게 실패하는지, 그리고 둘을 맞춰 두는 데 쓰이는 패턴을 설명한다.
+
+## 논문이 이를 생략할 수 있는 이유
+
+논문은 Zanzibar를 "a system for storing permissions and performing authorization checks based on the stored permissions"(권한을 저장하고 저장된 권한을 기반으로 인가 검사를 수행하는 시스템)로 기술하며(§1), "unified ACL storage and an RPC-based API"(통합된 ACL 저장소와 RPC 기반 API)를 "a philosophy also core to Zanzibar’s design"(Zanzibar 설계의 핵심이기도 한 철학)으로 든다(§5). ACL과 그룹은 Zanzibar에 있다. 클라이언트 애플리케이션은 자신의 *콘텐츠*를 자신의 저장소에 두며, 인가에 관해 저장하는 것은 zookie 하나뿐이다.
+
+논문의 프로토콜은 양쪽에 걸치는 유일한 쓰기가 클라이언트 쪽에서 원자적이도록 짜여 있다. "The client stores the zookie with the content change in an atomic write to the client storage"(클라이언트는 zookie를 콘텐츠 변경과 함께 클라이언트 저장소에 원자적 쓰기로 저장한다)(§2.2). zookie를 만들어 낸 검사는 읽기다. "the content-change check does not need to be evaluated in the same transaction as the application content modification"(content-change 검사는 애플리케이션 콘텐츠 수정과 같은 트랜잭션에서 평가될 필요가 없다)(§2.2). Zanzibar 내부에서 튜플과 그 변경 로그 항목은 하나의 트랜잭션이다. "Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction"(모든 Zanzibar 쓰기는 단일 트랜잭션으로 튜플 저장소와 변경 로그 샤드 양쪽에 커밋된다)(§3.1.2). 따라서 Watch는 커밋된 쓰기를 놓칠 수 없다.
+
+논문은 Google의 애플리케이션이 "이 문서의 소유자는 누구인가" 같은 사실의 사본을 따로 가지고 있는지, 가지고 있다면 어떻게 맞추는지 말하지 않는다. 이 경우를 다루지 않는다.
+
+대부분의 도입자는 다른 지점에서 출발한다. 소유자는 `documents` 테이블의 열이고, 팀 멤버십은 조인 테이블이며, 유료 좌석 정보는 또 다른 서비스에 있다. 그러면 같은 사실이 두 곳에 존재하게 되고, 그 사실에 대한 모든 변경은 *이중 쓰기*가 된다.
+
+## 이중 쓰기는 어떻게 실패하는가
+
+이 주제에 관한 AuthZed의 글은 이를 분명히 말한다. "The dual-write problem presents itself in all distributed systems"(이중 쓰기 문제는 모든 분산 시스템에서 나타난다)([AuthZed, The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). 두 쓰기의 어떤 순서도 그것만으로는 안전하지 않다. 프로세스가 두 쓰기 사이에서 멈출 수 있기 때문이다. 각 순서에서 무슨 일이 일어나는가?
+
+<Frames>
+
+<Swimlane
+  lanes={["앱", "앱 데이터베이스", "인가 서비스"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="시간"
+  title="데이터베이스 먼저, 튜플 쓰기 유실"
+  desc="Anne이 group eng에서 Beto를 제거한다. 앱은 변경을 데이터베이스에 커밋한다. 인가 서비스에서 튜플을 삭제하기 전에 앱이 중단된다. 튜플이 여전히 남아 있으므로, 앱 자신의 데이터로는 Beto가 더 이상 멤버가 아닌데도 이후의 검사는 Beto가 readme를 열람하도록 허용한다."
+  events={[
+    { lane: 0, t: 0, label: "Anne이 eng에서\nBeto 제거", kind: "note" },
+    { lane: 1, t: 1, label: "member 행 삭제,\nCOMMIT", kind: "write" },
+    { lane: 0, t: 2, label: "튜플 삭제 전\n중단", kind: "bad" },
+    { lane: 2, t: 3, label: "eng member\nbeto: 그대로", kind: "bad" },
+    { lane: 2, t: 4, label: "Beto의 readme\n열람: 허용", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1] },
+    { from: [0, 2], to: [2, 3], label: "전송 안 됨", dashed: true },
+  ]}
+  caption="유실된 권한 회수는 열린 쪽으로 실패하며, 앱의 어떤 부분도 이를 보여 주지 않는다."
+/>
+
+<Swimlane
+  lanes={["앱", "앱 데이터베이스", "인가 서비스"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="시간"
+  title="튜플 먼저, 데이터베이스 롤백"
+  desc="Anne이 Beto를 readme의 편집자로 만든다. 앱은 데이터베이스 트랜잭션을 열고 공유 행을 삽입한 다음, 인가 서비스에 editor 튜플을 쓰고, 커밋 전에 중단된다. 데이터베이스는 롤백되므로 앱에는 공유가 보이지 않지만, 인가 서비스는 Beto가 편집하도록 허용한다."
+  events={[
+    { lane: 0, t: 0, label: "Anne이 Beto를\n편집자로 지정", kind: "note" },
+    { lane: 1, t: 1, label: "BEGIN, 공유 행\n삽입", kind: "write" },
+    { lane: 2, t: 2, label: "readme editor\nbeto 쓰기", kind: "write" },
+    { lane: 0, t: 3, label: "COMMIT 전\n중단", kind: "bad" },
+    { lane: 1, t: 4, label: "롤백됨:\n공유 행 없음", kind: "bad" },
+    { lane: 2, t: 4, label: "Beto가 편집 가능", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1] },
+    { from: [1, 1], to: [2, 2] },
+  ]}
+  caption="두 시스템이 어긋난다. 여기서는 UI가 보여 줄 수 없는 곳에만 권한 부여가 존재한다."
+/>
+
+</Frames>
+
+왼쪽 프레임은 보안에, 오른쪽 프레임은 신뢰에 위험하다는 점에 주목하라. Beto는 잃어야 할 접근을 유지하거나, 아무도 보고 회수할 수 없는 접근을 가진다. 오른쪽 프레임은 AuthZed가 설명하는 경우다. "we've written to SpiceDB but we haven't committed the transaction to our database, and now SpiceDB and our database disagree about the state of the world"(SpiceDB에는 썼지만 데이터베이스에는 트랜잭션을 커밋하지 않았고, 이제 SpiceDB와 데이터베이스가 세계의 상태에 대해 서로 다르게 알고 있다)([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). 요청 핸들러에서 재시도해도 어느 틈도 메워지지 않는다. 재시도 전에 중단이 일어날 수 있기 때문이다.
+
+## 선택지
+
+AuthZed의 글은 선택지를 나열한다. 아무것도 하지 않기, 대역 외 일관성 검사, 인가 서비스를 원천 데이터(source of truth)로 삼기, 이벤트 소싱/CQRS, 내구성 있는 실행 환경, 트랜잭셔널 아웃박스다([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). 아무것도 하지 않는 것도 "*is* an option that may be viable in the right context"(적절한 맥락에서는 실행 가능할 수 있는 선택지*다*). 대역 외 검사란 "you can check that the two systems agree on a periodic basis"(두 시스템이 일치하는지 주기적으로 확인할 수 있다)는 뜻이며, 어긋남을 찾아내기는 하지만 막지는 못한다. 아래의 세 가지는 구조적으로 그 틈을 없애거나 확실하게 메우는 방법이다.
+
+### 인가 서비스를 원천 데이터로
+
+각 관계를 인가 서비스 한 곳에만 저장하고 다른 곳에는 저장하지 않는다. 이것이 논문의 구성이다. AuthZed: "make a single write to SpiceDB and avoid the dual-write problem entirely"(SpiceDB에 한 번만 써서 이중 쓰기 문제를 완전히 피한다)([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)).
+
+대가는 애플리케이션이 그 데이터를 더 이상 자신의 데이터처럼 쿼리할 수 없다는 것이다. 소유 관계가 SpiceDB에만 있으면 그 위의 사용자 인터페이스는 "wouldn't be able to filter, sort, or paginate that table as easily"(그 테이블을 그만큼 쉽게 필터링하거나 정렬하거나 페이지로 나눌 수 없다). SpiceDB는 "isn't a general-purpose database"(범용 데이터베이스가 아니다)이기 때문이다. 그러면 [사용자가 볼 수 있는 것 나열하기](../listing/)의 목록 문제가 그 관계를 보여 주는 모든 화면에 적용된다. Oso는 자사 제품에 대해 반대 방향을 주장한다. "apply your application data to authorization decisions without synchronizing it"(애플리케이션 데이터를 동기화하지 않고 인가 결정에 적용)할 수 있게 한다는 것이다([Oso, Launching Local Authorization](https://www.osohq.com/post/local-authorization), 벤더 글). 이는 데이터를 옮기는 대신 애플리케이션 데이터베이스에 남겨 둠으로써 동기화를 피한다.
+
+### 트랜잭셔널 아웃박스와 릴레이
+
+애플리케이션 데이터베이스를 원천 데이터로 유지하고, 두 번째 쓰기를 즉시 하는 대신 내구성 있게 만든다. 비즈니스 변경과 같은 트랜잭션에서 튜플 변경을 기술하는 행을 *아웃박스* 테이블에 삽입한다. 별도의 *릴레이*가 아웃박스를 읽어 인가 서비스에 변경을 적용하고, 성공할 때까지 재시도한다. 이 패턴의 일반형은 이렇다. "first store the message in the database as part of the transaction that updates the business entities"(먼저 비즈니스 엔터티를 갱신하는 트랜잭션의 일부로 메시지를 데이터베이스에 저장한다)([Chris Richardson, Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)).
+
+인가 서비스를 잠시 사용할 수 없을 때 릴레이는 무엇을 하는가?
+
+<Swimlane
+  lanes={["앱", "앱 데이터베이스", "릴레이", "인가 서비스"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="시간"
+  title="트랜잭셔널 아웃박스와 릴레이"
+  desc="Anne이 group eng에서 Beto를 제거한다. 앱은 하나의 데이터베이스 트랜잭션에서 member 행을 삭제하고 아웃박스 행을 삽입한다. 릴레이는 아웃박스 행을 읽고 튜플 삭제를 보낸다. 첫 시도가 실패하여 재시도한다. 두 번째 시도가 성공하고, 릴레이는 아웃박스 행을 완료로 표시한다. 그때까지 인가 서비스는 여전히 Beto를 들여보낸다."
+  events={[
+    { lane: 0, t: 0, label: "Anne이 eng에서\nBeto 제거", kind: "note" },
+    { lane: 1, t: 1, label: "트랜잭션 하나: member\n행 + 아웃박스 행", kind: "write" },
+    { lane: 2, t: 2, label: "다음 아웃박스\n행 읽기", kind: "read" },
+    { lane: 3, t: 2, label: "Beto 여전히\n허용", kind: "bad" },
+    { lane: 2, t: 3, label: "삭제 실패:\n재시도", kind: "bad" },
+    { lane: 3, t: 4, label: "튜플 삭제됨", kind: "good" },
+    { lane: 1, t: 5, label: "아웃박스 행\n완료 표시", kind: "write" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "원자적" },
+    { from: [1, 1], to: [2, 2] },
+    { from: [2, 3], to: [3, 4], label: "재시도" },
+    { from: [3, 4], to: [1, 5], label: "확인" },
+  ]}
+  caption="잃는 것은 없지만, 변경은 데이터베이스보다 늦게 인가 서비스에 도달한다."
+/>
+
+오른쪽의 빨간 상자에 주목하라. 아웃박스는 변경이 *도착*한다는 것을 보장할 뿐, *즉시* 도착한다는 것을 보장하지 않는다. 커밋과 릴레이의 성공 사이에는 예전 접근이 여전히 유효하다. 릴레이는 반복도 견뎌야 한다. 패턴 자신의 표현으로 "The Message relay might publish a message more than once"(메시지 릴레이는 메시지를 두 번 이상 발행할 수 있다)이기 때문이다([Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)). AuthZed는 "SpiceDB allowing for idempotent writes with its TOUCH operation"(TOUCH 작업으로 멱등 쓰기를 허용하는 SpiceDB)을 언급하고, 순서에 대해서는 "As long as this process is effectively single-threaded and retries operations until they succeed"(이 프로세스가 사실상 단일 스레드이고 작업이 성공할 때까지 재시도하는 한)라고 말한다([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). 앞선 생성보다 삭제를 먼저 적용하면 잘못된 상태가 남는다.
+
+### 변경 데이터 캡처
+
+아웃박스를 폴링하는 대신 데이터베이스 자체의 커밋 로그를 읽는다. 예를 들어 [Debezium](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)은 PostgreSQL 논리 디코딩을 사용한다. 초기 스냅샷 이후 "continuously captures row-level changes that insert, update, and delete database content and that were committed to a PostgreSQL database"(PostgreSQL 데이터베이스에 커밋된, 데이터베이스 내용을 삽입, 갱신, 삭제하는 행 수준의 변경을 지속적으로 캡처하고) 이를 Kafka 토픽으로 스트리밍한다. AuthZed는 이를 아웃박스 패턴에 가장 흔히 쓰이는 도구 중 하나로 설명한다. "It watches changes in an outbox table and submits them as events to Kafka"(아웃박스 테이블의 변경을 감시하고 이를 Kafka에 이벤트로 제출한다)([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)).
+
+변경은 커밋에서 튜플까지 가는 길에 어디를 거치는가?
+
+<Graph
+  width={640}
+  height={250}
+  title="인가 서비스로 들어가는 변경 데이터 캡처"
+  desc="앱은 비즈니스 행과 아웃박스 행을 하나의 트랜잭션으로 데이터베이스에 커밋한다. Debezium은 미리 쓰기 로그(WAL)에서 커밋된 변경을 읽어 Kafka 토픽에 발행한다. 컨슈머는 토픽을 읽어 각 이벤트를 튜플 쓰기나 삭제로 바꾸고 인가 서비스에 적용한다. 커넥터가 재시작된 뒤에는 중복이 생길 수 있으므로 컨슈머의 쓰기는 멱등이어야 한다."
+  nodes={[
+    { id: "app", x: 70, y: 50, label: "앱", kind: "client" },
+    { id: "db", x: 250, y: 50, label: "앱 데이터베이스\n행 + 아웃박스", kind: "store" },
+    { id: "dbz", x: 470, y: 50, label: "Debezium\n(WAL 읽기)", kind: "server", on: true },
+    { id: "kafka", x: 470, y: 185, label: "Kafka 토픽", kind: "store", on: true },
+    { id: "cons", x: 250, y: 185, label: "컨슈머:\n이벤트 → 튜플", kind: "server" },
+    { id: "authz", x: 70, y: 185, label: "인가 서비스", kind: "server" },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "트랜잭션 하나" },
+    { from: "db", to: "dbz", label: "커밋된\n변경", on: true },
+    { from: "dbz", to: "kafka", label: "발행", on: true },
+    { from: "kafka", to: "cons", label: "소비" },
+    { from: "cons", to: "authz", label: "TOUCH /\nDELETE" },
+  ]}
+  minWidth={520}
+  caption="각 단계는 지연을 더한다. 커밋된 변경만 파이프라인에 들어가므로, 롤백된 트랜잭션은 결코 튜플이 되지 않는다."
+/>
+
+첫 단계에 주목하라. Debezium은 *커밋된* 변경을 읽으므로 위의 오른쪽 실패는 일어날 수 없다. 중복은 여전히 생길 수 있다. Debezium의 PostgreSQL 문서는 "while it is recovering from the fault, it's possible that the connector might emit some duplicate change events"(장애에서 복구하는 동안 커넥터가 중복된 변경 이벤트를 내보낼 수 있다), 그리고 "consumers should always anticipate some duplicate events"(컨슈머는 항상 일부 중복 이벤트를 예상해야 한다)라고 말한다([Debezium PostgreSQL connector](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)). Debezium의 아웃박스 이벤트 라우터는 아웃박스와 CDC 조합을 패키지로 만든 것이다. "An outbox pattern implementation avoids inconsistencies between a service's internal state (as typically persisted in its database) and state in events consumed by services that need the same data"(아웃박스 패턴 구현은 서비스의 내부 상태(보통 데이터베이스에 영속된 상태)와, 같은 데이터가 필요한 서비스들이 소비하는 이벤트 속 상태 사이의 불일치를 피한다)([Debezium, Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html)).
+
+## Watch는 인덱스를 움직이지만 큐는 아니다
+
+위의 패턴들은 변경을 인가 서비스 *안으로* 옮긴다. Watch(§2.4.3)는 변경을 *밖으로* 옮긴다. "Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API."(일부 클라이언트는 Zanzibar의 관계 튜플에 대한 보조 인덱스를 유지한다. 이들은 Watch API로 그렇게 할 수 있다.) 응답은 *하트비트 zookie*까지의 변경을 "in ascending timestamp order"(타임스탬프 오름차순으로) 담으며, 하트비트 zookie는 "the client can use … to resume watching where the previous watch response left off"(클라이언트가 … 이전 watch 응답이 끝난 지점에서 감시를 재개하는 데 사용할 수 있다)(§2.4.3). Leopard의 증분 인덱서가 논문 자신의 소비자다(§3.2.4).
+
+재개 위치는 클라이언트가 소유하고, 서버는 이력을 일정 기간만 보관한다. SpiceDB 문서: "Historical changes can only be requested until the configured garbage collection window on the underlying datastore. This is typically 24 hours, but may differ based on the datastore used"(과거의 변경은 하부 데이터 저장소에 설정된 가비지 컬렉션 기간까지만 요청할 수 있다. 이는 보통 24시간이지만 사용하는 데이터 저장소에 따라 다를 수 있다)([SpiceDB, Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)). SpiceDB의 한 이슈는 그 결과를 밝힌다. "the Watch API is non-durable; if you want to write to a durable queue, you have to take the messages coming from the Watch API and put them somewhere"(Watch API는 내구성이 없다. 내구성 있는 큐에 쓰려면 Watch API에서 오는 메시지를 받아 어딘가에 넣어야 한다)([spicedb#2015](https://github.com/authzed/spicedb/issues/2015), 2026-10-29에 not planned로 종료). 열려 있는 이슈 [spicedb#2285](https://github.com/authzed/spicedb/issues/2285)는 기본 동작이 "starts watching from the HEAD revision which leaves gaps of updates that may have not been seen"(HEAD 리비전부터 감시를 시작하므로, 보지 못했을 수 있는 갱신의 틈이 남는다)라고 덧붙인다.
+
+컨슈머가 그 기간보다 오래 내려가 있으면 인덱스는 어떻게 되는가?
+
+<Swimlane
+  lanes={["인가 서비스", "인덱서", "인덱스"]}
+  laneWidth={150}
+  rowHeight={64}
+  timeLabel="시간"
+  title="Watch 재개와 위치 상실"
+  desc="인덱서는 변경 묶음을 적용하고 스트림 토큰 t50을 인덱스 행과 함께 저장한다. 연결이 끊긴 뒤 t50으로 다시 연결하여 이후의 변경을 받는다. 나중에 데이터 저장소의 가비지 컬렉션 기간보다 오래 내려가 있으면 t50이 만료되어 재개할 수 없고, 전체 읽기로 인덱스를 재구축해야 한다."
+  events={[
+    { lane: 0, t: 0, label: "토큰 t50까지의\n변경", kind: "write", mono: true },
+    { lane: 1, t: 0, label: "묶음 적용", kind: "read" },
+    { lane: 2, t: 0, label: "행 + t50,\n트랜잭션 하나", kind: "write", mono: true },
+    { lane: 1, t: 1, label: "연결 끊김", kind: "note" },
+    { lane: 1, t: 2, label: "t50부터 Watch", kind: "read", mono: true },
+    { lane: 0, t: 2, label: "t50 이후의\n변경", kind: "good" },
+    { lane: 1, t: 3, label: "GC 기간보다\n오래 중단", kind: "bad" },
+    { lane: 0, t: 4, label: "t50 만료", kind: "bad", mono: true },
+    { lane: 2, t: 5, label: "전체 읽기로\n재구축", kind: "write" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 0], label: "저장" },
+    { from: [1, 2], to: [0, 2], label: "재개" },
+    { from: [1, 3], to: [0, 4], label: "재개 불가", dashed: true },
+  ]}
+  caption="토큰은 그것이 포함하는 행과 같은 트랜잭션으로 저장하고, 이력이 사라졌을 때를 대비해 재구축 경로를 유지하라."
+/>
+
+인덱스 레인의 첫 번째 이벤트에 주목하라. 토큰은 그것이 만들어 낸 행과 함께 저장된다. 인덱서가 토큰을 먼저 저장하고 중단되면 변경을 건너뛰게 된다. 행을 적용하고 저장 전에 중단되면 그 행을 다시 적용하게 되는데, 이는 인덱스 쓰기가 멱등일 때에만 무해하다. 긴 중단을 견디려면 이슈가 말하듯 스트림을 직접 관리하는 내구성 있는 큐로 복사하거나, 재구축할 준비를 해 두어야 한다. SpiceDB의 재개 필드는 `ChangesThrough`다. 문서는 Watch를 "in a loop, sending in the last received ZedToken from `ChangesThrough` if the call disconnects"(루프 안에서, 호출이 끊기면 `ChangesThrough`에서 마지막으로 받은 ZedToken을 보내며) 호출하라고 권한다([Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)).
+
+## zookie와 각 선택지
+
+zookie 프로토콜은 클라이언트에게 두 가지를 요구한다. 콘텐츠를 저장할 때 zookie를 요청하고, 그것을 콘텐츠와 함께 저장하는 것이다(§2.2, §2.4.4). SpiceDB 문서도 ZedToken에 대해 같은 조언을 한다. ZedToken을 "alongside the newly updated content in the application database"(애플리케이션 데이터베이스에 새로 갱신된 콘텐츠와 함께) 저장하고, 리소스가 생성되거나 삭제될 때, 그 내용이 바뀔 때, 그리고 그에 대한 접근이 추가되거나 제거될 때 갱신하라는 것이다([SpiceDB, Consistency](https://authzed.com/docs/spicedb/concepts/consistency)). content-change 검사 자체에는 이중 쓰기 문제가 없다. 그것은 읽기이고, 토큰은 콘텐츠와 같은 트랜잭션으로 애플리케이션 데이터베이스에 들어간다.
+
+선택지마다 그 토큰이 약속할 수 있는 것이 다르다.
+
+| 선택지 | ACL 변경이 인가 서비스에 반영되는 시점 | 저장된 토큰이 포함하는 것 |
+| --- | --- | --- |
+| 인가 서비스를 원천 데이터로 | 쓰기가 반환될 때, 사용자에게 알리기 전 | 논문과 마찬가지로 전부: 쓰기의 토큰이나 이후의 content-change 검사는 적어도 ACL 변경만큼 최신이다 |
+| 아웃박스와 릴레이 | 데이터베이스 커밋 이후, 릴레이가 성공할 때 | 릴레이가 이미 적용한 변경만. 그 전에 이루어진 content-change 검사는 예전 ACL을 본다 |
+| 변경 데이터 캡처 | 로그를 읽고, 발행하고, 소비한 뒤 | 아웃박스와 같으며 지연 단계가 더 많다 |
+| Watch로 공급되는 인덱스 | 이미 반영되어 있다. 지연은 인덱스에 있다 | 직접적으로는 없음: zookie는 불투명하므로 인덱스는 자신이 주어진 토큰만큼 최신인지 알 수 없다. 토큰으로 다시 검사하거나 인덱스 자신이 저장한 위치와 비교하라 |
+
+아웃박스와 CDC 행에서 논문의 보장은 보기보다 약하다. §2.2의 예 B는 콘텐츠 변경(B2)을 검사하기 전에 ACL 변경(B1)이 Zanzibar에 들어가 있다는 것에 의존한다. 사이에 릴레이가 있으면, Anne이 Beto를 제거하고 1초 뒤 새 콘텐츠를 저장했을 때, 릴레이가 제거를 적용하기 전에 실행된 content-change 검사로부터 zookie를 받을 수 있다. 그 zookie는 Zanzibar가 가진 데이터에 대해서는 올바르지만, 그 데이터가 뒤처져 있었던 것이다. 완화책이 두 가지 있지만, 둘 다 위의 출처에서 온 것이 아니고 여기서 시험하지도 않았다. 권한 회수는 인가 서비스로 직접 보내고 데이터베이스에는 두 번째로 기록하거나(오른쪽 실패 모드를 "목록에는 있지만 거부됨"이라는 눈에 보이는 상태로 받아들인다), 릴레이가 받은 토큰을 영향받은 행에 다시 써서 이후의 검사가 그것을 담도록 하는 것이다.
+
+논문의 불투명성 규칙은 의도적이다. zookie가 불투명한 것은 "to discourage our clients from choosing arbitrary timestamps and to allow future extensions"(클라이언트가 임의의 타임스탬프를 선택하지 않도록 유도하고 향후 확장을 허용하기 위해서)다(§2.4). 그 대가는 마지막 행에 있다. 클라이언트는 두 zookie를 비교하여 어느 쪽이 더 최신인지 판단할 수 없다.
+
+## 객체의 튜플을 안전하게 다시 쓰기: 락 튜플
+
+동기화 작업은 흔히 한 객체의 모든 튜플을 데이터베이스와 맞도록 교체하고 싶어 한다. 예를 들어 readme의 열람자를 공유 테이블이 말하는 그대로 설정하는 것이다. 그런 작업 둘, 또는 작업 하나와 사용자의 편집이 경쟁할 수 있다. 논문의 답은 *락 튜플*을 이용한 낙관적 동시성 제어다(§2.4.2).
+
+<Callout kind="paper" title="§2.4.2, 읽기-수정-쓰기">
+
+1. 객체별 "락" 튜플을 포함하여 객체의 모든 관계 튜플을 읽는다.
+2. 쓰거나 삭제할 튜플을 생성한다. 쓰기를 락 튜플에 대한 touch와 함께 Zanzibar에 보내되, 읽기 이후 락 튜플이 수정되지 않은 경우에만 쓰기가 커밋된다는 조건을 붙인다.
+3. 쓰기 조건이 충족되지 않으면 1단계로 돌아간다.
+
+</Callout>
+
+"The lock tuple is just a regular relation tuple used by clients to detect write races"(락 튜플은 클라이언트가 쓰기 경쟁을 감지하는 데 사용하는 일반 관계 튜플일 뿐이다)(§2.4.2). 두 동기화 작업이 동시에 readme의 튜플을 다시 쓰면 어떻게 되는가?
+
+<Swimlane
+  lanes={["동기화 작업 1", "동기화 작업 2", "Zanzibar"]}
+  laneWidth={150}
+  rowHeight={64}
+  timeLabel="시간"
+  title="락 튜플을 이용한 낙관적 동시성 제어"
+  desc="두 동기화 작업이 같은 버전에서 락 튜플을 포함한 doc:readme의 모든 튜플을 읽는다. 작업 1은 락이 바뀌지 않았다는 조건으로 락 튜플에 대한 touch와 함께 쓰기를 보낸다. Zanzibar는 커밋하고 락이 바뀐다. 작업 2도 같은 조건으로 쓰기를 보낸다. 락이 바뀌었으므로 Zanzibar는 이를 거부하고, 작업 2는 1단계로 돌아가 다시 읽는다."
+  events={[
+    { lane: 0, t: 0, label: "readme 튜플\n+ 락 읽기", kind: "read" },
+    { lane: 2, t: 0, label: "락은\n버전 7", kind: "note" },
+    { lane: 1, t: 1, label: "readme 튜플\n+ 락 읽기", kind: "read" },
+    { lane: 0, t: 2, label: "쓰기 + touch,\n락 불변일 때만", kind: "write" },
+    { lane: 2, t: 2, label: "커밋,\n락 바뀜", kind: "good" },
+    { lane: 1, t: 3, label: "쓰기 + touch,\n락 불변일 때만", kind: "write" },
+    { lane: 2, t: 3, label: "락 바뀜:\n거부", kind: "bad" },
+    { lane: 1, t: 4, label: "1단계로:\n다시 읽기", kind: "read" },
+  ]}
+  arrows={[
+    { from: [0, 2], to: [2, 2] },
+    { from: [1, 3], to: [2, 3] },
+    { from: [2, 3], to: [1, 4], label: "재시도" },
+  ]}
+  caption="어느 작업도 계산하는 동안 락을 쥐지 않는다. 조건부 쓰기가 커밋 시점에 경쟁을 감지한다."
+/>
+
+작업 1이 일하는 동안 작업 2가 막히지 않는다는 점에 주목하라. 작업 2는 커밋하려 할 때에야 충돌을 알게 되고, 그때 새 데이터로 다시 계산한다. 이는 언제든 데이터베이스로부터 다시 계산할 수 있는 동기화 작업에 잘 맞는다.
+
+<Callout kind="note" title="문서화되지 않은 응용">
+
+SpiceDB의 `WriteRelationships`는 `optional_preconditions`를 받으며, "if any preconditions fail, the entire transaction will be reverted"(전제 조건 중 하나라도 실패하면 트랜잭션 전체가 되돌려진다). 전제 조건은 관계 필터에 대한 `MUST_MATCH` 또는 `MUST_NOT_MATCH`다([SpiceDB `permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). 논문의 락 튜플을 흉내 내는 한 가지 방법은 `doc:readme#lock@version:7` 같은 관계를 두고, 그것에 대한 `MUST_MATCH` 전제 조건과 함께, 같은 쓰기에서 버전 7을 삭제하고 버전 8을 생성하는 것이다. 이 구성은 우리가 만든 것이며 SpiceDB 문서에는 없고 실행해 보지도 않았다.
+
+</Callout>
+
+<Callout kind="paper" title="논문에서">
+
+권한 저장소로서의 Zanzibar: §1, §5. zookie 프로토콜과 원자적 클라이언트 쓰기: §2.2. Write와 락 튜플: §2.4.2. Watch와 하트비트 zookie: §2.4.3. content-change 검사: §2.4.4. 하나의 트랜잭션 안의 튜플과 변경 로그: §3.1.2. 용어: [락 튜플](../glossary/#lock-tuple), [Watch](../glossary/#watch), [하트비트 zookie](../glossary/#heartbeat-zookie), [content-change 검사](../glossary/#content-change-check), [zookie](../glossary/#zookie).
+
+</Callout>
+
+## 출처
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §1, §2.2, §2.4, §2.4.2, §2.4.3, §2.4.4, §3.1.2, §3.2.4, §5.
+- AuthZed (vendor), [The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem), 2025-01-02.
+- AuthZed (vendor), [Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch) and [Consistency](https://authzed.com/docs/spicedb/concepts/consistency), SpiceDB docs.
+- AuthZed, [Add external support for streaming relationships into and out of SpiceDB](https://github.com/authzed/spicedb/issues/2015), spicedb issue #2015, opened 2024-08-07, closed as not planned 2026-10-29.
+- AuthZed, [Watching Relationship Changes More Ergonomically](https://github.com/authzed/spicedb/issues/2285), spicedb issue #2285, opened 2025-03-19, open on 2026-11-13.
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto), authzed/api.
+- Chris Richardson, [Pattern: Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html), microservices.io.
+- Debezium, [Debezium connector for PostgreSQL](https://debezium.io/documentation/reference/stable/connectors/postgresql.html) and [Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html).
+- Oso (vendor), [Launching Local Authorization](https://www.osohq.com/post/local-authorization), 2024-04-16.

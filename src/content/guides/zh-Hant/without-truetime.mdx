@@ -1,0 +1,256 @@
+---
+title: "沒有 TrueTime 的排序"
+description: "zookie 需要底層資料庫提供什麼、Zanzibar 風格的產品如何從 CockroachDB、PostgreSQL、MySQL 與 Spanner 取得它，以及沒有任何東西提供它時會發生什麼事。"
+section: guide
+part: practice
+order: 12
+checked: "2026-11-13"
+paper: ["2.2", "2.4", "2.4.4", "3.2.5", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Zanzibar 以 zookie 防止「new enemy」問題，而 zookie 之所以有效，是因為 Spanner 為每一次寫入賦予一個遵循因果關係的時間戳記。[一致性、快照與 zookie](../consistency/) 說明了這兩者，包括 TrueTime 與提交等待如何產生這些時間戳記。Google 之外幾乎沒有人在 TrueTime 上執行。本頁要問的是：zookie 協定實際上需要資料庫提供什麼，以及建構在其他資料庫上的產品如何取得它，或如何在沒有它的情況下運作。
+
+## zookie 需要資料儲存區提供什麼
+
+zookie 協定建立在 §2.2 對儲存層要求的兩項特性之上，即 "external consistency and snapshot reads with bounded staleness"（外部一致性與具有有界陳舊度的快照讀取）：
+
+1. **提交順序依循因果關係。** 若寫入 `x` 發生在寫入 `y` 之前（例如 Anne 看到 `x` 成功之後才進行 `y`），則 `T_x < T_y`。用論文的話來說，兩個具因果關係的更新 `x ≺ y` "will be assigned timestamps that reflect the causal order: `T_x < T_y`"（所獲指派的時間戳記會反映其因果順序：`T_x < T_y`）（§2.2），而 zookie 協定 "ensures that all prior ACL writes have lower timestamps"（確保所有先前的 ACL 寫入都具有較低的時間戳記）。
+2. **在給定位置當下或之後的快照讀取。** 在 `T` 進行的讀取 "observes all updates with timestamps ≤ T"（會觀察到所有時間戳記 ≤ T 的更新）（§2.2），而檢查 "is always evaluated at a consistent snapshot no earlier than the given zookie"（一律在不早於給定 zookie 的一致性快照上進行評估）（§2.4.4）。
+
+這份清單中沒有任何地方提到牆上時鐘意義下的「時間戳記」。zookie 內的值可以是歷史中的任何位置，只要這兩項特性對它成立即可。這正是論文讓 zookie 保持不透明的原因："to discourage our clients from choosing arbitrary timestamps and to allow future extensions"（避免客戶端選擇任意的時間戳記，並保留未來擴充的空間）（§2.4）。
+
+這兩項特性如何結合，阻止 Chen 在被移出資料夾 A 之後看到 readme？
+
+<Graph
+  width={640}
+  height={300}
+  minWidth={540}
+  title="zookie 所依賴的兩項特性"
+  desc="寫入 x 將 Chen 從 folder:A 移除。寫入 y 在 x 被確認之後進行，將 doc:readme 移入 folder:A。特性 1 表示 x 的提交位置低於 y 的提交位置。為 y 傳回的權杖指名 y 的位置。之後的一次檢查攜帶該權杖。特性 2 表示檢查讀取的是該權杖當下或之後的快照，因此包含 y，並且由於特性 1，也包含 x。Chen 被拒絕。"
+  nodes={[
+    { id: "x", x: 100, y: 60, label: "x：將 Chen 從\nfolder:A 移除", kind: "store" },
+    { id: "y", x: 100, y: 200, label: "y：將 readme\n移入 folder:A", kind: "store" },
+    { id: "tok", x: 330, y: 200, label: "token = pos(y)", kind: "object", mono: true },
+    { id: "chk", x: 540, y: 200, label: "在快照 ≥ 權杖\n上檢查", kind: "server", on: true },
+    { id: "res", x: 540, y: 60, label: "看到 x 與 y：\nChen 被拒絕", kind: "note" },
+  ]}
+  edges={[
+    { from: "x", to: "y", label: "① x ≺ y ⇒ pos(x) < pos(y)", on: true },
+    { from: "y", to: "tok", label: "傳回" },
+    { from: "tok", to: "chk", label: "攜帶" },
+    { from: "chk", to: "res", label: "② 快照以前的全部", on: true },
+  ]}
+  caption="破壞 ①，快照就可能包含 y 而不包含 x。破壞 ②，檢查就可能在 y 之前執行。無論哪種情況，Chen 都會看到 readme。"
+/>
+
+請注意，特性 ① 涉及的是*資料庫可能永遠不會視為相關的寫入*。§2.2 要求對 "updates on different ACLs or objects and those coordinated via channels invisible to Zanzibar"（對不同 ACL 或物件的更新，以及透過 Zanzibar 看不到的管道所協調的更新）進行排序。在論文的例 A 中，兩次寫入之間的關聯是 Alice 請託 Charlie，發生在任何系統之外。即便如此，資料庫仍必須正確地排序這兩次提交。
+
+## 取得順序的三種方式
+
+Spanner 從具有已知誤差界限的同步時鐘取得特性 ①，代價是每次寫入都要等過不確定度（[Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)；圖示見[一致性頁面](../consistency/#時間戳記從哪裡來truetime)）。其他資料庫則以不同的方式取得它，或取得它的大部分。在各個資料庫中，順序從何而來？
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={540}
+  title="提交順序從何而來"
+  desc="三種順序來源。Spanner：TrueTime 時間戳記加上提交等待，讓每次提交都獲得具因果性的時間戳記，跨區域皆然。CockroachDB：混合邏輯時鐘提供的時間戳記，只在觸及相同鍵的交易之間遵循因果關係，因此 SpiceDB 讓寫入觸及一個共同的鍵。PostgreSQL 與 MySQL：由單一主資料庫決定提交順序，因此來自該主資料庫的交易 ID 或快照本身就遵循因果關係。"
+  nodes={[
+    { id: "sp", x: 110, y: 60, label: "Spanner\nTrueTime + 提交等待", kind: "store" },
+    { id: "cr", x: 330, y: 60, label: "CockroachDB\n混合邏輯時鐘", kind: "store" },
+    { id: "pg", x: 540, y: 60, label: "PostgreSQL、MySQL\n單一主資料庫", kind: "store" },
+    { id: "sp2", x: 110, y: 180, label: "每次提交\n都有順序", kind: "note" },
+    { id: "cr2", x: 330, y: 180, label: "只有鍵重疊時\n才有順序", kind: "note" },
+    { id: "pg2", x: 540, y: 180, label: "每次提交都有\n順序，單一站點", kind: "note" },
+  ]}
+  edges={[
+    { from: "sp", to: "sp2" },
+    { from: "cr", to: "cr2", on: true },
+    { from: "pg", to: "pg2" },
+  ]}
+  caption="中間這一欄需要應用程式層的協助。"
+/>
+
+請注意，單一主資料庫的資料庫可以免費取得特性 ①，因為一台伺服器會依序看到每一次提交；它們放棄的是論文的全球複製。CockroachDB 會在全球複製，但只部分提供特性 ①。下一節談的就是這個缺口。
+
+## CockroachDB：重疊鍵規則
+
+CockroachDB 沒有 TrueTime。其節點保有大致同步的時鐘，而叢集有一個最大時鐘偏移量 `--max-offset`，預設為 `500ms`；"If observed clock offsets exceed this limit, servers will crash to minimize the likelihood of reading inconsistent data"（若觀察到的時鐘偏移超過此上限，伺服器會當掉，以盡量降低讀到不一致資料的可能性）（[`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start)）。Cockroach Labs 自己與 Spanner 的比較指出 "CockroachDB only goes as far as to claim serializability"（CockroachDB 只宣稱到可序列化為止），並將它所允許的異常命名為 "causal reverse"（因果反轉）：具因果關係的交易可能以順序錯誤的時間戳記提交（[Living without atomic clocks，2022-01-27](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/)）。
+
+AuthZed 在 2021 年以 SpiceDB 在 CockroachDB 上重現了「new enemy」問題（[The One Crucial Difference Between Spanner and CockroachDB，2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)）。該文章對這個缺口的總結是："Cockroach does not provide external consistency for transactions involving _non-overlapping keys_."（對於涉及*不重疊的鍵*的交易，Cockroach 不提供外部一致性。）其測試使用兩次寫入與一次檢查，並 "in sequence (not parallel)"（依序（而非並行））執行：寫入一筆 `excluded` 元組、寫入一筆 `direct` 元組，然後在第二次寫入的 revision 上檢查 `allowed = direct - excluded`；"the check in 3 will succeed"（步驟 3 的檢查會成功）。
+
+若某個節點的時鐘走得較快，這在貫穿全站的範例中會是什麼樣子？
+
+<Frames>
+
+<Swimlane
+  lanes={["Anne 的應用程式", "節點 1（+250 ms）", "節點 2（準時）", "Chen 的檢查"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="真實時間"
+  ticks={["10.000", "10.100"]}
+  title="沒有重疊鍵時的時鐘偏移"
+  desc="在真實時間 10.000，Anne 的應用程式將 Chen 從 folder:A 移除。時鐘快了 250 毫秒的節點 1 以時間戳記 10.250 提交。收到確認之後，在真實時間 10.100，應用程式將 readme 移入 folder:A。時鐘準確的節點 2 以時間戳記 10.100 提交，並將其作為權杖傳回。Chen 的檢查在快照 10.100 上執行。它看到了移動，但沒有看到時間戳記較高的移除，因此 Chen 被允許。這就是「new enemy」問題。"
+  events={[
+    { lane: 0, t: 0, label: "x：移除 Chen", kind: "write" },
+    { lane: 1, t: 0, label: "commit x\nat 10.250", kind: "write", mono: true },
+    { lane: 0, t: 1, label: "y：移動 readme", kind: "write" },
+    { lane: 2, t: 1, label: "commit y\nat 10.100", kind: "bad", mono: true },
+    { lane: 3, t: 2, label: "check at\nsnapshot 10.100", kind: "read", mono: true },
+    { lane: 3, t: 3, label: "看到 y 而非 x：\nChen 被允許", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [0, 1], label: "確認", dashed: true },
+    { from: [0, 1], to: [2, 1] },
+    { from: [2, 1], to: [3, 2], label: "權杖 10.100", dashed: true },
+  ]}
+  caption="違規：y 發生在 x 之後，但 T_y < T_x。T_y 的快照並不是實際發生之事的前綴。"
+/>
+
+<Swimlane
+  lanes={["Anne 的應用程式", "節點 1（+250 ms）", "節點 2（準時）", "Chen 的檢查"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="真實時間"
+  ticks={["10.000", "10.100"]}
+  title="有重疊鍵時的時鐘偏移"
+  desc="同樣的兩次寫入，但每次寫入也都寫入一個共用的重疊鍵 K。節點 1 以 10.250 提交 x（含 K）。當節點 2 提交 y 時，它也寫入 K，因此 CockroachDB 必須給 y 一個高於 x 對 K 之寫入的時間戳記，此處為 10.251。權杖為 10.251，Chen 的檢查在該快照上執行，看到 x 與 y，Chen 被拒絕。"
+  events={[
+    { lane: 0, t: 0, label: "x：移除 Chen", kind: "write" },
+    { lane: 1, t: 0, label: "commit x + K\nat 10.250", kind: "write", mono: true },
+    { lane: 0, t: 1, label: "y：移動 readme", kind: "write" },
+    { lane: 2, t: 1, label: "commit y + K\nat 10.251", kind: "good", mono: true },
+    { lane: 3, t: 2, label: "check at\nsnapshot 10.251", kind: "read", mono: true },
+    { lane: 3, t: 3, label: "看到 x 與 y：\nChen 被拒絕", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [0, 1], label: "確認", dashed: true },
+    { from: [0, 1], to: [2, 1] },
+    { from: [1, 0], to: [2, 1], label: "相同的鍵 K" },
+    { from: [2, 1], to: [3, 2], label: "權杖 10.251", dashed: true },
+  ]}
+  caption="修正：對同一個鍵的兩次寫入，是由鍵而非時鐘來排序的。"
+/>
+
+</Frames>
+
+請注意右格中標示為「相同的鍵 K」的箭頭。兩個時鐘都沒有變得更準；改變的是這兩筆交易現在會互相衝突，而 CockroachDB 會正確地排序互相衝突的交易。兩格中的時間戳記都僅供說明；偏移量遠在 `500ms` 預設值之內，因此不會有伺服器當掉。
+
+AuthZed 發現共用的讀取並不足夠："we needed both transactions to write to the same key"（我們需要兩筆交易都寫入同一個鍵）。因此，SpiceDB 的 CockroachDB 驅動程式會在寫入中加入一個重疊鍵，其策略由 `--datastore-tx-overlap-strategy` 選擇（[datastores](https://authzed.com/docs/spicedb/concepts/datastores)）：
+
+| 策略 | SpiceDB 文件 |
+| --- | --- |
+| `static`（預設） | "All writes overlap to guarantee safety at the cost of write throughput"（所有寫入都重疊，以寫入吞吐量為代價保證安全） |
+| `prefix` | "Only writes that contain objects with same prefix overlap"（只有包含相同前綴之物件的寫入才重疊） |
+| `request` | "Only writes with the same io.spicedb.requestoverlapkey header overlap"（只有帶有相同 io.spicedb.requestoverlapkey 標頭的寫入才重疊） |
+| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem"（沒有寫入重疊，提供最佳的寫入吞吐量，但可能讓你暴露於 New Enemy 問題） |
+
+用 AuthZed 的話來說，代價是："This does add a small amount of latency to the write path, but it leaves the read paths performant."（這確實會為寫入路徑增加少量延遲，但讀取路徑仍保持高效能。）每一次 `static` 寫入都會在同一列上競爭，這就是論文改以提交等待支付的代價。
+
+資料儲存區文件在讀取端還補充了一項 CockroachDB 的注意事項：SpiceDB 以 `cluster_logical_timestamp()` 選取 revision，"which can differ across nodes by up to the cluster's"（其值在各節點之間最多可相差叢集的）最大偏移量，且 "A read may not see a recently committed write if the reading node's timestamp is behind the writing node's."（若讀取節點的時間戳記落後於寫入節點，讀取可能看不到最近提交的寫入。）因此，"fully_consistent does not guarantee read-after-write consistency on CockroachDB."（在 CockroachDB 上，fully_consistent 不保證寫後讀一致性。）來自寫入的 ZedToken 可以避免這個問題，因為它指名的是該寫入自己的 revision（[datastores](https://authzed.com/docs/spicedb/concepts/datastores)）。
+
+## PostgreSQL 與 MySQL：由單一主資料庫決定
+
+單一主資料庫的資料庫本來就會依序看到每一次提交，因此特性 ① 不需要時鐘。尚待解決的是特性 ②：讀取可能會送往一個落後的副本。
+
+SpiceDB 的 PostgreSQL 驅動程式完全不使用時間來排序。revision 是來自 `pg_current_xact_id()` 與 `pg_current_snapshot()` 的交易 ID 與快照；驅動程式中的一段註解寫道 "timestamps cannot be used for ordering transactions in PG"（在 PG 中不能用時間戳記來排序交易），以及兩個快照可能 "mutually uncomparable"（彼此無法比較）（[`postgres/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/postgres/revisions.go)，v1.57.1）。在 `x` 提交之後取得的快照會將 `x` 列為已提交，這就是以 PostgreSQL 自己的術語表述的特性 ①。MySQL 驅動程式會在一張交易表中寫入一列，其 `id` 為 `AUTO_INCREMENT`，並以該 id 作為 revision（[`migrations`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/migrations/zz_migration.0001_initial_schema.go)、[`revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/revisions.go)）。在另一次寫入提交之後才開始的寫入，會較晚插入其列，因此得到較大的 id；這個推論是本頁的，SpiceDB 的文件中並未陳述。
+
+唯讀副本會再度帶來延遲。當副本落後時，SpiceDB 如何讓檢查至少與其權杖一樣新？
+
+<Swimlane
+  lanes={["應用程式", "SpiceDB", "主資料庫", "副本"]}
+  laneWidth={140}
+  rowHeight={60}
+  timeLabel="時間"
+  title="副本落後時退回主資料庫"
+  desc="應用程式將 Chen 從 folder:A 移除。主資料庫將其提交為 revision r105，SpiceDB 傳回 r105 的 ZedToken。之後，一次帶有 at_least_as_fresh r105 的檢查抵達。SpiceDB 詢問副本 r105 是否已複製；副本只到 r103，因此 SpiceDB 改將讀取送往主資料庫，由主資料庫在 r105 或之後回答。Chen 被拒絕。"
+  events={[
+    { lane: 0, t: 0, label: "移除 Chen", kind: "write" },
+    { lane: 2, t: 0, label: "commit r105", kind: "write", mono: true },
+    { lane: 1, t: 1, label: "ZedToken r105", kind: "note", mono: true },
+    { lane: 0, t: 2, label: "check, token r105", kind: "read", mono: true },
+    { lane: 3, t: 2, label: "replayed to r103", kind: "bad", mono: true },
+    { lane: 1, t: 3, label: "缺少 r105：\n使用主資料庫", kind: "note" },
+    { lane: 2, t: 4, label: "read at ≥ r105", kind: "good", mono: true },
+    { lane: 0, t: 5, label: "Chen 被拒絕", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [2, 0], to: [1, 1] },
+    { from: [1, 1], to: [0, 1], label: "written_at" },
+    { from: [0, 2], to: [1, 2] },
+    { from: [1, 2], to: [3, 2], label: "有 r105 嗎？" },
+    { from: [1, 3], to: [2, 4] },
+    { from: [2, 4], to: [0, 5], dashed: true },
+  ]}
+  caption="revision 編號僅供說明。沒有近期權杖的檢查，較可能由副本回答。"
+/>
+
+文件描述的正是這種情況：複製延遲 "would be problematic to SpiceDB's ability to solve the new enemy problem"（會影響 SpiceDB 解決 new enemy 問題的能力），因此 SpiceDB 會檢查 "if the revision has been replicated into the target replica. If missing, it will fall back to the primary."（該 revision 是否已複製到目標副本。若缺少，就退回主資料庫。）對 MySQL 而言，這 "requires two roundtrips instead of one"（需要兩次往返而非一次），而文件警告不要在 MySQL 副本前放置負載平衡器，"because SpiceDB will not be able to maintain consistency guarantees"（因為 SpiceDB 將無法維持一致性保證）（[datastores](https://authzed.com/docs/spicedb/concepts/datastores)）。
+
+在 PostgreSQL 上執行的 Permify，以同樣的方式建立其 Snap Token：權杖存有一個 PostgreSQL `XID8` 與一個快照字串（[`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go)，v1.7.6）。其文件只將權杖描述為 "a token that consists of an encoded timestamp"（由一個編碼的時間戳記構成的權杖）（[snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)）。
+
+## 論文之外的 Spanner
+
+SpiceDB 也能在擁有 TrueTime 的 Cloud Spanner 上執行。在那裡，驅動程式 "assumes the database is linearizable and skips the transaction overlap strategy"（假設資料庫是可線性化的，並略過交易重疊策略）（[datastores](https://authzed.com/docs/spicedb/concepts/datastores)），並以 `SELECT CURRENT_TIMESTAMP()` 讀取其 revision（[`spanner/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/spanner/revisions.go)）。這是最接近論文的設定。
+
+## 完全沒有權杖
+
+OpenFGA 沒有 zookie；其文件說論文 "has a feature called `Zookies`"（有一項稱為 `Zookies` 的功能），而 OpenFGA "is considering a similar feature in future releases"（正在考慮於未來版本中加入類似的功能）（[consistency](https://openfga.dev/docs/interacting/consistency)）。取而代之的是，查詢選擇 `MINIMIZE_LATENCY`（預設）或 `HIGHER_CONSISTENCY`，後者 "will skip the cache and query the database directly"（略過快取，直接查詢資料庫）。在設定了次要資料儲存區的 PostgreSQL 上（`datastore.secondaryUri`，"for postgres only"，僅限 postgres，[configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)），`HIGHER_CONSISTENCY` 也會選擇主資料庫：程式碼註解寫道 "If we are using higher consistency, we need to use the write database"（如果我們使用較高的一致性，就需要使用寫入資料庫）（[`postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go)，v1.22.1）。
+
+這提供的是「與主資料庫一樣新」，而不是「至少與我的寫入一樣新」。這個差異會影響成本：zookie 讓大多數檢查可以使用快取或副本，只有近期的檢查才送往主資料庫；而 `HIGHER_CONSISTENCY` 會把每一個這樣的查詢都送到主資料庫。[OpenFGA 頁面](../../ecosystem/openfga/#沒有-zookie-的一致性)畫出了快取的情況；文件建議比較資源的最後修改時間與快取 TTL，逐請求選擇模式，這讓應用程式自己保存一部分 zookie 的資訊。
+
+其他產品：
+
+- **Ory Keto** 在其 Check API 中有 `snaptoken` 與 `latest` 欄位，每一個都標示為 "This field is not implemented yet and has no effect"（此欄位尚未實作，沒有作用）（[`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)）。
+- **Warrant** 會讀取 `Warrant-Token` 標頭，但只對值 `latest` 作出反應，即把讀取送往主資料庫；其他任何值都會被忽略，而開源伺服器不會傳回權杖（[`wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go)、[Warrant](../../ecosystem/warrant/)）。
+- **Topaz** 沒有記載任何權杖；見[比較頁面](../../ecosystem/compare/#一致性權杖與模式)。
+
+Tom MacWright 對論文的閱讀筆記從外部得出相同的觀察：OpenFGA 沒有類似 zookie 的東西，而且 "neither does Ory Keto"（Ory Keto 也沒有）（[Reading Zanzibar，2025-05-02](https://macwright.com/2025/05/02/reading-zanzibar.html)）。
+
+沒有權杖時，需要論文所述保證的應用程式有兩個選項：從一個永遠最新的儲存區讀取（單一主資料庫，不用快取），或接受一段被移除的使用者仍可能被允許的時間窗。
+
+## 各產品的機制
+
+| 產品與資料儲存區 | 順序從何而來 | 權杖 | 在權杖當下或之後的讀取 |
+| --- | --- | --- | --- |
+| 論文（Spanner） | TrueTime + 提交等待 | zookie | 任何副本；必要時等待（§3.2.5） |
+| SpiceDB on Spanner | TrueTime；略過重疊策略 | ZedToken | Spanner 快照讀取 |
+| SpiceDB on CockroachDB | HLC 時間戳記；寫入時加上重疊鍵（預設 `static`） | ZedToken | `AS OF SYSTEM TIME`；`fully_consistent` 可能漏掉另一個節點上的寫入 |
+| SpiceDB on PostgreSQL | 主資料庫的交易 ID 與快照 | ZedToken | 若副本已有該 revision 則用副本，否則用主資料庫 |
+| SpiceDB on MySQL | `AUTO_INCREMENT` 交易 ID | ZedToken | 若副本已有該 revision 則用副本，否則用主資料庫（兩次往返） |
+| Permify on PostgreSQL | 主資料庫的 `XID8` 與快照 | Snap Token | 來自權杖的快照 |
+| OpenFGA | 未公開 | 無 | `HIGHER_CONSISTENCY`：略過快取，使用主資料庫 |
+| Ory Keto | 未公開 | `snaptoken` 欄位，未實作 | 無法使用 |
+| Warrant | 無（不傳回權杖） | `Warrant-Token` 標頭 | 僅 `latest`；其他值會被忽略 |
+
+各列的出處見上方各節。未在原始碼中追蹤 Permify 針對權杖的讀取路徑；該列只反映權杖的內容。
+
+<Callout kind="note" title="未經查證">
+
+AuthZed 的 CockroachDB 文章報告的重現，是在三節點叢集的其中一個節點上注入時鐘與網路延遲；本頁的時間戳記僅供說明，並未實測。「MySQL 的 `AUTO_INCREMENT` id 依循因果順序」這項主張，是根據 InnoDB 分配 id 的方式所做的推論，並非 SpiceDB 文件中的陳述。
+
+</Callout>
+
+## 資料來源
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.2, §2.4, §2.4.4, §3.2.5, §5.
+- James C. Corbett et al., [Spanner: Google's Globally-Distributed Database](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), OSDI '12.
+- AuthZed, [The One Crucial Difference Between Spanner and CockroachDB](https://authzed.com/blog/prevent-newenemy-cockroachdb), 2021-10-14（廠商部落格）。
+- AuthZed, [Enforcing Causal Ordering in Distributed Systems: The Importance of Permissions Checking](https://authzed.com/blog/new-enemies), 2021-02-17（廠商部落格）。
+- AuthZed, [Datastores](https://authzed.com/docs/spicedb/concepts/datastores), SpiceDB docs.
+- SpiceDB v1.57.1 source: [`postgres/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/postgres/revisions.go), [`mysql/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/revisions.go), [`mysql` initial schema](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/migrations/zz_migration.0001_initial_schema.go), [`spanner/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/spanner/revisions.go).
+- Cockroach Labs, [`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start) (`--max-offset`).
+- Spencer Kimball and Irfan Sharif, [Living without atomic clocks: Where CockroachDB and Spanner diverge](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/), Cockroach Labs, 2022-01-27（廠商部落格）。
+- OpenFGA, [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency) and [Configuring OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configuration); v1.22.1 source [`pkg/storage/postgres/postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go).
+- Permify, [Snap Tokens](https://fusionauth.io/permify-docs/operations/snap-tokens); v1.7.6 source [`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go).
+- Ory Keto, [`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto).
+- Warrant, [`pkg/wookie/wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go).
+- Tom MacWright, [Reading Zanzibar](https://macwright.com/2025/05/02/reading-zanzibar.html), 2025-05-02.

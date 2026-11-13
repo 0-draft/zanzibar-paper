@@ -1,0 +1,385 @@
+---
+title: "Cambiar y probar un esquema"
+description: "Cómo mantiene el artículo la consistencia de los cambios de configuración de los espacios de nombres dentro de una solicitud, por qué eliminar una relación requiere tres pasos en los productos actuales y cómo probar un modelo con archivos de aserciones en CI."
+section: guide
+part: practice
+order: 13
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "3.1.3", "3.2.2", "4"]
+---
+
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Un esquema es la parte de un sistema de autorización que menos cambia y la que más rompe cuando cambia. En el artículo es la *configuración del espacio de nombres*: "A namespace configuration specifies its relations as well as its storage parameters" (La configuración de un espacio de nombres especifica sus relaciones, así como sus parámetros de almacenamiento) (§2.3). En Google había "more than 1,500 namespaces" (más de 1,500 espacios de nombres), y sus archivos de configuración "range from tens of lines to thousands of lines, with the median near 500 lines" (van de decenas a miles de líneas, con una mediana cercana a 500 líneas) (§4). Esta página trata tres cosas: cómo evita el artículo que un cambio de configuración parta en dos una misma solicitud, cómo obligan los productos actuales a eliminar una relación por pasos y cómo probar un modelo antes de ponerlo en producción.
+
+Las configuraciones de relación en sí (`_this`, `computed_userset`, `tuple_to_userset`) se explican en [Tuplas de relación y usersets](../relation-tuples/). Esta página trata de cómo cambiarlas.
+
+## Cómo versiona el artículo las configuraciones de los espacios de nombres
+
+Las configuraciones residen en su propia base de datos Spanner: "There is one database to store relation tuples for each client namespace, one database to hold all namespace configurations, and one changelog database shared across all namespaces" (Hay una base de datos para almacenar las tuplas de relación de cada espacio de nombres de cliente, una base de datos para contener todas las configuraciones de los espacios de nombres y una base de datos de registro de cambios compartida por todos los espacios de nombres) (§3). La base de datos de configuraciones es una tabla más un registro:
+
+<Callout kind="paper" title="§3.1.3 Almacenamiento de las configuraciones de los espacios de nombres">
+
+Namespace configs are stored in a database with two tables. One table contains the configs and is keyed by namespace IDs. The other is a changelog of config updates and is keyed by commit timestamps. This structure allows a Zanzibar server to load all configs upon startup and monitor the changelog to refresh configs continuously.
+
+(Las configuraciones de los espacios de nombres se almacenan en una base de datos con dos tablas. Una tabla contiene las configuraciones y tiene como clave los ID de los espacios de nombres. La otra es un registro de cambios de las actualizaciones de configuración y tiene como clave las marcas de tiempo de confirmación. Esta estructura permite a un servidor de Zanzibar cargar todas las configuraciones al arrancar y vigilar el registro de cambios para actualizarlas de forma continua.)
+
+</Callout>
+
+Así, cada versión de la configuración tiene una marca de tiempo de confirmación, y cada servidor tiene un cierto rango de versiones. El peligro es una solicitud que se reparte (véase [Arquitectura](../architecture/)): si el servidor que la recibe ya ha cargado una configuración nueva y el servidor en el que delega todavía no, las dos mitades de una misma comprobación se evaluarían con reglas distintas. El artículo lo descarta: "Zanzibar chooses a single snapshot timestamp for config metadata when evaluating each client request. All `aclservers` in a cluster use that same timestamp for the same request, including for any subrequests that fan out from the original client request" (Zanzibar elige una única marca de tiempo de instantánea para los metadatos de configuración al evaluar cada solicitud de cliente. Todos los `aclservers` de un clúster usan esa misma marca de tiempo para la misma solicitud, incluidas las subsolicitudes que se reparten a partir de la solicitud original del cliente) (§3.2.2).
+
+¿Qué marca de tiempo puede usar una solicitud cuando los servidores de un clúster han cargado versiones de configuración distintas?
+
+<Swimlane
+  lanes={["almacén de configs", "proceso de monitorización", "aclserver 1", "aclserver 2"]}
+  laneWidth={140}
+  rowHeight={62}
+  timeLabel="tiempo"
+  title="Una marca de tiempo de configuración por solicitud"
+  desc="Se confirma una nueva versión de la configuración en el almacén de configuraciones en la marca de tiempo T2. El aclserver 1 la lee del registro de cambios y tiene ahora versiones hasta T2; el aclserver 2 va retrasado y sigue teniendo versiones hasta T1. Ambos comunican sus rangos al proceso de monitorización, que comunica un rango disponible globalmente que termina en T1. Llega una solicitud al aclserver 1, que elige un momento dentro de ese rango, así que como mucho T1, y envía una subsolicitud al aclserver 2 con la misma marca de tiempo de configuración. Más tarde, el aclserver 2 carga T2 y el rango global crece hasta incluir T2."
+  events={[
+    { lane: 0, t: 0, label: "config v2\nconfirmada en T2", kind: "write" },
+    { lane: 2, t: 1, label: "carga v2:\ntiene ≤ T2", kind: "note" },
+    { lane: 3, t: 1, label: "retrasado:\ntiene ≤ T1", kind: "note" },
+    { lane: 1, t: 2, label: "el rango global\ntermina en T1", kind: "note" },
+    { lane: 2, t: 3, label: "solicitud: elige\nun momento ≤ T1", kind: "read" },
+    { lane: 3, t: 4, label: "subsolicitud en\nel mismo momento", kind: "good" },
+    { lane: 3, t: 5, label: "carga v2:\ntiene ≤ T2", kind: "note" },
+    { lane: 1, t: 6, label: "el rango global\nya incluye T2", kind: "note" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 1], label: "registro de cambios" },
+    { from: [2, 1], to: [1, 2], dashed: true },
+    { from: [3, 1], to: [1, 2], label: "rangos", dashed: true },
+    { from: [1, 2], to: [2, 3], label: "rango" },
+    { from: [2, 3], to: [3, 4], label: "reparto" },
+    { from: [0, 0], to: [3, 5], label: "registro de cambios", dashed: true },
+  ]}
+  caption="La solicitud se evalúa con v1 en los dos servidores, porque v2 todavía no está disponible en todos."
+/>
+
+Obsérvese que la nueva configuración no se usa en el momento en que se confirma. Pasa a ser utilizable cuando todos los servidores del clúster pueden servirla. En palabras del artículo, "each server in a cluster may have access to a different range of config timestamps due to restarts or network latency. Zanzibar must pick a timestamp that is available across all of them. To facilitate this, a monitoring job tracks the timestamp range available to every server and aggregates them, reporting a globally available range to every other server. On each incoming request the server picks a time from this range, ensuring that all servers can continue serving even if they are no longer able to read from the config storage" (cada servidor de un clúster puede tener acceso a un rango distinto de marcas de tiempo de configuración debido a reinicios o a la latencia de red. Zanzibar debe elegir una marca de tiempo que esté disponible en todos ellos. Para facilitarlo, un proceso de monitorización registra el rango de marcas de tiempo disponible en cada servidor y los agrega, comunicando a todos los demás servidores un rango disponible globalmente. En cada solicitud entrante, el servidor elige un momento de este rango, lo que garantiza que todos los servidores puedan seguir sirviendo aunque ya no puedan leer del almacén de configuraciones) (§3.2.2).
+
+El artículo se detiene ahí. No dice cómo migra las tuplas un cliente cuando elimina una relación, si una escritura de configuración se contrasta con las tuplas existentes ni cómo se relaciona la marca de tiempo de configuración con la instantánea de tuplas elegida para la misma solicitud. Solo dice que ⟨*namespace*⟩ y ⟨*relation*⟩ "are predefined in client configurations" (están predefinidos en las configuraciones de los clientes) (§2.1), y que una relación forma parte de la clave primaria de cada tupla (§2.1, §3.1.1). El resto de esta página trata de cómo gestionan ese hueco los sistemas de código abierto.
+
+## Versiones del esquema en dos productos
+
+Los dos productos más documentados tomaron decisiones distintas.
+
+- **SpiceDB** tiene un único esquema actual por despliegue, que se sustituye con `WriteSchema`. La documentación de AuthZed dice que SpiceDB "processes all calls to the WriteSchema in a **safe** manner: it is not possible to break the type safety of a schema" (procesa todas las llamadas a WriteSchema de forma **segura**: no es posible romper la seguridad de tipos de un esquema), lo que significa que "it is not possible to accidentally remove a relation that is still referenced by one or more relationships" (no es posible eliminar por accidente una relación a la que todavía hacen referencia una o varias relaciones almacenadas) ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)). Una entrada de AuthZed de 2022 añade que las escrituras de esquema son totalmente consistentes, de modo que las escrituras de relaciones posteriores a una escritura de esquema se evalúan con el nuevo esquema ([online schema migrations](https://authzed.com/blog/online-schema-migrations)).
+- **OpenFGA** conserva todas las versiones. "Authorization Models in OpenFGA are immutable, they are created once and then can no longer be deleted or modified. Each time you write an authorization model, a new version is created." (Los modelos de autorización de OpenFGA son inmutables: se crean una vez y después ya no pueden eliminarse ni modificarse. Cada vez que se escribe un modelo de autorización, se crea una nueva versión.) Las solicitudes pueden nombrar un `authorization_model_id`; sin él, "OpenFGA will use the last created Authorization Model for that store" (OpenFGA usará el último modelo de autorización creado para ese store) ([immutable models](https://openfga.dev/docs/getting-started/immutable-models)). La documentación recomienda fijar el ID en la configuración, lo que también permite hacer comprobaciones en la sombra contra un modelo nuevo antes de cambiar.
+
+El diseño del artículo queda entre los dos: un registro de cambios con marcas de tiempo de confirmación como clave, como el historial de versiones de OpenFGA, pero con los servidores pasando siempre a la versión más reciente, como SpiceDB. Más sobre cada producto: [SpiceDB](../../ecosystem/spicedb/), [OpenFGA](../../ecosystem/openfga/).
+
+## Eliminar una relación requiere tres pasos
+
+Añadir es fácil. En SpiceDB, "Adding a new `relation` to a `definition` is always allowed, as it cannot change any existing types or computation" (añadir una nueva `relation` a una `definition` siempre está permitido, ya que no puede cambiar ningún tipo ni cálculo existente), y cambiar cómo se calcula un permiso está permitido siempre que haga referencia a relaciones o permisos definidos ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)).
+
+Eliminar, no. La misma página: "For type safety reasons, any removal of a `relation` with data, or a `relation` or `permission` referenced by _another_ `relation` or `permission` is disallowed." (Por motivos de seguridad de tipos, no se permite eliminar una `relation` con datos, ni una `relation` o un `permission` a los que haga referencia _otra_ `relation` u _otro_ `permission`.) Una relación solo puede desaparecer cuando sus tuplas han desaparecido, y sus tuplas solo pueden desaparecer de forma segura cuando nada calcula el acceso a partir de ellas. Así que la eliminación tiene un orden.
+
+Tómese el `doc` del ejemplo de referencia con una relación adicional hipotética, `editor`, que el equipo quiere quitar. En el lenguaje de esquemas de SpiceDB empieza así:
+
+```text
+definition doc {
+  relation parent: folder
+  relation owner: user
+  relation editor: user
+  relation viewer: user | group#member
+  permission view = owner + editor + viewer + parent->view
+}
+```
+
+¿Qué cambia cada paso y por qué no puede saltarse ninguno?
+
+<Frames>
+
+<Graph
+  width={300}
+  height={230}
+  title="Inicio"
+  desc="El permiso view de doc apunta a cuatro relaciones: owner, editor, viewer y parent. La relación editor tiene relaciones almacenadas, dibujadas como una caja de almacenamiento debajo de ella."
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, on: true },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "tuplas editor", kind: "store", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "e", on: true },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+    { from: "e", to: "t", dir: "none", on: true },
+  ]}
+  caption="Inicio: view lee editor, y editor contiene datos."
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="Paso 1: dejar de hacer referencia a editor"
+  desc="El esquema se vuelve a escribir con view calculado solo a partir de owner, viewer y parent. La relación editor sigue existiendo y sigue conteniendo relaciones, pero nada la lee."
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, kind: "group" },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "tuplas editor", kind: "store", mono: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+    { from: "e", to: "t", dir: "none" },
+  ]}
+  caption="Paso 1 (WriteSchema): los editores pierden ya el acceso a través de view."
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="Paso 2: eliminar las tuplas editor"
+  desc="Una llamada DeleteRelationships elimina todas las relaciones de la relación editor. La relación sigue declarada en el esquema, pero está vacía y nada la referencia."
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 45, y: 110, label: "owner", mono: true },
+    { id: "e", x: 120, y: 110, label: "editor", mono: true, kind: "group" },
+    { id: "v", x: 195, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 265, y: 110, label: "parent", mono: true },
+    { id: "t", x: 120, y: 195, label: "sin tuplas", kind: "group", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+  ]}
+  caption="Paso 2 (DeleteRelationships): la relación está vacía."
+/>
+
+<Graph
+  width={300}
+  height={230}
+  title="Paso 3: quitar la relación"
+  desc="El esquema se escribe por tercera vez sin la relación editor. view lee owner, viewer y parent."
+  nodes={[
+    { id: "p", x: 150, y: 30, label: "permission view", mono: true },
+    { id: "o", x: 60, y: 110, label: "owner", mono: true },
+    { id: "v", x: 150, y: 110, label: "viewer", mono: true },
+    { id: "pa", x: 240, y: 110, label: "parent", mono: true },
+  ]}
+  edges={[
+    { from: "p", to: "o" },
+    { from: "p", to: "v" },
+    { from: "p", to: "pa" },
+  ]}
+  caption="Paso 3 (WriteSchema): editor ha desaparecido."
+/>
+
+</Frames>
+
+Obsérvese dónde cambia realmente el acceso: en el paso 1, no en el paso 3. En cuanto el permiso deja de leer `editor`, a un editor que no sea también propietario o lector se le deniega el acceso, mientras las tuplas siguen en disco. Ese es el momento de detenerse y observar. La entrada de AuthZed, que numera sus pasos de otra forma, dice de este estado, antes de eliminar ningún dato: "You can stay at step 2 for as long as desired, in production, to retain your ability to roll back the change" (puede quedarse en el paso 2 todo el tiempo que desee, en producción, para conservar la capacidad de revertir el cambio) ([online schema migrations](https://authzed.com/blog/online-schema-migrations)): revertir el paso 1 es una escritura de esquema, mientras que revertir el paso 2 supone restaurar tuplas. Los tres pasos proceden de la [documentación de migraciones de AuthZed](https://authzed.com/docs/spicedb/modeling/migrating-schema), que también describe el mismo patrón para quitar un tipo de sujeto permitido de una relación (primero eliminar esas relaciones y después editar el esquema).
+
+Renombrar una relación es una eliminación más una adición. La documentación de SpiceDB lo recorre: añadir la nueva relación e incluirla en el permiso, hacer que la aplicación escriba ambas, rellenar los datos, quitar la relación antigua del permiso, dejar de escribirla y después eliminarla con los tres pasos anteriores ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)). La versión de OpenFGA del mismo trabajo se apoya en los modelos inmutables: escribir el nuevo modelo (un ID nuevo que producción todavía no usa), actualizar la aplicación, copiar las tuplas al nuevo nombre de relación y después desplegar la aplicación apuntando al nuevo ID de modelo ([immutable models](https://openfga.dev/docs/getting-started/immutable-models)).
+
+<Callout kind="warn" title="Eliminar un permiso">
+
+SpiceDB permite eliminar un permiso al que nada más del esquema hace referencia, pero advierte que "*can* break API callers if they are making checks or other API requests against the permission. It is up to your own CI system to verify that removed permissions are no longer referenced externally" (*puede* romper a quienes llaman a la API si hacen comprobaciones u otras solicitudes contra ese permiso. Corresponde a su propio sistema de CI verificar que los permisos eliminados ya no se referencian externamente) ([migrating a schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)). El esquema no puede ver el código de la aplicación.
+
+</Callout>
+
+## Probar un modelo con archivos de aserciones
+
+Los dos productos leen un archivo YAML que contiene un modelo, algunas tuplas y las respuestas esperadas. Los ejemplos siguientes codifican el ejemplo de referencia (Anne es propietaria del readme; Beto pertenece a eng; los miembros de eng ven el readme; Chen ve la carpeta A). Siguen el formato documentado de cada producto, pero se escribieron para esta página y no se han ejecutado.
+
+### OpenFGA: `.fga.yaml`
+
+Un archivo `.fga.yaml` tiene un `model` (o `model_file`), `tuples` opcionales y `tests`; una prueba puede contener bloques `check`, `list_objects` y `list_users`, cada uno con `assertions` ([testing models](https://openfga.dev/docs/modeling/testing)).
+
+```yaml
+name: Running example
+model: |
+  model
+    schema 1.1
+
+  type user
+
+  type group
+    relations
+      define member: [user]
+
+  type folder
+    relations
+      define viewer: [user]
+
+  type doc
+    relations
+      define parent: [folder]
+      define owner: [user]
+      define viewer: [user, group#member] or owner or viewer from parent
+
+tuples:
+  - user: user:anne
+    relation: owner
+    object: doc:readme
+  - user: user:beto
+    relation: member
+    object: group:eng
+  - user: group:eng#member
+    relation: viewer
+    object: doc:readme
+  - user: folder:A
+    relation: parent
+    object: doc:readme
+  - user: user:chen
+    relation: viewer
+    object: folder:A
+
+tests:
+  - name: readme access
+    check:
+      - user: user:anne
+        object: doc:readme
+        assertions:
+          owner: true
+          viewer: true
+      - user: user:chen
+        object: doc:readme
+        assertions:
+          owner: false
+          viewer: true
+    list_objects:
+      - user: user:beto
+        type: doc
+        assertions:
+          viewer:
+            - doc:readme
+```
+
+La CLI de OpenFGA lo ejecuta con `fga model test --tests <filename>.fga.yaml` e imprime el número de pruebas superadas por tipo de prueba ([testing models](https://openfga.dev/docs/modeling/testing)).
+
+### SpiceDB: archivos de validación
+
+Un archivo de validación de SpiceDB tiene un `schema` (o `schemaFile`), `relationships` como una única cadena de varias líneas en lugar de una lista YAML, `assertions` con `assertTrue` y `assertFalse`, y un bloque `validation` opcional de *relaciones esperadas* que enumera cada sujeto con acceso y cómo lo obtuvo ([validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)).
+
+```yaml
+schema: |-
+  definition user {}
+
+  definition group {
+    relation member: user
+  }
+
+  definition folder {
+    relation viewer: user
+    permission view = viewer
+  }
+
+  definition doc {
+    relation parent: folder
+    relation owner: user
+    relation viewer: user | group#member
+    permission view = owner + viewer + parent->view
+  }
+
+relationships: |-
+  doc:readme#owner@user:anne
+  group:eng#member@user:beto
+  doc:readme#viewer@group:eng#member
+  doc:readme#parent@folder:A
+  folder:A#viewer@user:chen
+
+assertions:
+  assertTrue:
+    - doc:readme#view@user:anne
+    - doc:readme#view@user:beto
+    - doc:readme#view@user:chen
+  assertFalse:
+    - doc:readme#owner@user:chen
+```
+
+`zed validate` lo ejecuta "using the same parsing logic that the SpiceDB binary uses" (con la misma lógica de análisis que usa el binario de SpiceDB), y desde zed v0.25.0 acepta varios archivos a la vez (`zed validate validations/*`) ([validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)). Esta página omite el bloque `validation` porque no se ha comprobado su salida exacta para un userset de grupo; la documentación muestra la forma `"[user:you] is <document:validation-testing-debugging#reader>"`.
+
+Los dos archivos prueban el *modelo*, contra tuplas inventadas. Son pruebas unitarias del esquema, no una comprobación de los datos de producción.
+
+## Ejecutarlas en CI
+
+¿Dónde va cada tipo de comprobación entre una pull request y producción?
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={520}
+  title="Pruebas del esquema en una canalización de entrega"
+  desc="Una pull request con un cambio de esquema y su archivo de pruebas va a CI, que ejecuta zed validate o fga model test contra las tuplas del archivo de pruebas. Si pasan, un paso de despliegue escribe el esquema con WriteSchema o WriteAuthorizationModel en el servicio en ejecución, que lo guarda en su almacén de datos. En OpenFGA, el nuevo ID de modelo se fija después en la configuración de la aplicación. Una nota junto al paso de despliegue dice que las pruebas de CI no cubren los pasos que dependen de los datos, como eliminar tuplas antes de quitar una relación."
+  nodes={[
+    { id: "pr", x: 90, y: 60, label: "pull request:\nesquema + pruebas", kind: "client" },
+    { id: "ci", x: 310, y: 60, label: "CI: zed validate /\nfga model test", kind: "server", on: true },
+    { id: "dep", x: 310, y: 170, label: "despliegue: WriteSchema /\nWriteAuthorizationModel", kind: "server" },
+    { id: "db", x: 530, y: 170, label: "almacén de datos\nde autorización", kind: "store" },
+    { id: "cfg", x: 310, y: 265, label: "config de la app: ID de\nmodelo fijado (OpenFGA)", kind: "note" },
+    { id: "gap", x: 90, y: 170, label: "no cubierto:\ntuplas existentes", kind: "note" },
+  ]}
+  edges={[
+    { from: "pr", to: "ci", label: "en cada push", on: true },
+    { from: "ci", to: "dep", label: "pruebas superadas" },
+    { from: "dep", to: "db" },
+    { from: "dep", to: "cfg", dashed: true },
+    { from: "gap", to: "dep", dashed: true, dir: "none" },
+  ]}
+  caption="CI comprueba el modelo contra tuplas de prueba. Si una escritura tiene éxito contra los datos reales solo se sabe en el momento del despliegue."
+/>
+
+Obsérvese la nota de la izquierda. AuthZed lo dice directamente: "a schema write can still fail if a relation is removed and there are still instances of that relation in your database. `zed` doesn't know about your data" (una escritura de esquema puede seguir fallando si se elimina una relación y todavía hay instancias de esa relación en su base de datos. `zed` no conoce sus datos) ([validation, testing, debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)). La eliminación en tres pasos descrita más arriba es un procedimiento de despliegue, no algo que un archivo de pruebas pueda demostrar.
+
+Los dos proyectos publican GitHub Actions. Para SpiceDB, `authzed/action-spicedb-validate` ejecuta la validación de zed sobre un archivo; AuthZed lo califica de "highly recommended because it can prevent deployments of unverified changes" (muy recomendable porque puede impedir despliegues de cambios no verificados) ([documentación](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)). Para OpenFGA, `openfga/action-openfga-test` instala la CLI y ejecuta `fga model test` sobre cada archivo que coincida con `*.fga.yaml` bajo `test_path` ([action.yml](https://github.com/openfga/action-openfga-test/blob/main/action.yml)). Un workflow mínimo con ambos:
+
+```yaml
+name: Authorization model
+on:
+  pull_request:
+    paths: ["authz/**"]
+
+jobs:
+  spicedb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: authzed/action-spicedb-validate@v1
+        with:
+          validationfile: authz/spicedb.yaml
+
+  openfga:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: openfga/action-openfga-test@v0.1.1
+        with:
+          test_path: authz/
+```
+
+<Callout kind="note" title="¿Qué nombre de entrada?">
+
+La página de pruebas de OpenFGA todavía muestra la entrada como `store-file-path` con `v0.1.0`. El propio `action.yml` de la acción, consultado el 2026-11-13, define `test_path` y `test_files_pattern` y ningún `store-file-path`; el tutorial de Auth0 de diciembre de 2025 también usa `test_path` con `v0.1.1` ([blog de Auth0](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/)). Esta página sigue `action.yml`. Fije una versión que haya comprobado.
+
+</Callout>
+
+Para cambios mayores, SpiceDB incluye además un servidor de pruebas de integración (`spicedb serve-testing`, o la acción `authzed/action-spicedb`) que da a cada clave precompartida "an isolated, empty datastore" (un almacén de datos aislado y vacío), de modo que las pruebas de la aplicación pueden ejecutarse en paralelo contra una sola instancia ([documentación](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)). Los ID de modelo fijados de OpenFGA permiten comprobaciones en la sombra: enviar la misma comprobación al modelo antiguo y al nuevo y comparar antes de cambiar ([immutable models](https://openfga.dev/docs/getting-started/immutable-models)).
+
+Secciones del artículo: configuraciones de los espacios de nombres §2.3; almacenamiento de las configuraciones §3.1.3; una marca de tiempo de configuración por solicitud §3.2.2; número de espacios de nombres y tamaño de las configuraciones §4. Los términos están en el [glosario](../glossary/#namespace-config).
+
+## Fuentes
+
+- Artículo de Zanzibar, §2.1, §2.3, §3, §3.1.3, §3.2.2, §4 (transcripción de este sitio)
+- AuthZed, Migrating a Schema in SpiceDB: [authzed.com/docs/spicedb/modeling/migrating-schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)
+- Blog de AuthZed, Online Schema Migrations in SpiceDB (2022-02-03): [authzed.com/blog/online-schema-migrations](https://authzed.com/blog/online-schema-migrations)
+- AuthZed, Validation, Testing, Debugging SpiceDB Schemas: [authzed.com/docs/spicedb/modeling/validation-testing-debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)
+- OpenFGA, Testing Models: [openfga.dev/docs/modeling/testing](https://openfga.dev/docs/modeling/testing)
+- OpenFGA, Immutable Authorization Models: [openfga.dev/docs/getting-started/immutable-models](https://openfga.dev/docs/getting-started/immutable-models)
+- OpenFGA Model Testing Action, action.yml: [github.com/openfga/action-openfga-test](https://github.com/openfga/action-openfga-test/blob/main/action.yml)
+- Carla Urrea Stabile, Continuous Authorization Testing: FGA, GitHub Actions, and CI/CD, blog de Auth0 (2025-12-17): [auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/)

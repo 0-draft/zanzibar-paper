@@ -1,0 +1,220 @@
+---
+title: "Ory Keto"
+description: "Ory 的开源权限服务器，2021 年基于 Zanzibar 模型重建，用 TypeScript 子集进行配置，其 snaptoken 字段尚未实现。"
+section: ecosystem
+order: 4
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4"]
+product:
+  name: Ory Keto
+  maintainer: Ory Corp
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/ory/keto
+  docs: https://www.ory.com/docs/keto
+  status: "活跃，发布节奏放缓"
+  latest: v26.2.0 (2026-03-20)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+Ory Keto 是 Ory Corp 用 Go 编写的权限服务器。其 README 称它为 "an open source implementation of 'Zanzibar: Google's Consistent, Global Authorization System'"（“Zanzibar：Google 的一致性全球授权系统”的一个开源实现）（[README](https://github.com/ory/keto)）。Ory 还在 Ory Network 上把它作为托管服务运行："Ory Permissions is powered by the open source Ory Keto"（Ory Permissions 由开源的 Ory Keto 驱动）（同一 README）。
+
+Keto 最初并不是一个 Zanzibar 系统。Zanzibar 设计出现在 2021-04-07 发布的 v0.6.0-alpha.1 中；发布说明称，早先的 Keto 被移到了 `legacy-0.5` 分支，并且 "the architectures are vastly different"（两者的架构截然不同）（[发布说明](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)）。用 Ory Permission Language 编写的用户集重写随后在 2022-09-27 发布的 v0.10.0-alpha.0 中加入（[发布说明](https://github.com/ory/keto/releases/tag/v0.10.0-alpha.0)）。
+
+## 论文与 Keto 对照
+
+| 论文中 | Ory Keto 中 |
+| --- | --- |
+| 命名空间配置（§2.3） | Ory Permission Language（OPL，TypeScript 的一个子集）中一个 `implements Namespace` 的 `class`（[OPL 参考](https://www.ory.com/docs/keto/reference/ory-permission-language)） |
+| 关系元组 `object#relation@user`（§2.1） | `namespace:object#relation@subject`，例如 `Group:eng#members@User:beto`（[relation tuples](https://www.ory.com/docs/keto/concepts/relation-tuples)，[解析器](https://github.com/ory/keto/blob/master/ketoapi/enc_string.go)） |
+| `_this` | `this.related.viewers.includes(ctx.subject)` |
+| `computed_userset` | `this.permits.edit(ctx)`："A permission can call another permission defined on the same namespace"（一个权限可以调用同一命名空间中定义的另一个权限） |
+| `tuple_to_userset` | `this.related.parents.traverse((p) => p.permits.view(ctx))` |
+| 并集、交集、排除 | `\|\|`、`&&`、`!` |
+| zookie（§2.2、§2.4） | API 中存在 `snaptoken` 字段，但每一个都 "not implemented yet and has no effect"（尚未实现，没有任何效果）（[check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)） |
+| Check（§2.4.4） | `CheckService.Check`、`BatchCheck` |
+| Read（§2.4.1） | `ReadService.ListRelationTuples`（[read_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/read_service.proto)） |
+| Write（§2.4.2） | `WriteService.TransactRelationTuples`、`DeleteRelationTuples`（[write_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/write_service.proto)） |
+| Watch（§2.4.3） | API 中没有 |
+| Expand（§2.4.5） | `ExpandService.Expand`（[expand_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/expand_service.proto)） |
+| Leopard（§3.2.4） | 文档中没有对应物 |
+| Spanner（§3.1） | PostgreSQL、MySQL 或 CockroachDB；SQLite 仅用于开发（[生产指南](https://www.ory.com/docs/keto/guides/production)） |
+
+## 用 OPL 表示贯穿示例
+
+论文的图 1 使所有者成为编辑者，编辑者成为查看者，父文件夹的查看者成为文档的查看者（§2.3.1）。在 OPL 中，每个命名空间是一个类：`related` 声明各个关系及其接受的主体类型，`permits` 存放针对 `ctx.subject` 返回 true 或 false 的函数。
+
+```ts
+import { Namespace, SubjectSet, Context } from "@ory/keto-namespace-types"
+
+class User implements Namespace {}
+
+class Group implements Namespace {
+  related: {
+    members: User[]
+  }
+}
+
+class Folder implements Namespace {
+  related: {
+    viewers: (User | SubjectSet<Group, "members">)[]
+  }
+
+  permits = {
+    view: (ctx: Context): boolean => this.related.viewers.includes(ctx.subject),
+  }
+}
+
+class Doc implements Namespace {
+  related: {
+    parents: Folder[]
+    owners: User[]
+    editors: (User | SubjectSet<Group, "members">)[]
+    viewers: (User | SubjectSet<Group, "members">)[]
+  }
+
+  permits = {
+    edit: (ctx: Context): boolean =>
+      this.related.owners.includes(ctx.subject) ||
+      this.related.editors.includes(ctx.subject),
+
+    view: (ctx: Context): boolean =>
+      this.related.viewers.includes(ctx.subject) ||
+      this.permits.edit(ctx) ||
+      this.related.parents.traverse((p) => p.permits.view(ctx)),
+  }
+}
+```
+
+`SubjectSet<Group, "members">` 是 OPL 中表示“某个组的成员”的类型，即论文中的用户集。关系总是数组，因为 "an object can have many subjects"（一个对象可以有许多主体）（[OPL 参考](https://www.ory.com/docs/keto/reference/ory-permission-language)）。
+
+<Callout title="对照文档核对，未实际运行">
+这份配置遵循截至 2026-11-13 的文档语法：[OPL 参考](https://www.ory.com/docs/keto/reference/ory-permission-language)、仓库中的 [OPL 规范](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md)，以及维护者的示例 [namespaces.keto.ts](https://github.com/ory/keto/blob/master/contrib/rewrites-example/namespaces.keto.ts)。它没有被加载到 Keto 中。
+</Callout>
+
+贯穿示例的五个元组，采用 Keto 的文本形式。写作 `User:anne` 的主体是关系为空的主体集；维护者的示例元组就是这样书写用户的（[tuples.json](https://github.com/ory/keto/blob/master/contrib/rewrites-example/relation-tuples/tuples.json)）。
+
+```text
+Doc:readme#owners@User:anne
+Group:eng#members@User:beto
+Doc:readme#viewers@Group:eng#members
+Doc:readme#parents@Folder:A
+Folder:A#viewers@User:chen
+```
+
+哪个元组和哪个 OPL 表达式决定了每个人对 readme 的访问权？
+
+<Graph
+  width={600}
+  height={260}
+  title="以 Keto 关系元组表示的贯穿示例"
+  desc="五个关系元组。User:anne 属于 Doc:readme 的 owners。User:beto 属于 Group:eng 的 members。Group:eng#members 属于 Doc:readme 的 viewers。Folder:A 属于 Doc:readme 的 parents。User:chen 属于 Folder:A 的 viewers。从 Chen 经由 Folder:A 的路径被高亮：它由 parents 上的 traverse 解析。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "User:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "User:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "User:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "Group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "Folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "Doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owners" },
+    { from: "beto", to: "eng", label: "members" },
+    { from: "eng", to: "doc", label: "viewers\n(#members)", dashed: true },
+    { from: "chen", to: "folder", label: "viewers", on: true },
+    { from: "folder", to: "doc", label: "parents", on: true },
+  ]}
+  caption="Anne：owners → permits.edit → view。Beto：Group:eng#members 主体集。Chen：parents.traverse(p => p.permits.view)。虚线：主体集。"
+/>
+
+注意，只有箭头是存储的。把所有者变成查看者、把文件夹查看者变成文档查看者的每一步，都位于 `permits` 函数中，并在检查时运行。
+
+## 架构
+
+一个 Keto 部署的哪些部分之间相互通信？
+
+<Graph
+  width={620}
+  height={270}
+  title="文档所描述的 Ory Keto 部署"
+  desc="每个 Keto 容器默认在端口 4466 上提供 Read API，在端口 4467 上提供 Write API。面向公众的客户端只能通过网关访问 Read API。你的后端使用 Write API。所有容器共享一个 SQL 数据库。扩容就是增加容器。"
+  nodes={[
+    { id: "pub", x: 95, y: 55, label: "经由 API 网关\n的客户端", kind: "client" },
+    { id: "be", x: 95, y: 215, label: "你的后端", kind: "client" },
+    { id: "k1", x: 330, y: 55, label: "Keto 容器\nRead :4466 · Write :4467", kind: "server" },
+    { id: "k2", x: 330, y: 215, label: "Keto 容器\nRead :4466 · Write :4467", kind: "server" },
+    { id: "db", x: 545, y: 135, label: "SQL 数据库", kind: "store" },
+  ]}
+  edges={[
+    { from: "pub", to: "k1", label: "仅 Read API" },
+    { from: "be", to: "k2", label: "Write + Read" },
+    { from: "k1", to: "db", label: "SQL" },
+    { from: "k2", to: "db", label: "SQL" },
+  ]}
+  caption="黄色：Keto 容器。绿色：共享数据库。蓝色：客户端。文档中没有记载容器之间的对等通信。"
+/>
+
+- 每个容器提供一个 Read API（默认端口 4466）、一个 Write API（4467）和一个 OPL 语法 API（4469），各自通过 HTTP 和 gRPC 提供（[配置 schema](https://github.com/ory/keto/blob/master/embedx/config.schema.json)）。
+- "A good practice is to not expose the Write API at all to the public internet"（好的做法是完全不把 Write API 暴露到公共互联网上），并且 "The Read API should also be protected"（Read API 也应当受到保护）（[生产指南](https://www.ory.com/docs/keto/guides/production)）。
+- 扩容："There are no additional requirements for scaling when self-hosting Ory Keto, just spin up another container!"（自托管 Ory Keto 时扩容没有额外要求，只需再启动一个容器！）（同一指南）。各容器共享数据库。
+
+## 一致性
+
+论文的 zookie 让客户端可以要求检查 "at a consistent snapshot no earlier than the given zookie"（在一个不早于给定 zookie 的一致快照上进行）（§2.4.4）。Keto 的 protobuf API 在字段名中体现了同样的思路：Check、Expand 和 ListRelationTuples 上的 `snaptoken`，TransactRelationTuples 上的 `snaptokens`，以及用于内容变更检查的 `latest` 标志。这些字段中的每一个都被记载为 "not implemented yet and has no effect"（尚未实现，没有任何效果）（[check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)）。
+
+客户端现在发送的令牌会怎样？
+
+<Swimlane
+  lanes={["你的服务", "Keto", "SQL 数据库"]}
+  timeLabel="时间"
+  title="没有效果的 snaptoken 字段"
+  desc="服务通过 TransactRelationTuples 写入一个元组；Keto 把它存入 SQL 数据库。响应中有一个 snaptokens 字段，但它尚未实现。之后服务发送一次带 snaptoken 的 Check；Keto 忽略该字段，因此令牌不提供任何新鲜度保证。"
+  events={[
+    { lane: 0, t: 0, label: "Transact：添加\nDoc:readme viewer", kind: "write" },
+    { lane: 2, t: 0, label: "行已写入", kind: "write" },
+    { lane: 1, t: 1, label: "snaptokens：\n未实现", kind: "note" },
+    { lane: 0, t: 2, label: "带 snaptoken\n的 Check", kind: "read" },
+    { lane: 1, t: 2, label: "字段\n没有效果", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [1, 1], to: [0, 1], dashed: true },
+    { from: [0, 2], to: [1, 2] },
+  ]}
+  caption="API 的形式沿用了论文的 zookie 协议；但其行为尚未实现。"
+/>
+
+注意，论文基于 zookie 所建立的保证，即保护内容免受 “new enemy” 问题的影响（§2.2），因此取决于底层 SQL 数据库的行为。这里核对过的 Keto 文档页面没有任何关于一致性的说明。
+
+## 与论文的差异
+
+- **没有 zookie。** 字段存在，行为不存在（见上文）。
+- **没有 Watch。** v1alpha2 API 有 Check、Expand、Read、Write、Namespaces 和 Version 服务，以及一个单独的 OPL 语法服务（`opl/v1alpha1`），但没有变更流（[proto 目录](https://github.com/ory/keto/tree/master/proto/ory/keto)）。论文中的 Watch 为二级索引和 Leopard 提供数据（§2.4.3、§3.2.4）。
+- **没有 Leopard。** 文档中没有记载任何反规范化的集合索引。
+- **编程语言式的语法。** OPL 是 TypeScript 的一个子集，以便 "users can get context help from their IDE"（用户可以从 IDE 获得上下文帮助）（[OPL 规范](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md)）。论文的图 1 用一种类似 protocol buffer 的文本语法写出配置（§2.3.1）；论文没有说明该格式的名称。
+- **SQL 存储。** 一个共享的 SQL 数据库，而不是 Spanner（§3.1）。
+- **检查深度。** Check 请求带有 `max_depth`，"The maximum depth to search for a relation"（搜索关系的最大深度）（[check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)）。
+
+## 状态
+
+- 首个版本发布于 2018-11-13（Zanzibar 之前的设计）；Zanzibar 设计始于 2021-04-07 的 v0.6.0-alpha.1；OPL 始于 2022-09-27 的 v0.10.0-alpha.0（[releases](https://github.com/ory/keto/releases)）。
+- 版本号方案在 v0.14.0（2025-03-06）之后改变：下一个版本是 v25.4.0（2025-11-07），然后是 v26.2.0（2026-03-20），这是截至 2026-11-13 的最新版本。
+- 默认分支的最后一次提交：2026-07-29。约 5.4k 个 star（GitHub API，2026-11-13）。
+
+## 来源
+
+- Ory Keto 仓库与 README：[github.com/ory/keto](https://github.com/ory/keto)
+- 版本 v0.6.0-alpha.1：[github.com/ory/keto/releases/tag/v0.6.0-alpha.1](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)
+- 版本 v0.10.0-alpha.0：[github.com/ory/keto/releases/tag/v0.10.0-alpha.0](https://github.com/ory/keto/releases/tag/v0.10.0-alpha.0)
+- Ory Keto 文档：[ory.com/docs/keto](https://www.ory.com/docs/keto)
+- OPL 参考：[ory.com/docs/keto/reference/ory-permission-language](https://www.ory.com/docs/keto/reference/ory-permission-language)
+- OPL 规范：[github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md)
+- 关系元组：[ory.com/docs/keto/concepts/relation-tuples](https://www.ory.com/docs/keto/concepts/relation-tuples)
+- 元组字符串格式：[github.com/ory/keto/blob/master/ketoapi/enc_string.go](https://github.com/ory/keto/blob/master/ketoapi/enc_string.go)
+- 示例命名空间与元组：[namespaces.keto.ts](https://github.com/ory/keto/blob/master/contrib/rewrites-example/namespaces.keto.ts)、[tuples.json](https://github.com/ory/keto/blob/master/contrib/rewrites-example/relation-tuples/tuples.json)
+- gRPC 服务：[github.com/ory/keto/tree/master/proto/ory/keto](https://github.com/ory/keto/tree/master/proto/ory/keto)
+- 配置 schema：[github.com/ory/keto/blob/master/embedx/config.schema.json](https://github.com/ory/keto/blob/master/embedx/config.schema.json)
+- 生产指南：[ory.com/docs/keto/guides/production](https://www.ory.com/docs/keto/guides/production)

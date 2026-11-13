@@ -1,0 +1,214 @@
+---
+// One explainer page: a single column of prose and figures, with the
+// contents rail on wide screens. Reading settings are size and theme only.
+import type { MarkdownHeading } from "astro";
+import LangMenu from "../components/LangMenu.astro";
+import SiteNav from "../components/SiteNav.astro";
+import ViewMenu from "../components/ViewMenu.astro";
+import { LANGS } from "../i18n/langs.ts";
+import { ui } from "../i18n/ui.ts";
+import { type GuideEntry, pathOf, type Section } from "../lib/guides.ts";
+import { issueUrl, REPO_URL, withBase } from "../lib/paths.ts";
+import Base from "./Base.astro";
+
+interface Props {
+  lang: string;
+  section: Section;
+  slug: string;
+  entry: GuideEntry;
+  headings: MarkdownHeading[];
+  /** Languages this page exists in */
+  langs: string[];
+  prev?: GuideEntry | undefined;
+  next?: GuideEntry | undefined;
+}
+const { lang, section, slug, entry, headings, langs, prev, next } = Astro.props;
+const t = ui(lang);
+const d = entry.data;
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const langObjs = LANGS.filter((l) => langs.includes(l.code));
+const slugOf = (e: GuideEntry) => e.id.slice(e.id.indexOf("/") + 1);
+const kind = section === "guides" ? "guide" : "system";
+// The paper pages are per translation; English readers get the section number only.
+const paperHref = (s: string) => (lang === "en" ? undefined : withBase(`${lang}/#s${s.replaceAll(".", "-")}`));
+---
+
+<Base
+  lang={lang}
+  title={`${d.title} | zanzibar-paper`}
+  description={d.description}
+  path={pathOf(lang, section, slug)}
+  alternates={langs.map((code) => ({ code, path: pathOf(code, section, slug) }))}
+>
+  <a class="skip" href="#main">{t.skip}</a>
+  <header class="bar">
+    <a class="brand" href={withBase()} lang="en">
+      <span class="b-long">{kind}<span class="b-p">:</span></span>{slug}<span class="b-p">@</span><span class="b-user"
+        >{lang}</span
+      >
+    </a>
+    <SiteNav lang={lang} current={section} />
+    <span class="progress-num in-bar" aria-hidden="true" data-js-only hidden>0%</span>
+    <nav class="bar-tools" aria-label={t.view}>
+      {
+        toc.length > 0 && (
+          <details class="toc-pop pop">
+            <summary>
+              {t.contents}
+              <span class="progress-num in-toc" aria-hidden="true" data-js-only hidden>
+                0%
+              </span>
+              <svg class="chev" viewBox="0 0 10 6" aria-hidden="true" width="10" height="6">
+                <path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" />
+              </svg>
+            </summary>
+            <div class="pop-panel toc-pop-panel">
+              <nav class="toc" aria-label={t.onThisPage}>
+                <ol lang={lang}>
+                  {toc.map((h) => (
+                    <li class={`lv${h.depth}`}>
+                      <a href={`#${h.slug}`} data-toc-link={h.slug}>
+                        <span class="t">{h.text}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ol>
+              </nav>
+            </div>
+          </details>
+        )
+      }
+      <LangMenu current={lang} label={t.language} class="pop" langs={langObjs} pathFor={(c) => pathOf(c, section, slug)} />
+      <ViewMenu t={t} mode="prose" />
+    </nav>
+    <span class="progress" aria-hidden="true"><span class="progress-fill"></span></span>
+  </header>
+
+  <div class="shell">
+    <aside class="rail">
+      {
+        toc.length > 0 && (
+          <nav class="toc" aria-label={t.onThisPage}>
+            <p class="rail-title">{t.onThisPage}</p>
+            <ol lang={lang}>
+              {toc.map((h) => (
+                <li class={`lv${h.depth}`}>
+                  <a href={`#${h.slug}`} data-toc-link={h.slug}>
+                    <span class="t">{h.text}</span>
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        )
+      }
+    </aside>
+
+    <main id="main" class="guide" lang={lang}>
+      <SiteNav lang={lang} current={section} place="top" />
+      <header class="guide-head">
+        <p class="crumb">
+          <a href={withBase(pathOf(lang, section))}>{section === "guides" ? t.navGuides : t.navEcosystem}</a>
+        </p>
+        <h1>{d.title}</h1>
+        <p class="lede">{d.description}</p>
+        <p class="meta">
+          <span>{t.checkedOn} <time datetime={d.checked}>{d.checked}</time></span>
+          {
+            d.paper.length > 0 && (
+              <span>
+                {t.paperSections}{" "}
+                {d.paper.map((s, i) => {
+                  const href = paperHref(s);
+                  return (
+                    <>
+                      {i > 0 && ", "}
+                      {href ? <a href={href}>§{s}</a> : <span>§{s}</span>}
+                    </>
+                  );
+                })}
+              </span>
+            )
+          }
+        </p>
+        {
+          d.product && (
+            <dl class="facts">
+              <div>
+                <dt>{t.maintainer}</dt>
+                <dd>{d.product.maintainer}</dd>
+              </div>
+              <div>
+                <dt>{t.license}</dt>
+                <dd lang="en">{d.product.license}</dd>
+              </div>
+              <div>
+                <dt>{t.languageLabel}</dt>
+                <dd lang="en">{d.product.language}</dd>
+              </div>
+              <div>
+                <dt>{t.status}</dt>
+                <dd>{d.product.status}</dd>
+              </div>
+              <div>
+                <dt>{t.latestRelease}</dt>
+                <dd lang="en">{d.product.latest}</dd>
+              </div>
+              <div>
+                <dt>{t.repository}</dt>
+                <dd lang="en">
+                  <a href={d.product.repo} rel="noopener" target="_blank">
+                    {d.product.repo.replace("https://", "")}
+                  </a>
+                </dd>
+              </div>
+              <div>
+                <dt>{t.documentation}</dt>
+                <dd lang="en">
+                  <a href={d.product.docs} rel="noopener" target="_blank">
+                    {d.product.docs.replace("https://", "")}
+                  </a>
+                </dd>
+              </div>
+            </dl>
+          )
+        }
+      </header>
+
+      <article class="prose">
+        <slot />
+      </article>
+
+      <nav class="pager" aria-label={section === "guides" ? t.allGuides : t.allProducts}>
+        {
+          prev && (
+            <a class="prev" href={withBase(pathOf(lang, section, slugOf(prev)))}>
+              <span aria-hidden="true">←</span> {prev.data.title}
+            </a>
+          )
+        }
+        {
+          next && (
+            <a class="next" href={withBase(pathOf(lang, section, slugOf(next)))}>
+              {next.data.title} <span aria-hidden="true">→</span>
+            </a>
+          )
+        }
+      </nav>
+    </main>
+
+    <footer class="foot">
+      <p>
+        <a href={withBase(pathOf(lang, "guides"))}>{t.allGuides}</a>
+        <a href={withBase(pathOf(lang, "ecosystem"))}>{t.allProducts}</a>
+        <a href={REPO_URL} rel="noopener" target="_blank">{t.sourceCode}</a>
+        <a href={issueUrl(lang, `${section}/${slug}`)} rel="noopener" target="_blank">{t.fixLink}</a>
+      </p>
+      <p class="notice">{t.guideNote}</p>
+    </footer>
+  </div>
+
+  <script>
+    import "../scripts/guide.ts";
+  </script>
+</Base>

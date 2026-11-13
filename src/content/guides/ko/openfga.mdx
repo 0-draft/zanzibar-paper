@@ -1,0 +1,231 @@
+---
+title: "OpenFGA"
+description: "Zanzibar에서 영감을 받은 CNCF 인가 엔진을 논문과 대조하며 읽는다."
+section: ecosystem
+order: 2
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.4"]
+product:
+  name: OpenFGA
+  maintainer: CNCF project (Okta core maintainer)
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/openfga/openfga
+  docs: https://openfga.dev/docs
+  status: 활발함, CNCF Incubating
+  latest: v1.22.1 (2026-10-28)
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+OpenFGA는 오픈 소스 인가 엔진이다. 문서에 따르면 그 모델 언어의 JSON 형식, 즉 API가 받는 형식은 "closely tracks the language in the Zanzibar paper"(Zanzibar 논문의 언어를 충실히 따른다)이며, DSL은 문법적 편의를 더하고 그 JSON으로 컴파일된다([configuration language](https://openfga.dev/docs/configuration-language)). 인큐베이션을 알리는 CNCF의 글은 OpenFGA가 "was developed by a group of Okta employees, and is the foundation for the Auth0 FGA commercial offering"(Okta 직원 그룹이 개발했으며, Auth0 FGA 상용 제품의 기반이다)이라고 말한다([CNCF, 2025-11-11](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)). Go로 작성되었고 Apache-2.0 라이선스다([저장소](https://github.com/openfga/openfga)). Auth0의 관리형 서비스는 자신을 "based on OpenFGA, an open-source project owned by the Cloud Native Computing Foundation"(Cloud Native Computing Foundation이 소유한 오픈 소스 프로젝트인 OpenFGA에 기반한다)이라고 소개한다([Auth0 FGA 문서](https://docs.fga.dev/fga)).
+
+## 논문의 용어와 OpenFGA의 용어
+
+OpenFGA 문서에는 "Equivalent Zanzibar Concepts"(대응하는 Zanzibar 개념) 표가 있다([configuration language](https://openfga.dev/docs/configuration-language#equivalent-zanzibar-concepts)). 이 표는 그것을 API와 저장소까지 확장한 것이다.
+
+| 논문 | OpenFGA |
+| --- | --- |
+| 네임스페이스 설정 (§2.3) | 인가 모델 안의 `type`. DSL이나 JSON으로 작성한다([configuration language](https://openfga.dev/docs/configuration-language)) |
+| 관계 튜플 `object#relation@user` (§2.1) | `user`, `relation`, `object`를 가진 관계 튜플(relationship tuple). 예: `user:anne`, `owner`, `doc:readme`. 유저셋은 `group:eng#member`로 쓴다 |
+| `_this` (§2.3.1) | `[user, group#member]` 같은 직접 타입 제약(JSON에서는 `this`) |
+| `computed_userset` | 관계 이름 그대로. 예: `or owner` |
+| `tuple_to_userset` | `viewer from parent`(JSON에서는 `tupleToUserset`) |
+| `union` / `intersection` / `exclusion` | `or` / `and` / `but not`(JSON에서는 `union` / `intersection` / `difference`) |
+| zookie (§2.4) | 없음. 쿼리가 `MINIMIZE_LATENCY` 또는 `HIGHER_CONSISTENCY`를 고른다([consistency](https://openfga.dev/docs/interacting/consistency)) |
+| Check (§2.4.4) | `Check`, `BatchCheck` |
+| Read (§2.4.1) | `Read` |
+| Write (§2.4.2) | `Write` |
+| Watch (§2.4.3) | `ReadChanges`. 연속 토큰을 쓰는 페이지 단위 목록 읽기([tuple changes](https://openfga.dev/docs/interacting/read-tuple-changes)) |
+| Expand (§2.4.5) | `Expand` |
+| 논문의 API에 없음 | `ListObjects`, `StreamedListObjects`, `ListUsers`. 스토어. 모델 버전(`WriteAuthorizationModel`, `ReadAuthorizationModel(s)`) |
+| Leopard (§3.2.4) | 여기서 인용한 문서에는 대응물이 없음 |
+| Spanner (§3) | `memory`(기본값), `postgres`, `mysql`, `sqlite`([configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)) |
+
+API 이름은 [`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)에서 가져왔다.
+
+## 모델로 쓴 예제
+
+논문의 그림 1은 소유자를 편집자로, 편집자를 열람자로, 상위 폴더의 열람자를 문서의 열람자로 만든다(§2.3.1). OpenFGA의 DSL에서는 같은 규칙이 관계마다 한 줄에 들어간다.
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type folder
+  relations
+    define viewer: [user, group#member]
+
+type doc
+  relations
+    define parent: [folder]
+    define owner: [user]
+    define editor: [user, group#member] or owner
+    define viewer: [user, group#member] or editor or viewer from parent
+```
+
+<Callout kind="note" title="검증기로 실행하지 않음">
+
+이 모델은 2026-11-13 기준으로 OpenFGA의 [설정 언어 페이지](https://openfga.dev/docs/configuration-language)와 메인테이너들의 Google Drive 샘플([`model.fga`](https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga))에 나오는 구문만 사용한다. `model`, `schema 1.1`, `type`, `relations`, `define`, `group#member`를 가진 타입 제약, `or`, `from`이다. OpenFGA CLI나 Playground로 실행하지는 않았다.
+
+</Callout>
+
+Anne, Beto, Chen의 튜플:
+
+| user | relation | object |
+| --- | --- | --- |
+| `user:anne` | `owner` | `doc:readme` |
+| `folder:A` | `parent` | `doc:readme` |
+| `user:beto` | `member` | `group:eng` |
+| `group:eng#member` | `viewer` | `doc:readme` |
+| `user:chen` | `viewer` | `folder:A` |
+
+readme에 대한 `viewer` 검사는 각 사람에 대해 이 튜플들 가운데 어느 것을 거쳐 가는가?
+
+<Graph
+  width={600}
+  height={270}
+  title="OpenFGA 튜플로 쓴 예제"
+  desc="튜플 다섯 개. user:anne은 doc:readme의 owner다. user:beto는 group:eng의 member이고, group:eng#member는 doc:readme의 viewer다. user:chen은 folder:A의 viewer이고, folder:A는 doc:readme의 parent다. Anne의 경로가 강조되어 있다. owner가 editor로, editor가 viewer로 이어진다."
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 225, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 280, y: 135, label: "group:eng", kind: "object", mono: true },
+    { id: "folder", x: 280, y: 225, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 500, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer\n(eng#member)" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="각 화살표는 저장된 튜플 하나다. Anne의 owner 튜플(강조)은 editor로, 다시 viewer로 간주된다. Beto는 그룹을 통해, Chen은 viewer from parent를 통해 들어온다."
+/>
+
+"소유자는 편집자다"와 "편집자는 열람자다"를 담는 것은 튜플이 아니라 모델이라는 점에 주목하라. 관계 사이의 관계는 객체마다 튜플 하나씩이 아니라 설정에 속한다는 것이 논문의 요점이다(§2.3.1).
+
+## 아키텍처
+
+OpenFGA 배포는 무엇으로 이루어지는가? 문서는 SQL 데이터 저장소 하나 위의 서버들을 기술한다. 각 서버는 Check를 위한 인메모리 캐시를 둘 수 있으며, 프로덕션 가이드는 "a small pool of servers with high capacity (memory and CPU cores) instead of a big pool of servers, to increase cache hit ratios"(캐시 히트율을 높이기 위해 큰 서버 풀 대신 용량(메모리와 CPU 코어)이 큰 작은 서버 풀)를 권한다([running in production](https://openfga.dev/docs/best-practices/running-in-production)). PostgreSQL에서는 보조(읽기 복제본) 데이터 저장소를 설정할 수 있으며, `HIGHER_CONSISTENCY` 읽기는 주 데이터 저장소로 간다([configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)). 변경의 소비자는 `ReadChanges`를 호출하고 연속 토큰을 보관한다([tuple changes](https://openfga.dev/docs/interacting/read-tuple-changes)).
+
+<Graph
+  width={640}
+  height={320}
+  minWidth={560}
+  title="OpenFGA 아키텍처"
+  desc="애플리케이션 클라이언트가 gRPC나 HTTP로 두 OpenFGA 서버 중 하나에 Check를 보낸다. 각 서버에는 선택적인 인메모리 Check 캐시가 있다. 두 서버 모두 주 PostgreSQL 데이터 저장소에 쓰며, PostgreSQL 복제로 공급되는 선택적인 읽기 복제본에서 읽을 수 있다. 변경 소비자는 연속 토큰과 함께 서버에 ReadChanges를 호출한다."
+  nodes={[
+    { id: "app", x: 230, y: 40, label: "애플리케이션\n(gRPC / HTTP 클라이언트)", kind: "client" },
+    { id: "cons", x: 520, y: 40, label: "변경 소비자\n(ReadChanges 폴링)", kind: "client" },
+    { id: "s1", x: 200, y: 155, label: "OpenFGA 서버\n+ Check 캐시", kind: "server" },
+    { id: "s2", x: 440, y: 155, label: "OpenFGA 서버\n+ Check 캐시", kind: "server" },
+    { id: "pri", x: 200, y: 275, label: "주 데이터 저장소\nPostgreSQL · MySQL · SQLite", kind: "store" },
+    { id: "rep", x: 480, y: 275, label: "읽기 복제본\n(PostgreSQL, 선택)", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "s1", label: "Check" },
+    { from: "cons", to: "s2", label: "ReadChanges + 토큰" },
+    { from: "s1", to: "pri", label: "쓰기, HIGHER_CONSISTENCY", dir: "both" },
+    { from: "s2", to: "pri", dir: "both" },
+    { from: "s2", to: "rep", label: "그 밖의 읽기", dashed: true },
+    { from: "pri", to: "rep", label: "복제", dashed: true },
+  ]}
+  caption="노랑: 서버. 초록: 데이터 저장소. 파랑: 클라이언트. 점선: 선택. 문서는 서버 간 디스패치를 기술하지 않는다."
+/>
+
+논문의 그림 2(§3)와 비교해 보라. `aclservers`는 서로에게 작업을 팬아웃하고, `watchservers`는 스트림을 밀어 보내며, Leopard는 비정규화된 인덱스를 유지한다. 여기서 인용한 OpenFGA 문서는 셋 중 어느 것도 기술하지 않는다. 서버는 데이터 저장소와 자신의 캐시로 답한다.
+
+## zookie 없는 일관성
+
+OpenFGA에는 zookie가 없다. 문서는 "Future work"에서 이를 밝힌다. 논문에는 "has a feature called `Zookies`"(`Zookies`라는 기능이 있으며), OpenFGA는 "is considering a similar feature in future releases"(향후 릴리스에서 비슷한 기능을 검토하고 있다)([consistency](https://openfga.dev/docs/interacting/consistency)). 대신 Read와 쿼리 API는 두 값 중 하나를 받는다.
+
+| 모드 | 동작([consistency 문서](https://openfga.dev/docs/interacting/consistency)) | 논문의 대응 |
+| --- | --- | --- |
+| `MINIMIZE_LATENCY`(기본값) | "will serve queries from the cache when possible"(가능하면 캐시로 쿼리를 처리한다) | zookie 없는 요청: "a reasonably recent snapshot"(적당히 최근의 스냅샷)(§2.4.1) |
+| `HIGHER_CONSISTENCY` | "will skip the cache and query the database directly"(캐시를 건너뛰고 데이터베이스에 직접 쿼리한다) | 정확한 대응은 없음. 가장 가까운 것은 최신 스냅샷에서의 평가 |
+
+캐싱은 "disabled by default"(기본적으로 꺼져 있으며), 그 경우 "all queries will have strong consistency regardless of the consistency mode specified"(지정한 일관성 모드와 관계없이 모든 쿼리가 강한 일관성을 가진다)([consistency](https://openfga.dev/docs/interacting/consistency)). 모드는 캐시를 켰을 때에만 의미가 있다.
+
+캐시를 켠 상태에서, Chen이 폴더 A에서 제거된 직후에도 여전히 readme를 볼 수 있는가?
+
+<Swimlane
+  lanes={["애플리케이션", "OpenFGA 서버", "데이터 저장소"]}
+  laneWidth={190}
+  timeLabel="시간"
+  title="OpenFGA의 캐시와 일관성 모드"
+  desc="Check 캐시를 켠 상태에서, readme에 대한 Chen의 첫 검사는 허용되고 캐시된다. 그다음 애플리케이션이 폴더 A에 대한 Chen의 viewer 튜플을 삭제한다. MINIMIZE_LATENCY로 한 두 번째 검사는 캐시로 답해져 여전히 허용이라고 할 수 있다. HIGHER_CONSISTENCY로 한 세 번째 검사는 캐시를 건너뛰고 데이터 저장소를 읽어 거부된다."
+  events={[
+    { lane: 0, t: 0, label: "Chen이 볼 수 있나?", kind: "read" },
+    { lane: 1, t: 0, label: "허용, 캐시됨", kind: "note" },
+    { lane: 0, t: 1, label: "Chen의 튜플 삭제", kind: "write" },
+    { lane: 2, t: 1, label: "튜플 삭제됨", kind: "write" },
+    { lane: 0, t: 2, label: "Chen이 볼 수 있나?", kind: "read" },
+    { lane: 1, t: 2, label: "캐시: 허용", kind: "bad" },
+    { lane: 0, t: 3, label: "Chen이 볼 수 있나?", kind: "read" },
+    { lane: 2, t: 3, label: "튜플 읽기", kind: "read" },
+    { lane: 1, t: 4, label: "거부", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0], label: "Check" },
+    { from: [0, 1], to: [2, 1], label: "Write (delete)" },
+    { from: [0, 2], to: [1, 2], label: "MINIMIZE_LATENCY" },
+    { from: [0, 3], to: [2, 3], label: "HIGHER_CONSISTENCY" },
+    { from: [2, 3], to: [1, 4], dashed: true },
+  ]}
+  caption="2행은 문서가 경고하는 것이다. 결과가 캐시에서 오면 튜플 변경이 “might not be taken in consideration”(고려되지 않을 수 있다). zookie가 있다면 애플리케이션은 “적어도 내 쓰기만큼은 최신”을 요청할 수 있을 것이다(§2.2). 여기서는 전부 아니면 전무의 선택이다."
+/>
+
+문서는 요청마다 결정할 것을 제안한다. 애플리케이션이 리소스를 마지막으로 수정한 시각을 저장해 두면, 그 시각을 캐시 TTL과 비교하여 두 모드 중 하나를 고를 수 있다([consistency](https://openfga.dev/docs/interacting/consistency)). 애플리케이션이 보관하는 그 타임스탬프가 zookie 역할의 일부를 한다. 스토어에 대한 최근 쓰기를 확인하는 캐시 무효화 플래그(`cache-controller-enabled`)도 있다.
+
+## 논문과의 차이
+
+- **zookie 없음.** 일관성 토큰을 반환하지도 받지도 않는다. 두 가지 모드와 기본적으로 꺼진 캐시가 그 자리를 대신한다([consistency](https://openfga.dev/docs/interacting/consistency)). 논문의 일관성 모델은 zookie에 기반한다(§2.2).
+- **변경은 폴링한다.** `ReadChanges`는 "sorted by ascending time"(시간 오름차순으로 정렬된) 튜플 변경 한 페이지를 연속 토큰과 함께 반환한다([`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)). 논문의 Watch는 하트비트 zookie를 가진 스트림이다(§2.4.3).
+- **저장소.** 논문은 Spanner를 사용한다(§3.1). OpenFGA는 `memory`(기본값, "Data is lost between server restarts", 서버를 재시작하면 데이터가 사라진다), PostgreSQL(선택적인 읽기 복제본 포함), MySQL, SQLite를 제공한다([configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)).
+- **조건.** `[user with non_expired_grant]` 같은 타입 제약은 CEL 조건이 성립할 때에만 튜플이 효력을 갖게 한다([conditions](https://openfga.dev/docs/modeling/conditions)). 논문의 튜플(§2.1)에는 조건이 없다.
+- **컨텍스트 튜플.** Check, ListObjects, ListUsers, Expand 요청 하나와 함께 보내는 튜플로, "not persisted in the datastore"(데이터 저장소에 영속되지 않는다)([concepts](https://openfga.dev/docs/concepts), [contextual tuples](https://openfga.dev/docs/interacting/contextual-tuples)).
+- **와일드카드.** `[user, user:*]`는 공개 부여를 허용한다([configuration language](https://openfga.dev/docs/configuration-language)). 논문의 튜플 문법에는 와일드카드가 없다(§2.1).
+- **스토어와 모델 버전.** 스토어는 "one or more versions of an authorization model"(인가 모델의 하나 이상의 버전)과 그 튜플을 담으며, "Store data cannot be shared across stores"(스토어 데이터는 스토어 사이에 공유할 수 없다)([concepts](https://openfga.dev/docs/concepts)). 논문에서 설정은 네임스페이스 ID를 키로 하는 테이블에, 설정 갱신의 변경 로그와 나란히 저장되며, 각 요청은 하나의 설정 스냅샷 타임스탬프에서 평가된다(§3.1.3, §3.2.2). OpenFGA의 검사는 사용할 모델 버전을 지정할 수 있다.
+- **Leopard 없음.** 여기서 인용한 문서는 Check 캐시와 반복자 캐시를 기술할 뿐, Leopard(§3.2.4) 같은 미리 계산된 집합 인덱스는 기술하지 않는다.
+- **목록 API.** `ListObjects`, `StreamedListObjects`, `ListUsers`는 논문의 API(§2.4) 밖에 있다.
+
+## 현황
+
+2026-11-13 기준: 활발함. 최신 릴리스 v1.22.1은 2026-10-28, 첫 릴리스 v0.1.0은 2022-06-10, GitHub 스타 약 6.1k, Apache-2.0([저장소](https://github.com/openfga/openfga), [릴리스](https://github.com/openfga/openfga/releases)).
+
+- 2022년 6월: 오픈 소스로 공개([프로젝트 글, 2026-01-07](https://openfga.dev/blog/incubation-announcement)).
+- 2022년: CNCF Sandbox 프로젝트로 채택. 출처마다 날짜가 다르다. CNCF 프로젝트 페이지는 OpenFGA가 "was accepted to CNCF on September 14, 2022"(2022년 9월 14일에 CNCF에 채택되었다)라고 하고, 그 발표도 2022년 9월이라고 하지만, 프로젝트 자신의 글은 2022년 12월이라고 한다([CNCF 프로젝트 페이지](https://www.cncf.io/projects/openfga/), [CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/), [프로젝트 글](https://openfga.dev/blog/incubation-announcement)).
+- 2025-10-28: CNCF 프로젝트 페이지에 따르면 Incubating 성숙도 단계로 이동.
+- 2025-11-11: CNCF가 기술 감독 위원회가 "has voted to accept OpenFGA as a CNCF incubating project"(OpenFGA를 CNCF 인큐베이팅 프로젝트로 받아들이기로 의결했다)라고 발표([CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)).
+- 관리형 서비스는 Auth0 FGA다([문서](https://docs.fga.dev/fga)).
+
+## 출처
+
+- [https://github.com/openfga/openfga](https://github.com/openfga/openfga)
+- [https://github.com/openfga/openfga/releases](https://github.com/openfga/openfga/releases)
+- [https://openfga.dev/docs](https://openfga.dev/docs)
+- [https://openfga.dev/docs/concepts](https://openfga.dev/docs/concepts)
+- [https://openfga.dev/docs/configuration-language](https://openfga.dev/docs/configuration-language)
+- [https://openfga.dev/docs/interacting/consistency](https://openfga.dev/docs/interacting/consistency)
+- [https://openfga.dev/docs/interacting/read-tuple-changes](https://openfga.dev/docs/interacting/read-tuple-changes)
+- [https://openfga.dev/docs/interacting/contextual-tuples](https://openfga.dev/docs/interacting/contextual-tuples)
+- [https://openfga.dev/docs/modeling/conditions](https://openfga.dev/docs/modeling/conditions)
+- [https://openfga.dev/docs/best-practices/running-in-production](https://openfga.dev/docs/best-practices/running-in-production)
+- [https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)
+- [https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)
+- [https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga](https://github.com/openfga/sample-stores/blob/main/stores/gdrive/model.fga)
+- [https://openfga.dev/blog/incubation-announcement](https://openfga.dev/blog/incubation-announcement)
+- [https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
+- [https://www.cncf.io/projects/openfga/](https://www.cncf.io/projects/openfga/)
+- [https://docs.fga.dev/fga](https://docs.fga.dev/fga)

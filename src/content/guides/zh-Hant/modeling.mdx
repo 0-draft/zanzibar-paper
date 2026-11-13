@@ -1,0 +1,645 @@
+---
+title: "建模模式：從改寫規則到實際權限"
+description: "八種常見的授權需求，每一種都寫成元組、在可行時寫成論文命名空間設定記法中的規則，並寫成 SpiceDB 與 OpenFGA 的 schema 語言。"
+section: guide
+part: practice
+order: 10
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4.2", "3.2.3", "5", "6"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+論文描述了其資料模型與設定語言，但只給出一個完整的政策範例，即圖 1。其結論的宣稱更多："simple yet flexible data model and configuration language support a variety of access control policies from both consumer and enterprise applications"（簡單而有彈性的資料模型與設定語言，支援來自消費者與企業應用程式的各式存取控制政策）（§6）。其相關研究一節列出了它涵蓋的模式："Zanzibar’s data model supports permissions, users, groups, and inheritance"（Zanzibar 的資料模型支援權限、使用者、群組與繼承），如 Multics、UNIX、POSIX ACL 與 VMS 中所見，以及 "a number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language"（許多 Zanzibar 客戶端已在 Zanzibar 的命名空間設定語言之上實作了 RBAC 政策）（§5）。
+
+本頁寫出實務上常見的八種需求。每一節都給出該模式所回答的問題、元組、在論文能夠表達時以圖 1 記法寫成的規則、以 SpiceDB 的 schema 語言與 OpenFGA 的 DSL 寫成的同一規則，以及一張元組圖，並標出決定答案的路徑。模式清單依照 OpenFGA 的[建模指南](https://openfga.dev/docs/modeling)；[元組頁面](../relation-tuples/)說明了記法。
+
+貫穿全站的範例：Anne、Beto 與 Chen（`user:anne`、`user:beto`、`user:chen`）；位於 `folder:A` 中的文件 `doc:readme`；群組 `group:eng`。Anne 擁有 readme，Beto 屬於 eng，eng 的成員可檢視 readme，Chen 可檢視資料夾 A。
+
+<Callout kind="note" title="本頁 schema 的查核方式">
+
+論文的記法照抄自圖 1。圖 1 只使用 `union`；論文提到交集與排除（§2.3.1），但沒有展示它們的寫法，因此使用這兩者的兩個區塊是類推寫成的，並會加以註明。SpiceDB schema 只使用 AuthZed [schema 文件](https://authzed.com/docs/spicedb/concepts/schema)與建模頁面中展示過的語法；OpenFGA 模型只使用 OpenFGA [設定語言頁面](https://openfga.dev/docs/configuration-language)所列的 DSL 關鍵字（`or`、`and`、`but not`、`from`，以及 `[user, user:*, team#member]` 之類的型別限制）。每個區塊只列出該模式所需的型別。全部都已於 2026-11-13 對照文件查核；沒有任何一個經過驗證器、`zed`、OpenFGA CLI 或任一 Playground 執行。
+
+</Callout>
+
+## 角色與權限
+
+問題：Anne 能否編輯 readme？Beto 呢？*角色*是你授予的東西（owner、editor、viewer）。*權限*是你檢查的東西（edit、view）。授予角色、檢查權限，可以在角色變動時讓檢查保持穩定。
+
+元組：
+
+```text
+doc:readme#owner@user:anne
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+```
+
+在論文的記法中，角色是有儲存元組的關係，權限則是規則中不含 `_this` 的關係，因此沒有人能直接對它寫入元組。只需要 `union` 與 `computed_userset`，兩者都出自圖 1：
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+relation { name: "editor" }
+relation { name: "viewer" }
+
+relation {
+ name: "edit"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "owner" } }
+   child { computed_userset { relation: "editor" } }
+} } }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+} } }
+```
+
+圖 1 以不同的方式完成同樣的工作：它把 `_this` 與較大的角色放在同一個關係中（"All owners are editors, and all editors are viewers"，所有擁有者都是編輯者，所有編輯者都是檢視者）。兩種形式都是改寫規則；上面的寫法讓授予用的名稱與檢查用的名稱彼此分開。
+
+SpiceDB 在語法上區分這兩種：`relation` 行是可以儲存的，`permission` 行是計算出來的。其文件指出 "relations should be named as nouns"（關係應以名詞命名），而 "permissions should be named as verbs or nouns"（權限應以動詞或名詞命名）（[schema 文件](https://authzed.com/docs/spicedb/concepts/schema)）。
+
+```text
+definition user {}
+
+definition group {
+    relation member: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*SpiceDB schema；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+OpenFGA 只有一種關係。方括號中沒有型別限制的關係無法被直接寫入；OpenFGA 的[角色與權限指南](https://openfga.dev/docs/modeling/roles-and-permissions)將這類關係（`booking_viewer`、`booking_adder`）當作權限使用，其他指南則為它們加上 `can_` 前綴。
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA DSL；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+Anne 的 `edit` 從何而來？
+
+<Graph
+  width={600}
+  height={220}
+  minWidth={500}
+  title="角色與權限：Anne 的 edit"
+  desc="user:anne 有一條儲存的 owner 邊指向 doc:readme#owner。一支標示為 rewrite 的虛線箭頭從 doc:readme#owner 指向虛線方框 doc:readme#edit，另一支從 edit 指向虛線方框 doc:readme#view。從 Anne 經由 owner 到 edit 的路徑被標出。user:beto 透過群組到達 doc:readme#viewer，而 viewer 只有一支虛線箭頭指向 view。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 170, label: "user:beto", kind: "subject", mono: true },
+    { id: "owner", x: 300, y: 50, label: "doc:readme#owner", kind: "object", mono: true, on: true },
+    { id: "viewer", x: 300, y: 170, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "edit", x: 510, y: 50, label: "doc:readme#edit", kind: "group", mono: true, on: true },
+    { id: "view", x: 510, y: 170, label: "doc:readme#view", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "owner", label: "元組", on: true },
+    { from: "beto", to: "viewer", label: "經由 group:eng", dashed: true },
+    { from: "owner", to: "edit", label: "改寫", dashed: true, on: true },
+    { from: "viewer", to: "view", label: "改寫", dashed: true },
+    { from: "edit", to: "view", label: "改寫", dashed: true },
+  ]}
+  caption="實線箭頭是儲存的元組；虛線箭頭與方框由改寫規則計算而來。Anne 能編輯是因為她是擁有者；Beto 能到達 view，但到不了 edit。"
+/>
+
+請注意，`edit` 與 `view` 不存放任何元組。新增一個角色（例如 `commenter`），只需要一個新的關係，並在權限規則中多加一個子節點；既有的元組都不必變更。
+
+### 要有多少個關係
+
+對這種風格常見的批評與命名有關。在 Oso 的部落格文章 "Google Zanzibar Isn't Flexible"（Oso 販售一款與之競爭的授權產品）中，Greg Sarjeant 寫道 "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`"（ReBAC 的文獻中充斥著像 `can_delete` 與 `can_archive` 這樣的「關係」），稱之為 "essentially the same thing as creating a relation for every authorized action"（本質上等同於為每一個被授權的動作建立一個關係），並結論說這是 "an indication that relations are the wrong abstraction for authorization"（關係是錯誤的授權抽象的跡象）（[Oso，2024-11-01，2025-11-07 更新](https://www.osohq.com/post/google-zanzibar-isnt-flexible)）。
+
+數量確實會增加：應用程式檢查的每一個動作，都需要在 schema 中有一個名稱。改寫規則能壓低的，是儲存元組的數量，以及任何人會寫入的關係數量。在上面的 schema 中，有三個關係存放元組（`owner`、`editor`、`viewer`），權限則是它們的純函數，因此新增 `can_archive` 只需修改 schema 一次，不必動任何元組。論文自己引入改寫規則的動機也相同：為每個物件將衍生關係儲存為元組 "would be wasteful and make it hard to make modifications across all objects"（既浪費，也會使跨所有物件的修改變得困難）（§2.3.1）。schema 中的權限名稱究竟是成本還是文件，正是 Oso 與 Zanzibar 風格產品意見分歧之處；本頁不對此下定論。
+
+## 父子繼承
+
+問題：可檢視資料夾 A 的 Chen，能否檢視其中的 readme？從容器繼承就是 `tuple_to_userset` 葉節點：讀取物件的 `parent` 元組，再對每個上層物件詢問某個關係。
+
+元組：
+
+```text
+doc:readme#parent@folder:A#...
+folder:A#viewer@user:chen
+```
+
+論文的圖 1 已將這條規則列為 `viewer` 的第三個子節點。加到上一節的 `view` 權限中：
+
+```text
+relation { name: "parent" }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+在 SpiceDB 中，箭頭 `parent->view` 沿著 `parent` 關係前進，並對找到的物件詢問 `view`（[schema 文件](https://authzed.com/docs/spicedb/concepts/schema)）：
+
+```text
+definition folder {
+    relation parent: folder
+    relation viewer: user | group#member
+    permission view = viewer + parent->view
+}
+
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+}
+```
+
+*SpiceDB schema；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+在 OpenFGA 中，同樣的寫法是 `X from Y`；其[父子指南](https://openfga.dev/docs/modeling/parent-child)用它讓資料夾的編輯者成為其中文件的編輯者。
+
+```text
+type folder
+  relations
+    define parent: [folder]
+    define viewer: [user, group#member] or viewer from parent
+
+type doc
+  relations
+    define parent: [folder]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA DSL；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+兩個產品的版本也都為 `folder` 加上指向 `folder` 的 `parent`，讓資料夾從其上層資料夾繼承，而鏈的深度由元組決定。論文的圖 1 只展示了文件這一側。
+
+哪些元組決定了 Chen 的存取權？
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="父子繼承：Chen 透過資料夾 A 檢視 readme"
+  desc="user:chen 有一條 viewer 邊指向 folder:A；folder:A 有一條 parent 邊指向 doc:readme。兩條邊與三個節點都被標出。user:anne 有一條指向 doc:readme 的 owner 邊，未被標出。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 150, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "folder", x: 300, y: 150, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 515, y: 100, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="沒有任何元組同時提到 Chen 與 readme。parent 元組將關於 readme 的問題轉為關於資料夾 A 的問題。"
+/>
+
+請注意，將 readme 移到另一個資料夾只是一次元組變更（刪除一筆 `parent` 元組，寫入另一筆），所有繼承而來的授權都會隨之改變。這正是論文「new enemy」例 A 所涉及的操作："document ACLs inherit from folder ACLs"（文件的 ACL 繼承自資料夾的 ACL）（§2.2），因此 ACL 變更與移動的順序很重要；參見[一致性](../consistency/)。
+
+## 群組與巢狀群組
+
+問題：Beto 屬於某個子團隊；授予 eng 的權限能到達他嗎？這個貫穿全站範例的變化版本加入一個假設的子團隊 `group:sre`，Beto 屬於 sre，而 sre 屬於 eng。
+
+元組：
+
+```text
+group:sre#member@user:beto
+group:eng#member@group:sre#member
+doc:readme#viewer@group:eng#member
+```
+
+在論文中，群組不需要改寫規則。`member` 是一個普通的關係，而由於元組的使用者可以是使用者集合，"a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership"（⟨*userset*⟩ 讓 ACL 能夠參照群組，從而支援表示巢狀的群組成員資格）（§2.1）：
+
+```text
+name: "group"
+
+relation { name: "member" }
+```
+
+論文的設定並未說明一個關係接受哪些種類的使用者。兩個產品都要求在 schema 中寫明：只有在 `group#member` 被列為允許的主體時，巢狀才成立。
+
+```text
+definition group {
+    relation member: user | group#member
+}
+```
+
+*SpiceDB schema；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+```text
+type group
+  relations
+    define member: [user, group#member]
+```
+
+*OpenFGA DSL；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+授權如何到達 Beto？
+
+<Graph
+  width={600}
+  height={210}
+  minWidth={480}
+  title="巢狀群組：Beto 經由 sre 與 eng 到達 readme"
+  desc="user:beto 有一條 member 邊指向虛線的使用者集合 group:sre#member。group:sre#member 有一條 member 邊指向虛線的使用者集合 group:eng#member。group:eng#member 有一條 viewer 邊指向 doc:readme。整條鏈都被標出。"
+  nodes={[
+    { id: "beto", x: 80, y: 50, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "sre", x: 310, y: 50, label: "group:sre#member", kind: "group", mono: true, on: true },
+    { id: "eng", x: 310, y: 160, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "doc", x: 525, y: 160, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "sre", label: "member", on: true },
+    { from: "sre", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+  ]}
+  caption="三筆元組，三步。Check 從 readme 向外追蹤使用者集合，直到找到 Beto。"
+/>
+
+請注意，sre 加入 eng 時，文件的元組並沒有改變：群組是以與 ACL 相同的元組寫成的使用者集合（§2.1），因此成員資格的變更只停留在群組之內。同樣的間接關係，也是深層或寬廣的群組以指標追蹤檢查時很慢的原因；論文的對策是 [Leopard 索引](../leopard/)（§3.2.4）。
+
+## 封鎖清單（排除）
+
+問題：eng 的成員可以檢視 readme，但有一個人除外。在這個變化版本中，Beto 在 readme 上被封鎖。排除是從一個集合中移除另一個集合。
+
+元組：
+
+```text
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+doc:readme#blocked@user:beto
+```
+
+論文將排除列為一種運算子（§2.3.1），也列為 Expand 使用者集合樹中的一種節點（§2.4.5），但圖 1 沒有展示它的寫法。下面的區塊照抄圖 1 的形狀，以 `exclusion` 取代 `union`；這個關鍵字，以及第一個子節點為基底、第二個子節點被減去的規則，都是本頁的假設，而非論文的語法。
+
+```text
+relation { name: "blocked" }
+
+relation {
+ name: "can_view"
+ userset_rewrite {
+  exclusion {
+   child { computed_userset { relation: "view" } }
+   child { computed_userset { relation: "blocked" } }
+} } }
+```
+
+SpiceDB 以 `-` 表示排除（[schema 文件](https://authzed.com/docs/spicedb/concepts/schema)）。將封鎖後的權限定義在 `view` 之上，可以讓運算式不需要括號：
+
+```text
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+    relation blocked: user
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+    permission can_view = view - blocked
+}
+```
+
+*SpiceDB schema；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+OpenFGA 寫成 `but not`（在其 JSON 形式中為 `difference`）；其[封鎖清單指南](https://openfga.dev/docs/modeling/blocklists)封鎖某個團隊的一名成員，使其無法編輯該團隊可編輯的文件。
+
+```text
+type doc
+  relations
+    define parent: [folder]
+    define blocked: [user]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: (viewer or can_edit) but not blocked
+```
+
+*OpenFGA DSL；依 2026-11-13 時的文件語法撰寫（設定語言頁面允許以括號將運算子分組）；未執行驗證器。*
+
+哪一筆元組決定了結果？
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="封鎖清單：Beto 被排除"
+  desc="user:beto 有一條 member 邊指向虛線的使用者集合 group:eng#member，後者有一條 viewer 邊指向 doc:readme。另外，user:beto 有一條 blocked 邊直接指向 doc:readme。blocked 邊被標出，並決定了答案：否。"
+  nodes={[
+    { id: "beto", x: 80, y: 150, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 45, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 520, y: 150, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "beto", to: "doc", label: "blocked", on: true },
+  ]}
+  caption="Beto 屬於 view（經由 eng），也屬於 blocked。view 減去 blocked 不包含他，因此 can_view 回答否。"
+/>
+
+請注意，有一條通往文件的路徑已經不再足夠：排除必須同時查看兩邊。Zanzibar 只有在 "when the outcome of one node determines the result of a subtree"（某個節點的結果決定了一棵子樹的結果時）才會取消該子樹的其餘部分（§3.2.3）。一個「是」就能決定聯集；對排除而言，在得知被減去的一方之前，基底一方的「是」什麼也決定不了。也請注意被封鎖的範圍：由於 `can_view` 是從整個 `view` 中減去，被封鎖的擁有者同樣會失去 `can_view`。
+
+## 公開存取（萬用字元）
+
+問題：任何人都能檢視一份公開文件嗎？論文的記法無法回答這個問題。⟨*user*⟩ 是 "⟨*user_id*⟩ | ⟨*userset*⟩"，而使用者 ID "is an integer"（是整數）（§2.1）；沒有任何值代表所有使用者，論文也沒有討論公開物件。在論文的模型中，最接近的構造是一個包含所有使用者的群組，這需要每位使用者一筆元組；Google 如何處理公開分享則未說明。
+
+兩個產品都加入了*萬用字元*主體 `user:*`，只有在 schema 列出它的地方才允許使用。元組：
+
+```text
+doc:readme#viewer@user:*
+```
+
+```text
+definition doc {
+    relation viewer: user | user:* | group#member
+    permission view = viewer
+}
+```
+
+*SpiceDB schema；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+```text
+type doc
+  relations
+    define viewer: [user, user:*, group#member]
+```
+
+*OpenFGA DSL；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+兩個專案都對此提出警告。AuthZed："Be **very careful** with wildcard support in your schema!"（在 schema 中支援萬用字元時，請**非常小心**！）以及 "**Only** grant it to read permissions, unless you intend to allow for universal writing"（除非你打算允許所有人寫入，否則**只**將它授予讀取權限）（[schema 文件](https://authzed.com/docs/spicedb/concepts/schema)）。OpenFGA："type-bound public access is not a wildcard or a regex expression"（綁定型別的公開存取並不是萬用字元或正規表示式）；`user:*` 只能出現在使用者的位置，不能作為物件（`document:*`），也不能出現在使用者集合中（`org:*#member`）（[公開存取指南](https://openfga.dev/docs/modeling/public-access)）。
+
+## 多重限制（交集）
+
+問題：只有同時也是文件所屬團隊成員的擁有者，才能發布該文件。Anne 能發布 readme 嗎？交集要求使用者屬於每一個子節點。
+
+這個變化版本加入一個從 readme 指向 `group:eng` 的 `team` 關係。元組：
+
+```text
+doc:readme#owner@user:anne
+doc:readme#team@group:eng#...
+group:eng#member@user:beto
+```
+
+與排除一樣，論文提到交集（§2.3.1），但沒有展示其寫法。這個區塊照抄圖 1 的形狀；`intersection` 關鍵字是假設：
+
+```text
+relation { name: "team" }
+
+relation {
+ name: "publish"
+ userset_rewrite {
+  intersection {
+   child { computed_userset { relation: "owner" } }
+   child { tuple_to_userset {
+     tupleset { relation: "team" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # the doc's team
+       relation: "member"
+   } } }
+} } }
+```
+
+SpiceDB 以 `&` 表示交集：
+
+```text
+definition doc {
+    relation owner: user
+    relation team: group
+    permission publish = owner & team->member
+}
+```
+
+*SpiceDB schema；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+OpenFGA 寫成 `and`；其[多重限制指南](https://openfga.dev/docs/modeling/multiple-restrictions)建立了相同的形狀：`can_delete` 是同時也是所屬組織成員的撰寫者。
+
+```text
+type doc
+  relations
+    define owner: [user]
+    define team: [group]
+    define can_publish: owner and member from team
+```
+
+*OpenFGA DSL；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+Anne 為什麼被拒絕？
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="交集：Anne 是擁有者，但不在團隊中"
+  desc="user:anne 有一條被標出的 owner 邊指向 doc:readme。group:eng 有一條 team 邊指向 doc:readme。user:beto 有一條 member 邊指向 group:eng。一則被標出的註記說明不存在元組 group:eng#member@user:anne。交集的一個子節點成立，另一個不成立，因此答案是否。"
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 185, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 185, label: "group:eng", kind: "object", mono: true },
+    { id: "doc", x: 520, y: 115, label: "doc:readme", kind: "object", mono: true, on: true },
+    { id: "miss", x: 230, y: 112, label: "沒有元組\ngroup:eng#member@user:anne", kind: "note", on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "team" },
+  ]}
+  caption="publish = owner ∩ (team → member)。Anne 屬於第一個集合，不屬於第二個，因此答案是否。Beto 屬於第二個，不屬於第一個。"
+/>
+
+請注意，決定性的事實是一筆不存在的元組。加入 `group:eng#member@user:anne` 就能讓答案變成是，而不必動到文件。
+
+## 自訂角色
+
+問題：管理者在執行期間定義一個新角色「reviewer」，並授予它對 readme 的檢視權。持有該角色的 Chen 能檢視它嗎？schema 中固定的角色（owner、editor）只有在 schema 改變時才會改變；自訂角色則是資料。
+
+OpenFGA 的[自訂角色指南](https://openfga.dev/docs/modeling/custom-roles)將它們建模為獨立的型別，"because our roles are going to be dynamic and might change frequently"（因為我們的角色會是動態的，而且可能經常改變）：使用者以 `assignee` 與某個 `role` 物件建立關係，而角色的 assignee 以使用者集合的形式被授予關係（`role:media-manager#assignee` 作為 `asset-category:logos` 的 `editor`）。AuthZed 的[使用者自訂角色文章](https://authzed.com/blog/user-defined-roles)（2021-10-27）以 `role#member` 做了同樣的事。
+
+元組（一個變化版本：Chen 持有一個角色，而不是資料夾的授權）：
+
+```text
+role:reviewer#assignee@user:chen
+doc:readme#viewer@role:reviewer#assignee
+doc:readme#editor@role:maintainer#assignee
+```
+
+在論文中，這就是換了命名空間名稱的群組模式：`role` 是一個只有一個普通關係的命名空間，而 readme 的 `viewer` 儲存一個指向它的使用者集合。規則不需要任何變更：
+
+```text
+name: "role"
+
+relation { name: "assignee" }
+```
+
+```text
+definition role {
+    relation assignee: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member | role#assignee
+    relation viewer: user | group#member | role#assignee
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*SpiceDB schema；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+```text
+type role
+  relations
+    define assignee: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member, role#assignee]
+    define viewer: [user, group#member, role#assignee]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA DSL；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+執行期間建立的角色如何授予存取權？
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="自訂角色：Chen 透過 reviewer 角色檢視"
+  desc="user:chen 有一條被標出的 assignee 邊指向虛線的使用者集合 role:reviewer#assignee，後者有一條被標出的 viewer 邊指向 doc:readme。第二個虛線使用者集合 role:maintainer#assignee 有一條 editor 邊指向 doc:readme，且沒有成員。"
+  nodes={[
+    { id: "chen", x: 80, y: 70, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "rev", x: 300, y: 70, label: "role:reviewer#assignee", kind: "group", mono: true, on: true },
+    { id: "mnt", x: 300, y: 180, label: "role:maintainer#assignee", kind: "group", mono: true },
+    { id: "doc", x: 525, y: 125, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "rev", label: "assignee", on: true },
+    { from: "rev", to: "doc", label: "viewer", on: true },
+    { from: "mnt", to: "doc", label: "editor" },
+  ]}
+  caption="建立角色、指派 Chen，以及在 readme 上授予該角色，是三次元組寫入；schema 不變。"
+/>
+
+請注意，角色的授權是逐物件的。若一個角色應代表「可以在此儲存庫的任何地方建立與刪除 issue」，其權限集合也必須以資料的形式儲存。AuthZed 的[存取控制管理頁面](https://authzed.com/docs/spicedb/modeling/access-control-management)展示了這種更細的模式：一個 `role` 定義，每項權限各有一個萬用字元關係（`relation create_issue: user:*`），一個將角色與被授予者綁在一起的 `role_grant` 物件，以及 `permission create_issue = role->create_issue & grantee` 形式的權限。代價是每項權限都需要一個 schema 關係，這又帶回了上面的命名問題。
+
+## 所有權移轉
+
+問題：Anne 將 readme 移交給 Beto。移交之後，Beto 必須是擁有者，而 Anne 必須不是，且不能有兩者同時是或同時不是的時刻。這不是 schema 模式：三種記法都無法宣告「恰好一位擁有者」，而此處引用的 schema 文件也沒有展示任何基數限制。這是一種寫入模式。
+
+元組變更：
+
+```text
+delete  doc:readme#owner@user:anne
+write   doc:readme#owner@user:beto
+```
+
+論文的 Write API 涵蓋了這種情況。客戶端 "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control"（也可以透過採用樂觀並行控制的讀取—修改—寫入流程，修改與某個物件相關的所有元組）：讀取物件的元組，包括一個逐物件的「鎖定」元組，將寫入 "along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read"（連同對鎖定元組的一次 touch …… 一併傳送，條件是唯有在鎖定元組自讀取以來未被修改的情況下，這些寫入才會被提交），否則重試（§2.4.2）。鎖定元組可防止兩次同時進行的移轉都成功。
+
+- **SpiceDB。** `WriteRelationships` "atomically writes and/or deletes a set of specified relationships"（以原子方式寫入及／或刪除一組指定的關係），且 "if any preconditions fail, the entire transaction will be reverted"（若任何前置條件失敗，整筆交易都會被還原）（[`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)）。對 `doc:readme#owner@user:anne` 設定 `MUST_MATCH` 前置條件，就扮演了論文中鎖定元組的角色：若 Anne 已不再是擁有者，移轉便會失敗。
+- **OpenFGA。** "You can combine both writes and deletes in a single transactional API request"（你可以在單一交易式 API 請求中同時組合寫入與刪除），且 "all operations in the request will either succeed together or fail together"（請求中的所有操作會一起成功或一起失敗），每個請求最多 100 筆元組（[更新元組](https://openfga.dev/docs/getting-started/update-tuples)）。同一頁指出，寫入已存在的元組 "would normally cause the whole request to fail"（通常會導致整個請求失敗），並為 "deleting tuples that might not exist"（刪除可能不存在的元組）提供 `on_missing: "ignore"`（OpenFGA v1.10.0 及之後）。這意味著預設情況下，刪除不存在的元組會使請求失敗，這會讓刪除操作扮演鎖定元組的角色；但該頁並未直接陳述此預設值，本頁也未實際執行。
+
+有什麼改變？
+
+<Frames min="16rem">
+
+<Graph
+  width={320}
+  height={150}
+  title="移轉前的所有權"
+  desc="user:anne 有一條被標出的 owner 邊指向 doc:readme。user:beto 沒有邊。"
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner", on: true }]}
+  caption="之前：一筆 owner 元組，屬於 Anne。"
+/>
+
+<Graph
+  width={320}
+  height={150}
+  title="移轉後的所有權"
+  desc="user:beto 有一條被標出的 owner 邊指向 doc:readme。user:anne 沒有邊。"
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "beto", to: "doc", label: "owner", on: true }]}
+  caption="之後：一筆 owner 元組，屬於 Beto。兩項變更一起提交，否則都不提交。"
+/>
+
+</Frames>
+
+請注意，所有由所有權衍生的權限（`edit`、`view`）都隨著這一筆元組移動。Anne 仍保有她透過其他路徑取得的存取權，例如直接的 `viewer` 元組或群組；若移轉應移除 Anne 的所有存取權，也必須刪除那些元組。
+
+<Callout kind="paper" title="論文中的對應">
+
+元組與使用者集合：§2.1。改寫規則、三種葉節點與運算子：§2.3.1 與圖 1。帶鎖定元組的 Write：§2.4.2。含聯集、交集與排除的 Expand 使用者集合樹：§2.4.5。論文表示支援的模式（權限、使用者、群組、繼承、RBAC）：§5。術語彙整於[術語表](../glossary/)。
+
+</Callout>
+
+## 資料來源
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- OpenFGA modeling guides: [roles and permissions](https://openfga.dev/docs/modeling/roles-and-permissions), [parent-child](https://openfga.dev/docs/modeling/parent-child), [blocklists](https://openfga.dev/docs/modeling/blocklists), [public access](https://openfga.dev/docs/modeling/public-access), [multiple restrictions](https://openfga.dev/docs/modeling/multiple-restrictions), [custom roles](https://openfga.dev/docs/modeling/custom-roles)
+- OpenFGA, [configuration language](https://openfga.dev/docs/configuration-language)
+- OpenFGA, [update tuples](https://openfga.dev/docs/getting-started/update-tuples)
+- AuthZed, [SpiceDB schema docs](https://authzed.com/docs/spicedb/concepts/schema)
+- AuthZed, [access-control management](https://authzed.com/docs/spicedb/modeling/access-control-management)
+- AuthZed, [User Defined Roles](https://authzed.com/blog/user-defined-roles), 2021-10-27
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- Greg Sarjeant, [Google Zanzibar Isn't Flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible), Oso, 2024-11-01 (updated 2025-11-07)

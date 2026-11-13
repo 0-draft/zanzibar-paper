@@ -1,0 +1,75 @@
+---
+title: "Verbreitete Missverständnisse"
+description: "Zwölf Dinge, die über Zanzibar oft falsch verstanden werden, von „es macht den Login“ bis „man braucht Atomuhren“, jeweils korrigiert mit dem Abschnitt des Papers oder einer Primärquelle."
+section: guide
+part: reference
+order: 15
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.2", "2.3.1", "2.4.4", "2.4.5", "3", "3.1.1", "3.2.3", "3.2.4", "3.2.5", "4.1", "4.2", "4.3", "5"]
+---
+
+Die folgenden Missverständnisse stammen aus öffentlichen Diskussionen über das Paper: Threads auf Hacker News, Blogbeiträge und Herstellermaterial, jeweils verlinkt, wo sie auftauchen. Jede Überschrift nennt das Missverständnis; der Text darunter ist die Korrektur. Begriffe werden im [Glossar](../glossary/) erklärt.
+
+## Zanzibar übernimmt den Login
+
+Tut es nicht. Das Paper stellt "a system for storing permissions and performing authorization checks based on the stored permissions" (§1) vor (ein System zum Speichern von Berechtigungen und zum Durchführen von Autorisierungsprüfungen auf Grundlage der gespeicherten Berechtigungen). Die Identität kommt bereits festgestellt an: Ein Check nennt "a putative user, often represented by an authentication token" (§2.4.4) (einen mutmaßlichen Benutzer, oft dargestellt durch ein Authentifizierungstoken), also hat ein anderes System den Benutzer zuvor authentifiziert. Im HN-Thread von 2019 zum Paper kam dieselbe Korrektur auf: "This isn't a login service, this is an ACL service" (Das ist kein Login-Dienst, das ist ein ACL-Dienst) ([HN 20132520](https://news.ycombinator.com/item?id=20132520)).
+
+## Man kann Zanzibar bei Google kaufen
+
+Zanzibar selbst kann man nicht kaufen. Das Paper beschreibt ein internes System, das von Google-Diensten genutzt wird, "including Calendar, Cloud, Drive, Maps, Photos, and YouTube" (§1) (darunter Calendar, Cloud, Drive, Maps, Photos und YouTube), und in einem HN-Thread von 2023 merkte ein Kommentator an, dass "Google doesn't actually offer Zanzibar as a product/service (in GCP or otherwise) to customers" (Google Zanzibar Kunden tatsächlich nicht als Produkt oder Dienst anbietet, weder in GCP noch anderswo) ([HN 36470943](https://news.ycombinator.com/item?id=36470943)). Kunden von Google Cloud nutzen es indirekt: "Google's Cloud IAM system is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (§5) (Das Cloud-IAM-System von Google ist als Schicht auf dem ACL-Speicher- und Auswertungssystem von Zanzibar gebaut). Was andere verkaufen oder veröffentlichen, sind Neuimplementierungen, verglichen unter [Systeme im Zanzibar-Stil im Vergleich](../../ecosystem/compare/).
+
+## „Von Zanzibar inspiriert“ heißt, dass das ganze Paper implementiert ist
+
+Meist heißt es das Datenmodell und die Form der API. Tom MacWright trennt das Modell (Objekte, Usersets, Umschreibregeln) von der Maschinerie für Konsistenz und Skalierung und merkt an, dass zookies, "very clearly important to Google" (für Google ganz offensichtlich wichtig), in manchen Produkten keine Entsprechung haben ([Reading Zanzibar](https://macwright.com/2025/05/02/reading-zanzibar.html)). Leopard (§3.2.4) ist ein weiterer Teil, den Open-Source-Projekte meist weglassen; der Leopard-ähnliche Index von SpiceDB ist Teil des kommerziellen Angebots von AuthZed ([SpiceDB-Seite](../../ecosystem/spicedb/)). Prüfen Sie jedes Produkt Aspekt für Aspekt gegen das Paper, bevor Sie sich auf eine Garantie verlassen.
+
+## 99,999 % Verfügbarkeit heißt etwa fünf Minuten Ausfall pro Jahr
+
+Das Paper misst keine Uhrzeit. "We define availability as the fraction of 'qualified' RPCs the service answers successfully within latency thresholds: 5 seconds for a Safe request, and 15 seconds for a Recent request" (§4.3) (Wir definieren Verfügbarkeit als den Anteil „qualifizierter“ RPCs, die der Dienst innerhalb von Latenzschwellen erfolgreich beantwortet: 5 Sekunden für eine Safe-Anfrage und 15 Sekunden für eine Recent-Anfrage). Gemessen wird sie, indem Prober Stichproben von Anfragen wiederholen und "success ratios over 90-day windows averaged across clusters" (Erfolgsquoten über 90-Tage-Fenster, gemittelt über die Cluster) aggregiert werden; in Zeit ausgedrückt sagt das Paper: "for every quarter, Zanzibar has less than 2 minutes of global downtime and fewer than 13 minutes when the global error ratio exceeds 10%" (§4.3) (in jedem Quartal hat Zanzibar weniger als 2 Minuten globalen Ausfall und weniger als 13 Minuten, in denen die globale Fehlerquote 10 % übersteigt). Im HN-Thread von 2019 wurde ein Leser, der die Zahl in Minuten pro Jahr umgerechnet hatte, mit der Definition aus §4.3 korrigiert ([HN 20132520](https://news.ycombinator.com/item?id=20132520)).
+
+## Das Paper berichtet nur die p95-Latenz
+
+Die Zusammenfassung nennt nur das 95. Perzentil, aber die Auswertung geht weiter. Tabelle 2 gibt das 50., 95. und 99. Perzentil für Check, Read, Expand und Write an; für Safe-Prüfungen sind es 3,0, 9,46 und 15,0 ms (§4.2). Abbildung 4 ergänzt das 99,9.: "At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively" (§4.2) (Im 50., 95., 99. und 99,9. Perzentil erreicht sie Spitzen von etwa 3, 11, 20 bzw. 93 ms). Die Recent-Zeilen sind im Tail viel langsamer (60,0 ms im p95 für Check), weshalb das Paper die beiden Arten getrennt berichtet (§4.1).
+
+## Die Reihenfolge der ACL-Einträge zählt, und eine Verweigerung ist ein negativer Eintrag
+
+Beides ist nicht Teil des Modells. Ein Tupel wird durch ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩ und ⟨*user*⟩ identifiziert (§2.1), also bilden die Tupel eines Objekts eine Menge ohne Position. Eine Verweigerung wird in der Namespace-Konfiguration ausgedrückt: Umschreibregeln kombinieren Usersets "by operations such as union, intersection, and exclusion" (§2.3.1) (durch Operationen wie Vereinigung, Schnittmenge und Ausschluss), und ein Ausschluss entfernt eine Menge, zum Beispiel Betrachter minus eine Sperrliste. Was dagegen zählt, ist die Reihenfolge in der *Zeit*: "ACL checks must respect the order in which users modify ACLs and object contents" (§2.2) (ACL-Prüfungen müssen die Reihenfolge respektieren, in der Benutzer ACLs und Objektinhalte ändern); siehe [Konsistenz, Snapshots und zookies](../consistency/).
+
+## Check in einer Schleife oder ein Aufruf von Expand ergibt eine Liste
+
+Keines von beiden gibt „jedes Dokument, das Anne sehen kann“ zurück. Expand geht in die andere Richtung, von einem Objekt zu seinen Benutzern, und gibt einen *Userset-Baum* zurück, dessen Blätter "usersets pointing to other ⟨*object#relation*⟩ pairs" (§2.4.5) (Usersets, die auf andere Paare ⟨*object#relation*⟩ zeigen) sein können, keine flache Liste. Eine Schleife von Checks filtert nur Kandidaten, die man schon hat; der Suchanwendungsfall des Papers braucht "tens to hundreds of checks" (Dutzende bis Hunderte von Prüfungen) pro Seite (§1). Produkte haben Listen-APIs hinzugefügt, etwa LookupResources von SpiceDB und ListObjects von OpenFGA, deren Kosten laut OpenFGA "vary drastically depending on the model complexity" (je nach Komplexität des Modells drastisch schwanken) können ([OpenFGA-Dokumentation](https://openfga.dev/docs/getting-started/perform-list-objects)); AuthZed beschreibt Ansätze mit Lookup, gebündelter Prüfung und Denormalisierung ([AuthZed-Dokumentation](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)).
+
+## Man sollte jedes Paar aus Benutzer und Berechtigung als Tupel speichern
+
+Genau das soll das Modell vermeiden. Ein abgeleitetes Tupel pro Objekt zu speichern, "would be wasteful and make it hard to make modifications across all objects" (§2.3.1) (wäre verschwenderisch und würde Änderungen über alle Objekte hinweg erschweren); Umschreibregeln leiten es stattdessen ab, und ein Userset lässt ACLs "refer to groups and thus supports representing nested group membership" (§2.1) (auf Gruppen verweisen und unterstützt damit die Darstellung verschachtelter Gruppenmitgliedschaften). Zanzibar "avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)" (§3.2.5) (vermeidet Denormalisierung im Speicher und stützt sich nur auf normalisierte Daten (mit Ausnahme der in §3.2.4 beschriebenen Fälle)), wobei die Ausnahme der Gruppenindex [Leopard](../leopard/) ist. In einem HN-Thread von 2025 machte ein Kommentator denselben Punkt aus Erfahrung: Wer Benutzerberechtigungen aufzählt, bekommt eine kombinatorische Explosion, also sollte man an Gruppen vergeben ([HN 45661547](https://news.ycombinator.com/item?id=45661547)).
+
+## Man braucht eine Graphdatenbank
+
+Zanzibar selbst verwendet keine: "Zanzibar stores ACLs and their metadata in Spanner databases" (Zanzibar speichert ACLs und ihre Metadaten in Spanner-Datenbanken), mit Tupeln in Zeilen mit dem Schlüssel "(shard ID, object ID, relation, user, commit timestamp)" (§3, §3.1.1). Der Graph wird zur Abfragezeit von den Servern durchlaufen, nicht von der Speicher-Engine. Auch Open-Source-Implementierungen laufen auf relationalen Speichern: SpiceDB unterstützt CockroachDB, Cloud Spanner, PostgreSQL und MySQL ([SpiceDB-Datastores](https://authzed.com/docs/spicedb/concepts/datastores)), und OpenFGA unterstützt neben einem In-Memory-Speicher Postgres, MySQL und SQLite ([OpenFGA-Konfiguration](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)).
+
+## Es ist dasselbe wie AWS IAM
+
+Sie teilen eine Philosophie, aber nicht das Gruppenmodell. Das Paper ordnet die IAM-Systeme von Amazon, Google und Microsoft derselben Familie zu: "What all of these systems have in common is unified ACL storage and an RPC-based API, a philosophy also core to Zanzibar's design" (§5) (Allen diesen Systemen gemeinsam sind einheitliche ACL-Speicherung und eine RPC-basierte API, eine Philosophie, die auch für das Design von Zanzibar zentral ist). In AWS IAM aber gilt: "User groups can't be nested; they can contain only users, not other IAM groups" (Benutzergruppen können nicht verschachtelt werden; sie können nur Benutzer enthalten, keine anderen IAM-Gruppen) ([AWS-IAM-Dokumentation](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html)), während Zanzibar-Usersets verschachtelt sind und zur Prüfzeit rekursiv verfolgt werden (§2.1, §3.2.3). AWS IAM ist außerdem eine Richtliniensprache, die an Identitäten und Ressourcen hängt, kein Speicher für Beziehungen.
+
+## Zanzibar kann überhaupt kein ABAC, oder kann ABAC nativ
+
+Beides stimmt nicht. Das Paper hat keine Attributbedingungen: Seine Relationskonfigurationen kombinieren Usersets mit Vereinigung, Schnittmenge und Ausschluss (§2.3.1), und ein Tupel hat kein Feld für Kontext (§2.1). Produkte haben Bedingungen als Erweiterungen hinzugefügt: SpiceDB-Caveats in CEL, OpenFGA-Conditions, Permify-Attribute und -Regeln (siehe [ACL, RBAC, ABAC, ReBAC](../access-control-models/)). Im HN-Thread von 2021 zu Osos „Why Authorization Is Hard“ bestritt ein Gründer von AuthZed die Behauptung, ABAC lasse sich mit ReBAC-Systemen nicht umsetzen, und der Autor des Artikels stimmte zu, dass sich ein System im Zanzibar-Stil mit einer Policy-Engine kombinieren lässt ([HN 28543457](https://news.ycombinator.com/item?id=28543457)).
+
+## Man braucht TrueTime oder Atomuhren
+
+Man braucht eine Möglichkeit, Schreibvorgänge zu ordnen und konsistente Snapshots zu lesen; TrueTime ist die Art, wie Google eine bekam. Das Paper "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness" (§5) (verlässt sich auf sein zugrunde liegendes Datenbanksystem Spanner, um sowohl externe Konsistenz als auch Snapshot-Lesevorgänge mit begrenzter Veraltung zu bieten). AuthZed beschreibt, wie SpiceDB dieselbe Ordnung anderswo erreicht: Auf CockroachDB, das externe Konsistenz nur für sich überschneidende Schlüssel bietet, sorgt seine Standardstrategie dafür, dass "all relationship writes touch the same row" (alle Beziehungs-Schreibvorgänge dieselbe Zeile berühren); PostgreSQL bietet externe Konsistenz direkt, braucht aber zusätzlich Snapshot-Lesevorgänge ([AuthZed-Blog, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). Ob ein Produkt die „New Enemy“-Garantie erhält, hängt von diesen Details ab, nicht von der Uhrenhardware; siehe [Konsistenz, Snapshots und zookies](../consistency/).
+
+## Quellen
+
+
+- Zanzibar paper, §1, §2.1, §2.2, §2.3.1, §2.4.4, §2.4.5, §3, §3.1.1, §3.2.3, §3.2.4, §3.2.5, §4.1, §4.2, §4.3, §5 (this site's transcription)
+- Hacker News, "Zanzibar: Consistent, Global Authorization System" (2019-06-08): [news.ycombinator.com/item?id=20132520](https://news.ycombinator.com/item?id=20132520)
+- Hacker News, "Why Google Zanzibar shines at building authorization" (2023-06-25): [news.ycombinator.com/item?id=36470943](https://news.ycombinator.com/item?id=36470943)
+- Hacker News, "Why Authorization Is Hard" (2021-09-15): [news.ycombinator.com/item?id=28543457](https://news.ycombinator.com/item?id=28543457)
+- Hacker News, "We rewrote OpenFGA in pure Postgres" (2025-10-21): [news.ycombinator.com/item?id=45661547](https://news.ycombinator.com/item?id=45661547)
+- Tom MacWright, Reading Zanzibar (2025-05-02): [macwright.com/2025/05/02/reading-zanzibar.html](https://macwright.com/2025/05/02/reading-zanzibar.html)
+- OpenFGA, Perform a List Objects call: [openfga.dev/docs/getting-started/perform-list-objects](https://openfga.dev/docs/getting-started/perform-list-objects)
+- AuthZed, Protecting a List Endpoint: [authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)
+- AuthZed, SpiceDB datastores: [authzed.com/docs/spicedb/concepts/datastores](https://authzed.com/docs/spicedb/concepts/datastores)
+- OpenFGA, Configure OpenFGA: [openfga.dev/docs/getting-started/setup-openfga/configure-openfga](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)
+- AWS, IAM user groups: [docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html)
+- AuthZed, The One Crucial Difference Between Spanner and CockroachDB (2021-10-14): [authzed.com/blog/prevent-newenemy-cockroachdb](https://authzed.com/blog/prevent-newenemy-cockroachdb)

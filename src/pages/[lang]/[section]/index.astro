@@ -1,0 +1,107 @@
+---
+// Index of a section in one language: guides, or the ecosystem directory.
+import LangMenu from "../../../components/LangMenu.astro";
+import SiteNav from "../../../components/SiteNav.astro";
+import ViewMenu from "../../../components/ViewMenu.astro";
+import { LANGS } from "../../../i18n/langs.ts";
+import { ui } from "../../../i18n/ui.ts";
+import Base from "../../../layouts/Base.astro";
+import { allEntries, inSection, pathOf, type Section, splitId } from "../../../lib/guides.ts";
+import { withBase } from "../../../lib/paths.ts";
+
+export async function getStaticPaths() {
+  const entries = await allEntries();
+  const sections: Section[] = ["guides", "ecosystem"];
+  return LANGS.flatMap((l) =>
+    sections
+      .filter((section) => inSection(entries, l.code, section).length > 0)
+      .map((section) => ({ params: { lang: l.code, section } })),
+  );
+}
+
+const { lang, section } = Astro.params as { lang: string; section: Section };
+const t = ui(lang);
+const entries = await allEntries();
+const list = inSection(entries, lang, section);
+const title = section === "guides" ? t.navGuides : t.navEcosystem;
+const lead = section === "guides" ? t.guidesLead : t.ecosystemLead;
+const langs = LANGS.filter((l) => inSection(entries, l.code, section).length > 0);
+// Guides are grouped into parts; the ecosystem is one list.
+const PARTS = [
+  ["background", t.partBackground],
+  ["mechanisms", t.partMechanisms],
+  ["practice", t.partPractice],
+  ["reference", t.partReference],
+] as const;
+const groups =
+  section === "guides"
+    ? PARTS.map(([key, label]) => ({ label, items: list.filter((e) => (e.data.part ?? "mechanisms") === key) })).filter(
+        (g) => g.items.length > 0,
+      )
+    : [{ label: "", items: list }];
+---
+
+<Base
+  lang={lang}
+  title={`${title} | zanzibar-paper`}
+  description={lead}
+  path={pathOf(lang, section)}
+  alternates={langs.map((l) => ({ code: l.code, path: pathOf(l.code, section) }))}
+>
+  <a class="skip" href="#main">{t.skip}</a>
+  <header class="bar">
+    <a class="brand" href={withBase()} lang="en">
+      <span class="b-long">{section}<span class="b-p">:</span></span>index<span class="b-p">@</span><span class="b-user"
+        >{lang}</span
+      >
+    </a>
+    <SiteNav lang={lang} current={section} />
+    <nav class="bar-tools" aria-label={t.view}>
+      <LangMenu current={lang} label={t.language} class="pop" langs={langs} pathFor={(c) => pathOf(c, section)} />
+      <ViewMenu t={t} mode="prose" />
+    </nav>
+  </header>
+  <div class="shell">
+    <main id="main" class="guide guide-index" lang={lang}>
+      <SiteNav lang={lang} current={section} place="top" />
+      <header class="guide-head">
+        <h1>{title}</h1>
+        <p class="lede">{lead}</p>
+      </header>
+      {
+        groups.map((g) => (
+          <section class="cards-part">
+            {g.label && <h2>{g.label}</h2>}
+            <ol class:list={["cards", section === "ecosystem" && "cards-systems"]}>
+              {g.items.map((e) => (
+                <li>
+                  <a href={withBase(pathOf(lang, section, splitId(e.id).slug))}>
+                    {e.data.product && (
+                      <span class="mark" lang="en" aria-hidden="true">
+                        {e.data.product.name}
+                      </span>
+                    )}
+                    <span class="card-title">{e.data.title}</span>
+                    <span class="card-desc">{e.data.description}</span>
+                    {e.data.product && (
+                      <span class="card-meta" lang="en">
+                        <span>{e.data.product.license}</span>
+                        <span>{e.data.product.language}</span>
+                      </span>
+                    )}
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </section>
+        ))
+      }
+    </main>
+    <footer class="foot">
+      <p class="notice">{t.guideNote}</p>
+    </footer>
+  </div>
+  <script>
+    import "../../../scripts/guide.ts";
+  </script>
+</Base>

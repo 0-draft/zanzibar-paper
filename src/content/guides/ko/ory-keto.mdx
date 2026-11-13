@@ -1,0 +1,220 @@
+---
+title: "Ory Keto"
+description: "2021년에 Zanzibar 모델로 다시 만들어진 Ory의 오픈 소스 권한 서버로, TypeScript 부분 집합으로 설정하며, 아직 구현되지 않은 snaptoken 필드를 가지고 있다."
+section: ecosystem
+order: 4
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4"]
+product:
+  name: Ory Keto
+  maintainer: Ory Corp
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/ory/keto
+  docs: https://www.ory.com/docs/keto
+  status: 활발함, 릴리스 주기가 느려짐
+  latest: v26.2.0 (2026-03-20)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+Ory Keto는 Ory Corp가 Go로 작성한 권한 서버다. README는 이를 "an open source implementation of 'Zanzibar: Google's Consistent, Global Authorization System'"('Zanzibar: Google의 일관된 글로벌 인가 시스템'의 오픈 소스 구현)이라고 부른다([README](https://github.com/ory/keto)). Ory는 이를 관리형 서비스로도 운영한다. Ory Network에서 "Ory Permissions is powered by the open source Ory Keto"(Ory Permissions는 오픈 소스 Ory Keto로 작동한다)(같은 README).
+
+Keto는 처음부터 Zanzibar 시스템이었던 것은 아니다. Zanzibar 설계는 2021-04-07의 v0.6.0-alpha.1에서 들어왔다. 릴리스 노트는 이전의 Keto가 `legacy-0.5` 브랜치로 옮겨 갔으며 "the architectures are vastly different"(아키텍처가 크게 다르다)라고 말한다([릴리스 노트](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)). Ory Permission Language로 작성하는 유저셋 재작성은 2022-09-27의 v0.10.0-alpha.0에서 뒤따랐다([릴리스 노트](https://github.com/ory/keto/releases/tag/v0.10.0-alpha.0)).
+
+## 논문과 Keto 나란히 보기
+
+| 논문 | Ory Keto |
+| --- | --- |
+| 네임스페이스 설정 (§2.3) | TypeScript의 부분 집합인 Ory Permission Language(OPL)에서 `implements Namespace`하는 `class`([OPL reference](https://www.ory.com/docs/keto/reference/ory-permission-language)) |
+| 관계 튜플 `object#relation@user` (§2.1) | `namespace:object#relation@subject`. 예: `Group:eng#members@User:beto`([relation tuples](https://www.ory.com/docs/keto/concepts/relation-tuples), [parser](https://github.com/ory/keto/blob/master/ketoapi/enc_string.go)) |
+| `_this` | `this.related.viewers.includes(ctx.subject)` |
+| `computed_userset` | `this.permits.edit(ctx)`: "A permission can call another permission defined on the same namespace"(권한은 같은 네임스페이스에 정의된 다른 권한을 호출할 수 있다) |
+| `tuple_to_userset` | `this.related.parents.traverse((p) => p.permits.view(ctx))` |
+| 합집합, 교집합, 차집합 | `\|\|`, `&&`, `!` |
+| zookie (§2.2, §2.4) | API에 `snaptoken` 필드가 있지만, 각각 "not implemented yet and has no effect"(아직 구현되지 않았으며 효과가 없다)([check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)) |
+| Check (§2.4.4) | `CheckService.Check`, `BatchCheck` |
+| Read (§2.4.1) | `ReadService.ListRelationTuples`([read_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/read_service.proto)) |
+| Write (§2.4.2) | `WriteService.TransactRelationTuples`, `DeleteRelationTuples`([write_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/write_service.proto)) |
+| Watch (§2.4.3) | API에 없음 |
+| Expand (§2.4.5) | `ExpandService.Expand`([expand_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/expand_service.proto)) |
+| Leopard (§3.2.4) | 문서화된 대응물 없음 |
+| Spanner (§3.1) | PostgreSQL, MySQL 또는 CockroachDB. SQLite는 개발용만([production guide](https://www.ory.com/docs/keto/guides/production)) |
+
+## OPL로 쓴 예제
+
+논문의 그림 1은 소유자를 편집자로, 편집자를 열람자로, 상위 폴더의 열람자를 문서의 열람자로 만든다(§2.3.1). OPL에서 각 네임스페이스는 클래스다. `related`는 관계와 그것이 받는 주체 타입을 선언하고, `permits`는 `ctx.subject`에 대해 참이나 거짓을 반환하는 함수를 담는다.
+
+```ts
+import { Namespace, SubjectSet, Context } from "@ory/keto-namespace-types"
+
+class User implements Namespace {}
+
+class Group implements Namespace {
+  related: {
+    members: User[]
+  }
+}
+
+class Folder implements Namespace {
+  related: {
+    viewers: (User | SubjectSet<Group, "members">)[]
+  }
+
+  permits = {
+    view: (ctx: Context): boolean => this.related.viewers.includes(ctx.subject),
+  }
+}
+
+class Doc implements Namespace {
+  related: {
+    parents: Folder[]
+    owners: User[]
+    editors: (User | SubjectSet<Group, "members">)[]
+    viewers: (User | SubjectSet<Group, "members">)[]
+  }
+
+  permits = {
+    edit: (ctx: Context): boolean =>
+      this.related.owners.includes(ctx.subject) ||
+      this.related.editors.includes(ctx.subject),
+
+    view: (ctx: Context): boolean =>
+      this.related.viewers.includes(ctx.subject) ||
+      this.permits.edit(ctx) ||
+      this.related.parents.traverse((p) => p.permits.view(ctx)),
+  }
+}
+```
+
+`SubjectSet<Group, "members">`는 "그룹의 멤버", 즉 논문의 유저셋을 나타내는 OPL 타입이다. 관계는 항상 배열인데, "an object can have many subjects"(객체는 많은 주체를 가질 수 있기) 때문이다([OPL reference](https://www.ory.com/docs/keto/reference/ory-permission-language)).
+
+<Callout title="문서와 대조했으며 실행하지 않음">
+이 설정은 2026-11-13 기준으로 문서화된 문법, 즉 [OPL reference](https://www.ory.com/docs/keto/reference/ory-permission-language), 저장소의 [OPL 명세](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md), 메인테이너들의 샘플 [namespaces.keto.ts](https://github.com/ory/keto/blob/master/contrib/rewrites-example/namespaces.keto.ts)를 따른다. Keto에 로드해 보지는 않았다.
+</Callout>
+
+다음은 예제의 튜플 다섯 개를 Keto의 텍스트 형식으로 쓴 것이다. `User:anne`처럼 쓴 주체는 관계가 비어 있는 주체 집합(subject set)이다. 메인테이너들의 샘플 튜플도 사용자를 이렇게 쓴다([tuples.json](https://github.com/ory/keto/blob/master/contrib/rewrites-example/relation-tuples/tuples.json)).
+
+```text
+Doc:readme#owners@User:anne
+Group:eng#members@User:beto
+Doc:readme#viewers@Group:eng#members
+Doc:readme#parents@Folder:A
+Folder:A#viewers@User:chen
+```
+
+어느 튜플과 어느 OPL 표현식이 각 사람의 readme 접근을 결정하는가?
+
+<Graph
+  width={600}
+  height={260}
+  title="Keto 관계 튜플로 쓴 예제"
+  desc="관계 튜플 다섯 개. User:anne은 Doc:readme의 owners에 있다. User:beto는 Group:eng의 members에 있다. Group:eng#members는 Doc:readme의 viewers에 있다. Folder:A는 Doc:readme의 parents에 있다. User:chen은 Folder:A의 viewers에 있다. Chen에서 Folder:A를 거치는 경로가 강조되어 있다. 이는 parents에 대한 traverse로 해석된다."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "User:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "User:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "User:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "Group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "Folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "Doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owners" },
+    { from: "beto", to: "eng", label: "members" },
+    { from: "eng", to: "doc", label: "viewers\n(#members)", dashed: true },
+    { from: "chen", to: "folder", label: "viewers", on: true },
+    { from: "folder", to: "doc", label: "parents", on: true },
+  ]}
+  caption="Anne: owners → permits.edit → view. Beto: 주체 집합 Group:eng#members. Chen: parents.traverse(p => p.permits.view). 점선: 주체 집합."
+/>
+
+저장되는 것은 화살표뿐이라는 점에 주목하라. 소유자를 열람자로, 폴더 열람자를 문서 열람자로 바꾸는 모든 단계는 `permits` 함수 안에 있으며 검사 시점에 실행된다.
+
+## 아키텍처
+
+Keto 배포의 어느 부분이 어느 부분과 통신하는가?
+
+<Graph
+  width={620}
+  height={270}
+  title="문서에 기술된 Ory Keto 배포"
+  desc="Keto 컨테이너는 각각 기본적으로 포트 4466에서 Read API를, 포트 4467에서 Write API를 제공한다. 외부에 노출된 클라이언트는 게이트웨이 뒤에서 Read API에만 도달한다. 여러분의 백엔드는 Write API를 사용한다. 모든 컨테이너는 SQL 데이터베이스 하나를 공유한다. 확장은 컨테이너를 추가하는 것이다."
+  nodes={[
+    { id: "pub", x: 95, y: 55, label: "API 게이트웨이를\n거치는 클라이언트", kind: "client" },
+    { id: "be", x: 95, y: 215, label: "여러분의 백엔드", kind: "client" },
+    { id: "k1", x: 330, y: 55, label: "Keto 컨테이너\nRead :4466 · Write :4467", kind: "server" },
+    { id: "k2", x: 330, y: 215, label: "Keto 컨테이너\nRead :4466 · Write :4467", kind: "server" },
+    { id: "db", x: 545, y: 135, label: "SQL 데이터베이스", kind: "store" },
+  ]}
+  edges={[
+    { from: "pub", to: "k1", label: "Read API만" },
+    { from: "be", to: "k2", label: "Write + Read" },
+    { from: "k1", to: "db", label: "SQL" },
+    { from: "k2", to: "db", label: "SQL" },
+  ]}
+  caption="노랑: Keto 컨테이너. 초록: 공유 데이터베이스. 파랑: 클라이언트. 컨테이너 사이의 통신은 문서화되어 있지 않다."
+/>
+
+- 각 컨테이너는 Read API(기본 포트 4466), Write API(4467), OPL 문법 API(4469)를 각각 HTTP와 gRPC로 제공한다([config schema](https://github.com/ory/keto/blob/master/embedx/config.schema.json)).
+- "A good practice is to not expose the Write API at all to the public internet"(Write API는 공용 인터넷에 전혀 노출하지 않는 것이 좋은 관행이다), 그리고 "The Read API should also be protected"(Read API도 보호해야 한다)([production guide](https://www.ory.com/docs/keto/guides/production)).
+- 확장: "There are no additional requirements for scaling when self-hosting Ory Keto, just spin up another container!"(Ory Keto를 자체 호스팅할 때 확장을 위한 추가 요구 사항은 없다. 컨테이너를 하나 더 띄우면 된다!)(같은 가이드). 컨테이너들은 데이터베이스를 공유한다.
+
+## 일관성
+
+논문의 zookie는 클라이언트가 "at a consistent snapshot no earlier than the given zookie"(주어진 zookie보다 이르지 않은 일관된 스냅샷에서) 검사를 요청할 수 있게 한다(§2.4.4). Keto의 protobuf API는 필드 이름에 같은 생각을 담고 있다. Check, Expand, ListRelationTuples의 `snaptoken`, TransactRelationTuples의 `snaptokens`, 그리고 content-change 검사를 위한 `latest` 플래그다. 이 필드들은 모두 "not implemented yet and has no effect"(아직 구현되지 않았으며 효과가 없다)로 문서화되어 있다([check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)).
+
+클라이언트가 오늘 보내는 토큰은 어떻게 되는가?
+
+<Swimlane
+  lanes={["여러분의 서비스", "Keto", "SQL 데이터베이스"]}
+  timeLabel="시간"
+  title="효과가 없는 snaptoken 필드"
+  desc="서비스가 TransactRelationTuples로 튜플을 쓰고, Keto는 이를 SQL 데이터베이스에 저장한다. 응답에는 구현되지 않은 snaptokens 필드가 있다. 나중에 서비스가 snaptoken과 함께 Check를 보내지만, Keto는 그 필드를 무시하므로 토큰은 최신성을 전혀 보장하지 않는다."
+  events={[
+    { lane: 0, t: 0, label: "Transact: Doc:readme\n열람자 추가", kind: "write" },
+    { lane: 2, t: 0, label: "행 기록됨", kind: "write" },
+    { lane: 1, t: 1, label: "snaptokens:\n미구현", kind: "note" },
+    { lane: 0, t: 2, label: "snaptoken과\n함께 Check", kind: "read" },
+    { lane: 1, t: 2, label: "필드에\n효과 없음", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [1, 1], to: [0, 1], dashed: true },
+    { from: [0, 2], to: [1, 2] },
+  ]}
+  caption="API의 모양은 논문의 zookie 프로토콜을 따르지만, 동작은 아직 없다."
+/>
+
+따라서 논문이 zookie 위에 쌓는 보장, 즉 콘텐츠를 “new enemy” 문제로부터 보호하는 것(§2.2)은 그 아래 SQL 데이터베이스가 어떻게 동작하는지에 달려 있다는 점에 주목하라. 여기서 확인한 Keto 문서 페이지들은 일관성에 대해 아무것도 말하지 않는다.
+
+## 논문과의 차이
+
+- **zookie 없음.** 필드는 있지만 동작은 없다(위 참조).
+- **Watch 없음.** v1alpha2 API에는 Check, Expand, Read, Write, Namespaces, Version 서비스와 별도의 OPL 문법 서비스(`opl/v1alpha1`)가 있지만 변경 스트림은 없다([proto 디렉터리](https://github.com/ory/keto/tree/master/proto/ory/keto)). 논문의 Watch는 보조 인덱스와 Leopard에 데이터를 공급한다(§2.4.3, §3.2.4).
+- **Leopard 없음.** 비정규화된 집합 인덱스는 문서화되어 있지 않다.
+- **프로그래밍 언어 문법.** OPL은 "users can get context help from their IDE"(사용자가 IDE에서 문맥 도움을 받을 수 있도록) TypeScript의 부분 집합이다([OPL 명세](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md)). 논문의 그림 1은 설정을 프로토콜 버퍼 스타일의 텍스트 문법으로 쓰며(§2.3.1), 논문은 그 형식의 이름을 밝히지 않는다.
+- **SQL 저장소.** Spanner(§3.1) 대신 공유 SQL 데이터베이스 하나.
+- **검사 깊이.** Check 요청은 `max_depth`, 즉 "The maximum depth to search for a relation"(관계를 탐색할 최대 깊이)을 담는다([check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)).
+
+## 현황
+
+- 첫 릴리스 2018-11-13(Zanzibar 이전 설계). Zanzibar 설계는 2021-04-07의 v0.6.0-alpha.1부터, OPL은 2022-09-27의 v0.10.0-alpha.0부터([releases](https://github.com/ory/keto/releases)).
+- 버전 번호 체계가 v0.14.0(2025-03-06) 이후 바뀌었다. 다음 릴리스는 v25.4.0(2025-11-07), 그다음 v26.2.0(2026-03-20)이며, 이것이 2026-11-13 기준 최신이다.
+- 기본 브랜치의 마지막 커밋: 2026-07-29. 스타 약 5.4k(GitHub API, 2026-11-13).
+
+## 출처
+
+- Ory Keto repository and README: [github.com/ory/keto](https://github.com/ory/keto)
+- Release v0.6.0-alpha.1: [github.com/ory/keto/releases/tag/v0.6.0-alpha.1](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)
+- Release v0.10.0-alpha.0: [github.com/ory/keto/releases/tag/v0.10.0-alpha.0](https://github.com/ory/keto/releases/tag/v0.10.0-alpha.0)
+- Ory Keto docs: [ory.com/docs/keto](https://www.ory.com/docs/keto)
+- OPL reference: [ory.com/docs/keto/reference/ory-permission-language](https://www.ory.com/docs/keto/reference/ory-permission-language)
+- OPL specification: [github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md)
+- Relation tuples: [ory.com/docs/keto/concepts/relation-tuples](https://www.ory.com/docs/keto/concepts/relation-tuples)
+- Tuple string format: [github.com/ory/keto/blob/master/ketoapi/enc_string.go](https://github.com/ory/keto/blob/master/ketoapi/enc_string.go)
+- Sample namespaces and tuples: [namespaces.keto.ts](https://github.com/ory/keto/blob/master/contrib/rewrites-example/namespaces.keto.ts), [tuples.json](https://github.com/ory/keto/blob/master/contrib/rewrites-example/relation-tuples/tuples.json)
+- gRPC services: [github.com/ory/keto/tree/master/proto/ory/keto](https://github.com/ory/keto/tree/master/proto/ory/keto)
+- Configuration schema: [github.com/ory/keto/blob/master/embedx/config.schema.json](https://github.com/ory/keto/blob/master/embedx/config.schema.json)
+- Production guide: [ory.com/docs/keto/guides/production](https://www.ory.com/docs/keto/guides/production)

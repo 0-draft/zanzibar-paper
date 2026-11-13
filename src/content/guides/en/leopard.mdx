@@ -1,0 +1,247 @@
+---
+title: Leopard, the group index
+description: How Zanzibar answers membership in deeply nested groups with one set intersection, and what that costs on every write.
+section: guide
+part: mechanisms
+order: 7
+checked: "2026-11-13"
+paper: ["3.2.4", "4.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar normally answers a Check by following tuples from the object to the user, one lookup at a time. For most data that is fast. For groups nested many levels deep, it is not, and Zanzibar hands those checks to Leopard, an index that precomputes the nesting.
+
+## Why nesting is slow
+
+Extend the running example. `group:eng` is now inside `group:product`, which is inside `group:all`, and the readme is shared with all of `group:all`. How many lookups does it take to learn that Beto can view the readme?
+
+<Graph
+  width={640}
+  height={380}
+  title="A nested group chain"
+  desc="user:beto is a member of group:eng, group:eng's members are members of group:product, group:product's members are members of group:all, and group:all's members are viewers of doc:readme. Checking Beto's access starts at doc:readme and reads one object per step: doc:readme, group:all, group:product and group:eng, four reads in sequence."
+  nodes={[
+    { id: "doc", x: 200, y: 30, label: "doc:readme", kind: "object", mono: true },
+    { id: "all", x: 200, y: 110, label: "group:all", kind: "group", mono: true },
+    { id: "prod", x: 200, y: 190, label: "group:product", kind: "group", mono: true },
+    { id: "eng", x: 200, y: 270, label: "group:eng", kind: "group", mono: true, on: true },
+    { id: "beto", x: 200, y: 350, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "n1", x: 470, y: 30, label: "1. read doc:readme: viewers are group:all", kind: "note" },
+    { id: "n2", x: 470, y: 110, label: "2. read group:all: includes group:product", kind: "note" },
+    { id: "n3", x: 470, y: 190, label: "3. read group:product: includes group:eng", kind: "note" },
+    { id: "n4", x: 470, y: 270, label: "4. read group:eng: Beto is a member", kind: "note" },
+  ]}
+  edges={[
+    { from: "all", to: "doc", label: "viewer" },
+    { from: "prod", to: "all", label: "member" },
+    { from: "eng", to: "prod", label: "member" },
+    { from: "beto", to: "eng", label: "member", on: true },
+  ]}
+  caption="Each step names the object for the next one, so the four reads cannot start together. Each object can also live on a different server (see the architecture page)."
+/>
+
+The tuples behind the figure are:
+
+```text
+doc:readme#viewer@group:all#member
+group:all#member@group:product#member
+group:product#member@group:eng#member
+group:eng#member@user:beto
+```
+
+Notice that step *n* cannot begin until step *n* − 1 has returned. The paper calls this pointer chasing and says it "can be expensive when indirect ACLs or groups are deep or wide" (§3.2.3). Wide hurts too: if `group:all` held a hundred child groups, step 2 would branch a hundred ways. So: "Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation." (§3.2.4)
+
+## Two kinds of set
+
+Leopard stores "a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID" (§3.2.4). Group membership uses two set types:
+
+- `GROUP2GROUP(s)`: the groups that are "*directly or indirectly*" sub-groups of the ancestor group *s*.
+- `MEMBER2GROUP(s)`: the groups in which user *s* is a "*direct*" member.
+
+What do the sets hold for the example?
+
+<Graph
+  width={640}
+  height={330}
+  title="GROUP2GROUP and MEMBER2GROUP for the example"
+  desc="GROUP2GROUP(group:all) is group:all, group:product and group:eng. GROUP2GROUP(group:product) is group:product and group:eng. GROUP2GROUP(group:eng) is group:eng. MEMBER2GROUP(user:beto) is group:eng. MEMBER2GROUP(user:anne) is empty."
+  nodes={[
+    { id: "g1", x: 125, y: 40, label: "GROUP2GROUP(group:all)", kind: "object", mono: true },
+    { id: "g2", x: 125, y: 100, label: "GROUP2GROUP(group:product)", kind: "object", mono: true },
+    { id: "g3", x: 125, y: 160, label: "GROUP2GROUP(group:eng)", kind: "object", mono: true },
+    { id: "m1", x: 125, y: 240, label: "MEMBER2GROUP(user:beto)", kind: "object", mono: true },
+    { id: "m2", x: 125, y: 300, label: "MEMBER2GROUP(user:anne)", kind: "object", mono: true },
+    { id: "s1", x: 455, w: 330, y: 40, label: "{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "s2", x: 455, w: 330, y: 100, label: "{ group:product, group:eng }", kind: "group", mono: true },
+    { id: "s3", x: 455, w: 330, y: 160, label: "{ group:eng }", kind: "group", mono: true },
+    { id: "s4", x: 455, w: 330, y: 240, label: "{ group:eng }", kind: "group", mono: true, on: true },
+    { id: "s5", x: 455, w: 330, y: 300, label: "{ }", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "g1", to: "s1" },
+    { from: "g2", to: "s2" },
+    { from: "g3", to: "s3" },
+    { from: "m1", to: "s4", on: true },
+    { from: "m2", to: "s5" },
+  ]}
+  caption="GROUP2GROUP is flattened: group:all lists group:eng even though eng sits two levels down. MEMBER2GROUP is not: it lists only direct memberships. Each group is drawn in its own GROUP2GROUP set; the paper does not say so, see the note below."
+/>
+
+Notice the asymmetry. All of the nesting is folded into `GROUP2GROUP`, so a user's side only has to record where the user was added directly. In the paper's words, "Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard" (§3.2.4).
+
+<Callout kind="warn" title="Does a group contain itself?">
+The paper defines `GROUP2GROUP(s)` as the groups that are sub-groups of *s*, and does not say whether *s* itself is in the set. For a direct member of *G* to pass the test below, *G* has to be in `GROUP2GROUP(G)` or be handled separately. The figures assume the first; this is an inference, not something the paper states.
+</Callout>
+
+## Membership is a non-empty intersection
+
+"To evaluate whether user *U* is a member of group *G*, we check whether" (§3.2.4)
+
+```text
+(MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
+```
+
+That is: is any group the user was added to directly also somewhere under *G*? What does that give for Beto and Anne against `group:all`?
+
+<Graph
+  width={640}
+  height={330}
+  title="Membership as an intersection"
+  desc="MEMBER2GROUP(user:beto), which is group:eng, intersected with GROUP2GROUP(group:all), which is group:all, group:product and group:eng, gives group:eng: not empty, so Beto is a member of group:all. MEMBER2GROUP(user:anne), which is empty, intersected with the same set gives the empty set, so Anne is not a member."
+  nodes={[
+    { id: "mb", x: 190, y: 50, label: "MEMBER2GROUP(user:beto)\n{ group:eng }", kind: "group", mono: true },
+    { id: "ga", x: 190, y: 130, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "rb", x: 530, y: 90, label: "∩ = { group:eng }\nnot empty: member", kind: "object", on: true },
+    { id: "ma", x: 190, y: 220, label: "MEMBER2GROUP(user:anne)\n{ }", kind: "group", mono: true },
+    { id: "gb", x: 190, y: 295, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "ra", x: 530, y: 257, label: "∩ = { }\nempty: not a member", kind: "object" },
+  ]}
+  edges={[
+    { from: "mb", to: "rb", on: true },
+    { from: "ga", to: "rb", on: true },
+    { from: "ma", to: "ra" },
+    { from: "gb", to: "ra" },
+  ]}
+  caption="Two lookups and one intersection, whatever the depth of the nesting. Beto is in; Anne is not."
+/>
+
+The four sequential reads of the first figure became two set lookups and one intersection. To finish the original question, Zanzibar still reads the readme's tuple that names `group:all#member`; the depth below that is what Leopard removes. The paper does not spell out how a Check is split between ordinary evaluation and Leopard queries, so this split is a reading of §3.2.4, not a quote.
+
+## Intersection on sorted lists
+
+How cheap is the intersection? "Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets. For example, evaluating the intersection between two sets, *A* and *B*, requires only O(min(|A|, |B|)) skip-list seeks." (§3.2.4)
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={520}
+  title="Intersecting a short sorted list with a long one"
+  desc="List A holds 17, 42 and 90. List B holds 3, 8, 17, 21, 30, 42, 55, 61, 77, 84, 93 and 99. For each element of A, one seek in B finds the first element that is not smaller: 17 finds 17, 42 finds 42, 90 lands on 93, which is not a match. The intersection is 17 and 42, found in three seeks."
+  nodes={[
+    { id: "la", x: 30, y: 50, label: "A", kind: "note" },
+    { id: "lb", x: 30, y: 200, label: "B", kind: "note" },
+    { id: "a1", x: 182, y: 50, label: "17", mono: true, w: 38, on: true },
+    { id: "a2", x: 320, y: 50, label: "42", mono: true, w: 38, on: true },
+    { id: "a3", x: 527, y: 50, label: "90", mono: true, w: 38 },
+    { id: "b0", x: 90, y: 200, label: "3", mono: true, w: 38 },
+    { id: "b1", x: 136, y: 200, label: "8", mono: true, w: 38 },
+    { id: "b2", x: 182, y: 200, label: "17", mono: true, w: 38, on: true },
+    { id: "b3", x: 228, y: 200, label: "21", mono: true, w: 38 },
+    { id: "b4", x: 274, y: 200, label: "30", mono: true, w: 38 },
+    { id: "b5", x: 320, y: 200, label: "42", mono: true, w: 38, on: true },
+    { id: "b6", x: 366, y: 200, label: "55", mono: true, w: 38 },
+    { id: "b7", x: 412, y: 200, label: "61", mono: true, w: 38 },
+    { id: "b8", x: 458, y: 200, label: "77", mono: true, w: 38 },
+    { id: "b9", x: 504, y: 200, label: "84", mono: true, w: 38 },
+    { id: "b10", x: 550, y: 200, label: "93", mono: true, w: 38 },
+    { id: "b11", x: 596, y: 200, label: "99", mono: true, w: 38 },
+  ]}
+  edges={[
+    { from: "a1", to: "b2", label: "seek 1: hit", on: true },
+    { from: "a2", to: "b5", label: "seek 2: hit", on: true },
+    { from: "a3", to: "b10", label: "seek 3: miss", dashed: true },
+  ]}
+  caption="Three elements in A, three seeks in B. The twelve elements of B are never scanned one by one. The skip list's upper levels, which make each seek fast, are not drawn."
+/>
+
+Notice that the work follows the shorter list. When a user is a direct member of only a few groups, `MEMBER2GROUP(U)` is short and the test stays cheap even when `GROUP2GROUP(G)` is huge. The paper gives no set sizes; that case is an assumption. The index "is sharded by element IDs", and shards "are usually served entirely from memory" (§3.2.4).
+
+## Three parts
+
+"The Leopard system consists of three discrete parts: a serving system capable of consistent and low-latency operations across sets; an offline, periodic index building system; and an online real-time layer capable of continuously updating the serving system as tuple changes occur." (§3.2.4) How do they connect?
+
+<Graph
+  width={640}
+  height={350}
+  title="Leopard's three parts"
+  desc="An offline index builder reads a snapshot of Zanzibar's tuples and configs and produces index shards, which are replicated and swapped into the Leopard serving system. In parallel, an incremental indexer reads Zanzibar's Watch stream and writes timestamped updates into the serving system's incremental layer. aclservers query the serving system, which merges the incremental layer over the offline index at the query timestamp."
+  nodes={[
+    { id: "snap", x: 85, y: 60, label: "tuple + config\nsnapshot", kind: "store" },
+    { id: "build", x: 310, y: 60, label: "offline index builder\n(periodic)", kind: "server" },
+    { id: "serve", x: 480, y: 185, label: "Leopard serving\noffline index\n+ incremental layer", kind: "server", on: true },
+    { id: "watch", x: 85, y: 300, label: "Watch API", kind: "server" },
+    { id: "inc", x: 290, y: 300, label: "incremental\nindexer", kind: "server" },
+    { id: "acl", x: 560, y: 315, label: "aclservers", kind: "server" },
+  ]}
+  edges={[
+    { from: "snap", to: "build" },
+    { from: "build", to: "serve", label: "new shards" },
+    { from: "watch", to: "inc", label: "tuple changes" },
+    { from: "inc", to: "serve", label: "(T, s, e, t, d)", labelOffset: -22 },
+    { from: "acl", to: "serve", label: "query", dir: "both" },
+  ]}
+  caption="The offline path is complete but stale; the incremental path is fresh but only covers changes since the last snapshot. Serving merges the two."
+/>
+
+- **Offline index builder.** It "generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples." Servers "swap old shards with new ones when they become available".
+- **Incremental layer.** The offline index alone "cannot do so at a fresh and consistent snapshot", so servers keep "an incremental layer that indexes all updates since the offline snapshot", each update a `(T, s, e, t, d)` tuple "where *t* is the timestamp of the update and *d* is a deletion marker". "Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing."
+- **Feed.** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions."
+
+All quotes in this list are from §3.2.4. Because updates carry timestamps and are merged up to the query timestamp, a Leopard answer can reflect the same snapshot as the rest of the Check; the paper's stated purpose for the incremental layer is "To support consistent ACL evaluation".
+
+## The cost: one write, many index updates
+
+Flattening is paid for at write time. Go back to before eng was added to product, and suppose `group:eng` has two sub-groups of its own, `group:infra` and `group:web`. Now someone adds eng to product. How many index tuples change?
+
+<Graph
+  width={640}
+  height={380}
+  title="One tuple write fans out into many index updates"
+  desc="Adding the tuple group:product#member@group:eng#member makes group:eng, group:infra and group:web new descendants of both group:product and group:all. The incremental indexer turns the single tuple into six GROUP2GROUP additions: product gains eng, infra and web, and all gains eng, infra and web."
+  nodes={[
+    { id: "t", x: 110, y: 40, label: "group:product#member\n@group:eng#member", kind: "store", mono: true },
+    { id: "inc", x: 110, y: 190, label: "incremental\nindexer", kind: "server" },
+    { id: "e1", x: 520, y: 30, w: 190, label: "+ G2G(product, eng)", kind: "group", mono: true },
+    { id: "e2", x: 520, y: 94, w: 190, label: "+ G2G(product, infra)", kind: "group", mono: true },
+    { id: "e3", x: 520, y: 158, w: 190, label: "+ G2G(product, web)", kind: "group", mono: true },
+    { id: "e4", x: 520, y: 222, w: 190, label: "+ G2G(all, eng)", kind: "group", mono: true },
+    { id: "e5", x: 520, y: 286, w: 190, label: "+ G2G(all, infra)", kind: "group", mono: true },
+    { id: "e6", x: 520, y: 350, w: 190, label: "+ G2G(all, web)", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "t", to: "inc", label: "1 write" },
+    { from: "inc", to: "e1" },
+    { from: "inc", to: "e2" },
+    { from: "inc", to: "e3" },
+    { from: "inc", to: "e4" },
+    { from: "inc", to: "e5" },
+    { from: "inc", to: "e6" },
+  ]}
+  caption="1 Zanzibar tuple, 6 Leopard tuples (the group: prefix is left out): every ancestor of product (product, all) times every descendant of eng (eng, infra, web). MEMBER2GROUP does not change."
+/>
+
+The count is the number of ancestors on one side times the number of descendants on the other, so it grows with both depth and width. To compute it, "Generating updates for the GROUP2GROUP tuples requires the incremental indexer to maintain group-to-group membership for denormalizing the effects of a relation tuple update to potentially multiple index updates." At Google's scale: "In practice, a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events." (§3.2.4)
+
+A deletion is subtler than the figure: an index tuple can only be removed if no other path still connects the two groups. The paper does not describe how the indexer decides that.
+
+This is also why Leopard is the exception. Elsewhere "Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)" (§3.2.5), and Leopard is used only for selected namespaces "that exhibit such structure" (§3.2.4).
+
+## In production
+
+From §4.4, over 7 days: "The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile", and "Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile." The incremental layer "writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile." Calls to Leopard are hedged like calls to Spanner (§3.2.7).
+
+## Sources
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3.2.3, §3.2.4, §3.2.5, §3.2.7, §4.4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

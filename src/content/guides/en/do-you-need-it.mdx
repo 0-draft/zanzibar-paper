@@ -1,0 +1,217 @@
+---
+title: Do you need a Zanzibar?
+description: A role table in your own database, a policy engine such as OPA or Cedar, a Zanzibar-style service, or a mix, compared on the same requirements, with the published critiques and replies.
+section: guide
+part: practice
+order: 14
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.2", "2.3.1", "2.4.3", "2.4.5", "3", "4.2"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+The paper describes a system built for "billions of objects shared by billions of users" (§1). Most applications are smaller, and the question readers ask most often is whether they need one at all. This page compares four common answers on the same requirements: a role table in the application's own database, a policy engine, a Zanzibar-style service, and combinations of them. It does not pick a winner; the sources it cites do disagree, and they are cited as they stand. Several of them are vendors, named as such.
+
+The models behind these options (ACL, RBAC, ABAC, ReBAC) are compared on [ACL, RBAC, ABAC, ReBAC](../access-control-models/). The open-source Zanzibar-style systems are compared on [Zanzibar-style systems compared](../../ecosystem/compare/).
+
+## Four options
+
+**A role table in your database.** Grants are rows next to the data they protect, for example `(user_id, role, doc_id)`, and the application checks them with a query. A list of "documents Anne can see" is a join. Nested groups need a query that follows membership edges; in PostgreSQL, "Using `RECURSIVE`, a `WITH` query can refer to its own output" ([PostgreSQL docs](https://www.postgresql.org/docs/current/queries-with.html)). In a 2021 Hacker News thread on Oso's "Why Authorization Is Hard", one commenter argued that since many projects are mostly about database access, enforcing rules in the database itself may be enough ([HN 28543457](https://news.ycombinator.com/item?id=28543457)).
+
+**A policy engine.** Rules live in a policy language and are evaluated against data the application supplies or the engine has cached. "Cedar is a language for writing authorization policies and making authorization decisions based on those policies", and "Cedar evaluates each request against the provided policies and entities to make an allow or deny decision" ([Cedar docs](https://docs.cedarpolicy.com/)). OPA keeps "a cache or replica of that data, just as OPA has a cache/replica of policy", loaded by bundles, pushes, the request input or calls during evaluation; with bundles, "OPA stores the entire datasource at once in memory" ([OPA external data](https://www.openpolicyagent.org/docs/external-data)).
+
+**A Zanzibar-style service.** Relationships are stored in the authorization service ahead of time and queried over the network. AuthZed (the company behind SpiceDB) puts the difference this way: "authorization data must be explicitly written into the backing datastore ahead of query time, just like an RDBMS" ([AuthZed blog, 2023-11-29](https://authzed.com/blog/policy-based-access-control)). The paper's case for one shared service is in §1: it "helps establish consistent semantics and user experience across applications", "makes it easier for applications to interoperate", and supports common infrastructure such as "a search index that respects access control and works across applications".
+
+**A combination.** Either one product with both models (SpiceDB caveats, OpenFGA conditions, see [ACL, RBAC, ABAC, ReBAC](../access-control-models/)), or two systems side by side, discussed below.
+
+Where does the data a decision needs live, and who keeps it current?
+
+<Frames min="18rem">
+
+<Graph
+  width={280}
+  height={240}
+  title="Role table"
+  desc="The application reads and writes one database that holds both its own data and the role table. There is a single write path."
+  nodes={[
+    { id: "app", x: 140, y: 40, label: "application", kind: "client" },
+    { id: "db", x: 140, y: 175, label: "app database:\ndocs + role table", kind: "store", on: true },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "one transaction", dir: "both", on: true },
+  ]}
+  caption="Role table: one store, one write."
+/>
+
+<Graph
+  width={320}
+  height={240}
+  title="Policy engine"
+  desc="The application keeps its data in its own database. It asks the policy engine for a decision, sending the input and entities with the request. The engine also holds policies and, optionally, a replica of data loaded as bundles."
+  nodes={[
+    { id: "app", x: 80, y: 40, label: "application", kind: "client" },
+    { id: "db", x: 80, y: 180, label: "app database", kind: "store" },
+    { id: "pe", x: 240, y: 120, label: "policy engine\n(OPA, Cedar)", kind: "server", on: true },
+    { id: "b", x: 240, y: 205, label: "policy + data\nbundles", kind: "note" },
+  ]}
+  edges={[
+    { from: "app", to: "db", dir: "both" },
+    { from: "app", to: "pe", label: "input +\nentities", on: true },
+    { from: "b", to: "pe", dashed: true },
+  ]}
+  caption="Policy engine: data travels with the request or is replicated in."
+/>
+
+<Graph
+  width={280}
+  height={240}
+  title="Zanzibar-style service"
+  desc="The application writes its data to its own database and writes relationship tuples to the authorization service, which has its own datastore. Checks go to the service. The two writes are separate."
+  nodes={[
+    { id: "app", x: 140, y: 40, label: "application", kind: "client" },
+    { id: "db", x: 60, y: 185, label: "app database", kind: "store" },
+    { id: "z", x: 215, y: 120, label: "authz service", kind: "server" },
+    { id: "zs", x: 215, y: 200, label: "tuples", kind: "store", mono: true },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "write 1", on: true },
+    { from: "app", to: "z", label: "write 2,\ncheck", on: true },
+    { from: "z", to: "zs", dir: "both" },
+  ]}
+  caption="Zanzibar-style: two stores, two writes."
+/>
+
+</Frames>
+
+Notice the highlighted arrows. With a role table the grant and the data change in one transaction. A policy engine moves the work to request time: whoever calls it must gather the facts. A separate Zanzibar-style service moves it to write time: every change that affects access is written twice, once to the application and once to the service. AuthZed calls this "the dual-write problem" and lists ways to handle it, from out-of-band consistency checking to a transactional outbox or durable execution ([AuthZed blog, 2025-01-02](https://authzed.com/blog/the-dual-write-problem)). The paper does not discuss this cost. It says "Zanzibar stores ACLs and their metadata in Spanner databases" (§3) and that clients store zookies "in an atomic write to the client storage" (§2.2), but not how clients keep their own data and their tuples in step.
+
+## Requirements against options
+
+Each cell is a short summary of the paragraphs and sources on this page; "possible" means the option can do it with work the cell names.
+
+| Requirement | Role table in your DB | Policy engine (OPA, Cedar) | Zanzibar-style service | Combination |
+| --- | --- | --- | --- | --- |
+| Sharing one object with one user or group | Possible: a grant row per object and subject | Possible if the shares are passed in or replicated as data | Native: one tuple per share (§2.1) | Shares in the relationship store, the rest as policy |
+| Nested groups | Recursive query (e.g. `WITH RECURSIVE`) | Engine-specific; data must include the whole hierarchy | Native: usersets nest (§2.1); deep groups have a cost, see [Leopard](../leopard/) | From the relationship store |
+| Consistency across services | One transaction, within one database | Whatever the caller's data reflects; no snapshot token in the engine | The paper's zookie (§2.2); product support varies ([compare](../../ecosystem/compare/)) | Per part; the policy side inherits the caller's freshness |
+| Audit: who can see X | A query over the grant tables | Analysis of rules plus data; hard for attribute rules ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)) | Expand returns a userset tree (§2.4.5); products add lookup APIs | Relationship side answerable; policy side as for policy engines |
+| List: what can Anne see | A join | Partial evaluation or filtering, engine-specific | Lookup APIs or bulk check, see [protecting a list endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint) | As for the store that holds the relationships |
+| Latency of one check | One local query | In-process or sidecar evaluation, after the data is gathered | A network call; Google reports p50 ≈ 3 ms for Safe checks (§4.2) | Two calls if both systems are on the path |
+| Operational cost | None beyond the database | Distribute policies and data to each engine | Another stateful service and datastore | Both |
+| Data sync | None | Replicate or pass data on each request | Dual writes from the application | Dual writes for relationships only |
+
+The latency row is the one most often over-read. The paper's numbers (Table 2, §4.2) come from Google's deployment and caching; they say nothing about a single-node install, and a policy engine's evaluation time leaves out the time the caller spends fetching data. AuthZed makes the second point in its own favour ([AuthZed blog](https://authzed.com/blog/policy-based-access-control)); it is a vendor argument and has not been measured here.
+
+## A rough order of questions
+
+Which questions separate the options? The figure follows the rows of the table, in the order they usually decide things.
+
+<Graph
+  width={620}
+  height={360}
+  minWidth={540}
+  title="Questions that narrow the choice"
+  desc="A flow of three questions. First: do users share individual objects with other users or groups, possibly nested? If no, a role table or a policy engine is usually enough. If yes, second question: does more than one service or database need the same answers? If no, grant tables in the application's database with recursive queries may be enough. If yes, a Zanzibar-style service is a candidate. Third question, from either branch: do decisions depend on request context such as time, IP address or amounts? If yes, add conditions (caveats) or a policy engine alongside."
+  nodes={[
+    { id: "q1", x: 150, y: 40, label: "Do users share single objects\nwith users or nested groups?", w: 280 },
+    { id: "a1", x: 500, y: 40, label: "role table or\npolicy engine", kind: "note" },
+    { id: "q2", x: 150, y: 150, label: "Do several services or\ndatabases need the same answers?", w: 280 },
+    { id: "a2", x: 500, y: 150, label: "grant tables +\nrecursive queries", kind: "note" },
+    { id: "a3", x: 150, y: 250, label: "Zanzibar-style service", kind: "server", on: true },
+    { id: "q3", x: 470, y: 250, label: "Context: time, IP,\namounts?", w: 200 },
+    { id: "a4", x: 470, y: 330, label: "conditions / caveats\nor a policy engine", kind: "note" },
+  ]}
+  edges={[
+    { from: "q1", to: "a1", label: "no" },
+    { from: "q1", to: "q2", label: "yes" },
+    { from: "q2", to: "a2", label: "no" },
+    { from: "q2", to: "a3", label: "yes", on: true },
+    { from: "a3", to: "q3", dashed: true },
+    { from: "a2", to: "q3", dashed: true },
+    { from: "q3", to: "a4", label: "yes" },
+  ]}
+  caption="A heuristic drawn from the sources on this page, not a rule. Scale and team skills move the boundaries."
+/>
+
+Notice that context is a separate axis. The paper has no attribute conditions; a userset rewrite combines usersets with "union, intersection, and exclusion" (§2.3.1). Whatever the first two answers are, rules about time or network need either a product extension or a second system.
+
+## Critiques and replies
+
+The debate is public and partly commercial. Here are its main published positions, with who wrote each.
+
+**"Zanzibar isn't flexible"** (Greg Sarjeant, Oso, 2024-11-01; Oso sells a policy-based authorization service). The argument: applications ask about actions, but "Your authorization service only lets you define relations", so teams end up encoding permissions as relations; and a constrained language makes it harder to say exactly what you mean ([Oso blog](https://www.osohq.com/post/google-zanzibar-isnt-flexible)). Oso has also written about the sync cost of centralising authorization data in microservices ([Oso Academy](https://www.osohq.com/academy/microservices-authorization)), and launched "Local Authorization", where Oso can answer "yes, if" and the application evaluates the condition against its own database ([Oso blog, 2024-04-16](https://www.osohq.com/post/local-authorization)).
+
+**"Reading Zanzibar"** (Tom MacWright, 2025-05-02; an independent developer). The post separates the paper's model (objects, usersets, rewrite rules) from its machinery for consistency and scale, notes that "Zookies are very clearly important to Google" while several Zanzibar-like products have no equivalent, and concludes: "For my own needs, zookies and distributed consistency to the degree described in the Zanzibar paper are overkill." What MacWright wants is "the API surface that Zanzibar describes", trading "some scalability for simplicity" ([macwright.com](https://macwright.com/2025/05/02/reading-zanzibar.html)).
+
+**Policy and ReBAC as complements** (AuthZed, maker of SpiceDB). AuthZed's learning pages say "Policy engines like Cerbos and OPA primarily focus on ABAC but can be used alongside ReBAC systems" for cases that do not map to stored relationships ([AuthZed learn](https://authzed.com/learn/rebac-key-components)). Its comparison post says the choice "depends on the authorization problems you have", and that SpiceDB caveats "offer some of the benefits of policy engines without sacrificing the benefits of Google Zanzibar" ([AuthZed blog, 2023-11-29](https://authzed.com/blog/policy-based-access-control)). The SpiceDB FAQ states "SpiceDB is not a policy engine" ([FAQ](https://authzed.com/docs/spicedb/getting-started/faq)). In the 2021 HN thread, an AuthZed founder disputed the claim that ABAC cannot be done with ReBAC systems, and the Oso article's author agreed a Zanzibar-style system can be combined with a policy engine ([HN 28543457](https://news.ycombinator.com/item?id=28543457)).
+
+**From practitioners.** In a 2023 HN thread, one commenter called Zanzibar "overkill for the majority of needs", and another replied that hosted services hide that complexity ([HN 36470943](https://news.ycombinator.com/item?id=36470943)). In a 2025 thread on rewriting OpenFGA in Postgres, the cited pain point was "keeping everything in sync all the time" ([HN 45661547](https://news.ycombinator.com/item?id=45661547)).
+
+The positions overlap more than the titles suggest: all of them agree that relationship data and request context are different kinds of input, and differ on which one should be the centre.
+
+## A hybrid deployment
+
+What does a combination look like in practice? This one is an illustration, assembled from the patterns above, not a documented reference architecture.
+
+<Graph
+  width={630}
+  height={360}
+  minWidth={540}
+  title="A hybrid deployment"
+  desc="A client calls an API gateway, where a policy engine makes coarse request-level decisions such as token scope and IP range. The gateway forwards to an application service. The service checks sharing and group permissions with a Zanzibar-style service, which stores relationships in its own datastore. The service writes its own data to the application database, and an outbox table in the same transaction is relayed to the authorization service as tuple writes. The authorization service's Watch stream feeds a search index that filters by permission."
+  nodes={[
+    { id: "c", x: 60, y: 60, label: "client", kind: "client" },
+    { id: "gw", x: 220, y: 60, label: "API gateway +\npolicy engine", kind: "server" },
+    { id: "svc", x: 420, y: 60, label: "application\nservice", kind: "server" },
+    { id: "db", x: 420, y: 190, label: "app database\n+ outbox table", kind: "store" },
+    { id: "relay", x: 420, y: 300, label: "outbox relay", kind: "server" },
+    { id: "z", x: 580, y: 190, label: "authz\nservice", kind: "server", on: true },
+    { id: "zs", x: 580, y: 300, label: "tuples", kind: "store", mono: true },
+    { id: "idx", x: 220, y: 190, label: "search index", kind: "store" },
+  ]}
+  edges={[
+    { from: "c", to: "gw", label: "request" },
+    { from: "gw", to: "svc", label: "scope, IP ok" },
+    { from: "svc", to: "db", label: "one transaction" },
+    { from: "svc", to: "z", label: "Check", on: true },
+    { from: "db", to: "relay", dashed: true },
+    { from: "relay", to: "z", label: "tuple writes", dashed: true },
+    { from: "z", to: "zs", dir: "both" },
+    { from: "z", to: "idx", label: "Watch", dashed: true, labelOffset: -10 },
+  ]}
+  groups={[
+    { x: 140, y: 15, w: 160, h: 95, label: "request context" },
+    { x: 510, y: 140, w: 120, h: 200, label: "relationships" },
+  ]}
+  caption="Policy at the edge for context, relationships in one service, and an outbox so the two writes cannot drift apart silently."
+/>
+
+Notice that each system answers the question it holds data for. The gateway decides from the request alone; the relationship service decides who may see which document; the outbox turns the dual write into one local transaction followed by a retried delivery, one of the options in AuthZed's [dual-write post](https://authzed.com/blog/the-dual-write-problem). The Watch arrow follows the paper's own use: "Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API" (§2.4.3), and Expand helps "build efficient search indices for access-controlled content" (§2.4.5).
+
+<Callout kind="note" title="What this page does not settle">
+
+No source here measured the options against each other on one workload. The requirement rows are qualitative, the latency numbers are Google's, and most product claims come from the vendors' own pages.
+
+</Callout>
+
+## Sources
+
+- Zanzibar paper, §1, §2.1, §2.2, §2.3.1, §2.4.3, §2.4.5, §3, §4.2 (this site's transcription)
+- PostgreSQL documentation, WITH Queries: [postgresql.org/docs/current/queries-with.html](https://www.postgresql.org/docs/current/queries-with.html)
+- Cedar documentation: [docs.cedarpolicy.com](https://docs.cedarpolicy.com/)
+- Open Policy Agent, External Data: [openpolicyagent.org/docs/external-data](https://www.openpolicyagent.org/docs/external-data)
+- D. R. Kuhn, E. J. Coyne, T. R. Weil, Adding Attributes to Role-Based Access Control, IEEE Computer, 2010: [csrc.nist.gov](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)
+- Evan Cordell, Policy-Based Access Control (PBAC) vs Google Zanzibar, AuthZed blog (2023-11-29): [authzed.com/blog/policy-based-access-control](https://authzed.com/blog/policy-based-access-control)
+- AuthZed, The Dual-Write Problem (2025-01-02): [authzed.com/blog/the-dual-write-problem](https://authzed.com/blog/the-dual-write-problem)
+- AuthZed, What are the key components of ReBAC?: [authzed.com/learn/rebac-key-components](https://authzed.com/learn/rebac-key-components)
+- AuthZed, SpiceDB FAQ: [authzed.com/docs/spicedb/getting-started/faq](https://authzed.com/docs/spicedb/getting-started/faq)
+- AuthZed, Protecting a List Endpoint: [authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)
+- Greg Sarjeant, Google Zanzibar Isn't Flexible, Oso blog (2024-11-01): [osohq.com/post/google-zanzibar-isnt-flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible)
+- Greg Sarjeant, Launching Local Authorization, Oso blog (2024-04-16): [osohq.com/post/local-authorization](https://www.osohq.com/post/local-authorization)
+- Oso Academy, Authorization in Microservices: [osohq.com/academy/microservices-authorization](https://www.osohq.com/academy/microservices-authorization)
+- Tom MacWright, Reading Zanzibar (2025-05-02): [macwright.com/2025/05/02/reading-zanzibar.html](https://macwright.com/2025/05/02/reading-zanzibar.html)
+- Hacker News, "Why Authorization Is Hard" (2021-09-15): [news.ycombinator.com/item?id=28543457](https://news.ycombinator.com/item?id=28543457)
+- Hacker News, "Why Google Zanzibar shines at building authorization" (2023-06-25): [news.ycombinator.com/item?id=36470943](https://news.ycombinator.com/item?id=36470943)
+- Hacker News, "We rewrote OpenFGA in pure Postgres" (2025-10-21): [news.ycombinator.com/item?id=45661547](https://news.ycombinator.com/item?id=45661547)

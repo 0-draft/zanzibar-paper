@@ -1,0 +1,247 @@
+---
+title: "Leopard, der Gruppenindex"
+description: "Wie Zanzibar die Mitgliedschaft in tief verschachtelten Gruppen mit einer einzigen Mengenschnittmenge beantwortet und was das bei jedem Schreibvorgang kostet."
+section: guide
+part: mechanisms
+order: 7
+checked: "2026-11-13"
+paper: ["3.2.4", "4.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar beantwortet einen Check normalerweise, indem es Tupeln vom Objekt zum Benutzer folgt, ein Nachschlagen nach dem anderen. Für die meisten Daten ist das schnell. Für Gruppen, die über viele Ebenen verschachtelt sind, ist es das nicht, und Zanzibar übergibt solche Prüfungen an Leopard, einen Index, der die Verschachtelung vorab berechnet.
+
+## Warum Verschachtelung langsam ist
+
+Erweitern wir das durchgehende Beispiel. `group:eng` liegt nun in `group:product`, das in `group:all` liegt, und das Readme ist mit ganz `group:all` geteilt. Wie viele Nachschlagevorgänge braucht es, um herauszufinden, dass Beto das Readme sehen kann?
+
+<Graph
+  width={640}
+  height={380}
+  title="Eine Kette verschachtelter Gruppen"
+  desc="user:beto ist Mitglied von group:eng, die Mitglieder von group:eng sind Mitglieder von group:product, die Mitglieder von group:product sind Mitglieder von group:all, und die Mitglieder von group:all sind Betrachter von doc:readme. Die Prüfung von Betos Zugriff beginnt bei doc:readme und liest pro Schritt ein Objekt: doc:readme, group:all, group:product und group:eng, vier Lesevorgänge nacheinander."
+  nodes={[
+    { id: "doc", x: 200, y: 30, label: "doc:readme", kind: "object", mono: true },
+    { id: "all", x: 200, y: 110, label: "group:all", kind: "group", mono: true },
+    { id: "prod", x: 200, y: 190, label: "group:product", kind: "group", mono: true },
+    { id: "eng", x: 200, y: 270, label: "group:eng", kind: "group", mono: true, on: true },
+    { id: "beto", x: 200, y: 350, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "n1", x: 470, y: 30, label: "1. doc:readme lesen: Betrachter ist group:all", kind: "note" },
+    { id: "n2", x: 470, y: 110, label: "2. group:all lesen: enthält group:product", kind: "note" },
+    { id: "n3", x: 470, y: 190, label: "3. group:product lesen: enthält group:eng", kind: "note" },
+    { id: "n4", x: 470, y: 270, label: "4. group:eng lesen: Beto ist Mitglied", kind: "note" },
+  ]}
+  edges={[
+    { from: "all", to: "doc", label: "viewer" },
+    { from: "prod", to: "all", label: "member" },
+    { from: "eng", to: "prod", label: "member" },
+    { from: "beto", to: "eng", label: "member", on: true },
+  ]}
+  caption="Jeder Schritt nennt das Objekt für den nächsten, daher können die vier Lesevorgänge nicht gemeinsam beginnen. Jedes Objekt kann außerdem auf einem anderen Server liegen (siehe die Architekturseite)."
+/>
+
+Die Tupel hinter der Abbildung sind:
+
+```text
+doc:readme#viewer@group:all#member
+group:all#member@group:product#member
+group:product#member@group:eng#member
+group:eng#member@user:beto
+```
+
+Schritt *n* kann erst beginnen, wenn Schritt *n* − 1 zurückgekehrt ist. Das Paper nennt das Zeigerverfolgung (pointer chasing) und sagt, sie "can be expensive when indirect ACLs or groups are deep or wide" (§3.2.3) (kann teuer werden, wenn indirekte ACLs oder Gruppen tief oder breit sind). Breite schadet ebenfalls: Enthielte `group:all` hundert Untergruppen, würde sich Schritt 2 hundertfach verzweigen. Daher: "Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation." (§3.2.4) (Rekursive Zeigerverfolgung während der Check-Auswertung hat Mühe, bei tief verschachtelten Gruppen oder Gruppen mit sehr vielen Untergruppen eine niedrige Latenz zu halten. Für ausgewählte Namespaces, die eine solche Struktur aufweisen, behandelt Zanzibar Prüfungen mit Leopard, einem spezialisierten Index, der effiziente Mengenberechnungen unterstützt.)
+
+## Zwei Arten von Mengen
+
+Leopard speichert "a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID" (§3.2.4) (eine Sammlung benannter Mengen mithilfe von Tupeln `(T, s, e)`, wobei *T* ein Enum ist, das den Mengentyp darstellt, und *s* und *e* 64-Bit-Ganzzahlen sind, die die Mengen-ID und die Element-ID darstellen). Gruppenmitgliedschaft verwendet zwei Mengentypen:
+
+- `GROUP2GROUP(s)`: die Gruppen, die "*directly or indirectly*" (*direkt oder indirekt*) Untergruppen der Vorfahrengruppe *s* sind.
+- `MEMBER2GROUP(s)`: die Gruppen, in denen Benutzer *s* "*direct*" (*direktes*) Mitglied ist.
+
+Was enthalten die Mengen im Beispiel?
+
+<Graph
+  width={640}
+  height={330}
+  title="GROUP2GROUP und MEMBER2GROUP im Beispiel"
+  desc="GROUP2GROUP(group:all) ist group:all, group:product und group:eng. GROUP2GROUP(group:product) ist group:product und group:eng. GROUP2GROUP(group:eng) ist group:eng. MEMBER2GROUP(user:beto) ist group:eng. MEMBER2GROUP(user:anne) ist leer."
+  nodes={[
+    { id: "g1", x: 125, y: 40, label: "GROUP2GROUP(group:all)", kind: "object", mono: true },
+    { id: "g2", x: 125, y: 100, label: "GROUP2GROUP(group:product)", kind: "object", mono: true },
+    { id: "g3", x: 125, y: 160, label: "GROUP2GROUP(group:eng)", kind: "object", mono: true },
+    { id: "m1", x: 125, y: 240, label: "MEMBER2GROUP(user:beto)", kind: "object", mono: true },
+    { id: "m2", x: 125, y: 300, label: "MEMBER2GROUP(user:anne)", kind: "object", mono: true },
+    { id: "s1", x: 455, w: 330, y: 40, label: "{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "s2", x: 455, w: 330, y: 100, label: "{ group:product, group:eng }", kind: "group", mono: true },
+    { id: "s3", x: 455, w: 330, y: 160, label: "{ group:eng }", kind: "group", mono: true },
+    { id: "s4", x: 455, w: 330, y: 240, label: "{ group:eng }", kind: "group", mono: true, on: true },
+    { id: "s5", x: 455, w: 330, y: 300, label: "{ }", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "g1", to: "s1" },
+    { from: "g2", to: "s2" },
+    { from: "g3", to: "s3" },
+    { from: "m1", to: "s4", on: true },
+    { from: "m2", to: "s5" },
+  ]}
+  caption="GROUP2GROUP ist abgeflacht: group:all listet group:eng auf, obwohl eng zwei Ebenen tiefer liegt. MEMBER2GROUP ist es nicht: Es listet nur direkte Mitgliedschaften auf. Jede Gruppe ist in ihrer eigenen GROUP2GROUP-Menge gezeichnet; das Paper sagt das nicht, siehe den Hinweis unten."
+/>
+
+Beachten Sie die Asymmetrie. Die gesamte Verschachtelung ist in `GROUP2GROUP` gefaltet, sodass die Seite eines Benutzers nur festhalten muss, wo der Benutzer direkt hinzugefügt wurde. In den Worten des Papers: "Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard" (§3.2.4) (Das Abflachen von Gruppe-zu-Gruppe-Pfaden erlaubt es Leopard, die Erreichbarkeit effizient auszuwerten).
+
+<Callout kind="warn" title="Enthält eine Gruppe sich selbst?">
+Das Paper definiert `GROUP2GROUP(s)` als die Gruppen, die Untergruppen von *s* sind, und sagt nicht, ob *s* selbst in der Menge ist. Damit ein direktes Mitglied von *G* den folgenden Test besteht, muss *G* in `GROUP2GROUP(G)` enthalten sein oder gesondert behandelt werden. Die Abbildungen nehmen Ersteres an; das ist eine Schlussfolgerung, keine Aussage des Papers.
+</Callout>
+
+## Mitgliedschaft ist eine nicht leere Schnittmenge
+
+"To evaluate whether user *U* is a member of group *G*, we check whether" (§3.2.4) (Um auszuwerten, ob Benutzer *U* Mitglied der Gruppe *G* ist, prüfen wir, ob)
+
+```text
+(MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
+```
+
+Das heißt: Liegt irgendeine Gruppe, zu der der Benutzer direkt hinzugefügt wurde, auch irgendwo unter *G*? Was ergibt das für Beto und Anne gegenüber `group:all`?
+
+<Graph
+  width={640}
+  height={330}
+  title="Mitgliedschaft als Schnittmenge"
+  desc="MEMBER2GROUP(user:beto), also group:eng, geschnitten mit GROUP2GROUP(group:all), also group:all, group:product und group:eng, ergibt group:eng: nicht leer, also ist Beto Mitglied von group:all. MEMBER2GROUP(user:anne), das leer ist, geschnitten mit derselben Menge ergibt die leere Menge, also ist Anne kein Mitglied."
+  nodes={[
+    { id: "mb", x: 190, y: 50, label: "MEMBER2GROUP(user:beto)\n{ group:eng }", kind: "group", mono: true },
+    { id: "ga", x: 190, y: 130, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "rb", x: 530, y: 90, label: "∩ = { group:eng }\nnicht leer: Mitglied", kind: "object", on: true },
+    { id: "ma", x: 190, y: 220, label: "MEMBER2GROUP(user:anne)\n{ }", kind: "group", mono: true },
+    { id: "gb", x: 190, y: 295, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "ra", x: 530, y: 257, label: "∩ = { }\nleer: kein Mitglied", kind: "object" },
+  ]}
+  edges={[
+    { from: "mb", to: "rb", on: true },
+    { from: "ga", to: "rb", on: true },
+    { from: "ma", to: "ra" },
+    { from: "gb", to: "ra" },
+  ]}
+  caption="Zwei Nachschlagevorgänge und eine Schnittmenge, unabhängig von der Tiefe der Verschachtelung. Beto ist drin; Anne nicht."
+/>
+
+Aus den vier aufeinanderfolgenden Lesevorgängen der ersten Abbildung wurden zwei Mengen-Lookups und eine Schnittmenge. Um die ursprüngliche Frage zu beantworten, liest Zanzibar weiterhin das Tupel des Readme, das `group:all#member` nennt; die Tiefe darunter ist das, was Leopard beseitigt. Das Paper schlüsselt nicht auf, wie ein Check zwischen gewöhnlicher Auswertung und Leopard-Abfragen aufgeteilt wird; diese Aufteilung ist also eine Lesart von §3.2.4, kein Zitat.
+
+## Schnittmenge auf sortierten Listen
+
+Wie günstig ist die Schnittmenge? "Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets. For example, evaluating the intersection between two sets, *A* and *B*, requires only O(min(|A|, |B|)) skip-list seeks." (§3.2.4) (Indextupel werden als geordnete Listen von Ganzzahlen in einer Struktur wie einer Skip-Liste gespeichert, was effiziente Vereinigungen und Schnittmengen zwischen Mengen erlaubt. Zum Beispiel erfordert die Auswertung der Schnittmenge zweier Mengen *A* und *B* nur O(min(|A|, |B|)) Skip-Listen-Suchschritte.)
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={520}
+  title="Eine kurze sortierte Liste mit einer langen schneiden"
+  desc="Liste A enthält 17, 42 und 90. Liste B enthält 3, 8, 17, 21, 30, 42, 55, 61, 77, 84, 93 und 99. Für jedes Element von A findet ein Suchschritt in B das erste Element, das nicht kleiner ist: 17 findet 17, 42 findet 42, 90 landet auf 93, was kein Treffer ist. Die Schnittmenge ist 17 und 42, gefunden in drei Suchschritten."
+  nodes={[
+    { id: "la", x: 30, y: 50, label: "A", kind: "note" },
+    { id: "lb", x: 30, y: 200, label: "B", kind: "note" },
+    { id: "a1", x: 182, y: 50, label: "17", mono: true, w: 38, on: true },
+    { id: "a2", x: 320, y: 50, label: "42", mono: true, w: 38, on: true },
+    { id: "a3", x: 527, y: 50, label: "90", mono: true, w: 38 },
+    { id: "b0", x: 90, y: 200, label: "3", mono: true, w: 38 },
+    { id: "b1", x: 136, y: 200, label: "8", mono: true, w: 38 },
+    { id: "b2", x: 182, y: 200, label: "17", mono: true, w: 38, on: true },
+    { id: "b3", x: 228, y: 200, label: "21", mono: true, w: 38 },
+    { id: "b4", x: 274, y: 200, label: "30", mono: true, w: 38 },
+    { id: "b5", x: 320, y: 200, label: "42", mono: true, w: 38, on: true },
+    { id: "b6", x: 366, y: 200, label: "55", mono: true, w: 38 },
+    { id: "b7", x: 412, y: 200, label: "61", mono: true, w: 38 },
+    { id: "b8", x: 458, y: 200, label: "77", mono: true, w: 38 },
+    { id: "b9", x: 504, y: 200, label: "84", mono: true, w: 38 },
+    { id: "b10", x: 550, y: 200, label: "93", mono: true, w: 38 },
+    { id: "b11", x: 596, y: 200, label: "99", mono: true, w: 38 },
+  ]}
+  edges={[
+    { from: "a1", to: "b2", label: "Suche 1: Treffer", on: true },
+    { from: "a2", to: "b5", label: "Suche 2: Treffer", on: true },
+    { from: "a3", to: "b10", label: "Suche 3: kein Treffer", dashed: true },
+  ]}
+  caption="Drei Elemente in A, drei Suchschritte in B. Die zwölf Elemente von B werden nie einzeln durchlaufen. Die oberen Ebenen der Skip-Liste, die jeden Suchschritt schnell machen, sind nicht gezeichnet."
+/>
+
+Die Arbeit richtet sich nach der kürzeren Liste. Ist ein Benutzer direktes Mitglied nur weniger Gruppen, ist `MEMBER2GROUP(U)` kurz, und der Test bleibt günstig, auch wenn `GROUP2GROUP(G)` riesig ist. Das Paper nennt keine Mengengrößen; dieser Fall ist eine Annahme. Der Index "is sharded by element IDs" (ist nach Element-IDs geshardet), und Shards "are usually served entirely from memory" (§3.2.4) (werden meist vollständig aus dem Arbeitsspeicher bedient).
+
+## Drei Teile
+
+"The Leopard system consists of three discrete parts: a serving system capable of consistent and low-latency operations across sets; an offline, periodic index building system; and an online real-time layer capable of continuously updating the serving system as tuple changes occur." (§3.2.4) (Das Leopard-System besteht aus drei getrennten Teilen: einem Serving-System, das konsistente Operationen mit niedriger Latenz über Mengen ausführen kann; einem periodischen Offline-System zum Aufbau des Index; und einer Online-Echtzeitschicht, die das Serving-System fortlaufend aktualisieren kann, während Tupeländerungen auftreten.) Wie hängen sie zusammen?
+
+<Graph
+  width={640}
+  height={350}
+  title="Die drei Teile von Leopard"
+  desc="Ein Offline-Index-Builder liest einen Snapshot der Tupel und Konfigurationen von Zanzibar und erzeugt Index-Shards, die repliziert und im Leopard-Serving-System eingewechselt werden. Parallel liest ein inkrementeller Indexer den Watch-Stream von Zanzibar und schreibt zeitgestempelte Aktualisierungen in die inkrementelle Schicht des Serving-Systems. aclserver fragen das Serving-System ab, das die inkrementelle Schicht zum Abfragezeitstempel über den Offline-Index legt."
+  nodes={[
+    { id: "snap", x: 85, y: 60, label: "Tupel- und Konfig-\nSnapshot", kind: "store" },
+    { id: "build", x: 310, y: 60, label: "Offline-Index-Builder\n(periodisch)", kind: "server" },
+    { id: "serve", x: 480, y: 185, label: "Leopard-Serving\nOffline-Index\n+ inkrementelle Schicht", kind: "server", on: true },
+    { id: "watch", x: 85, y: 300, label: "Watch-API", kind: "server" },
+    { id: "inc", x: 290, y: 300, label: "inkrementeller\nIndexer", kind: "server" },
+    { id: "acl", x: 560, y: 315, label: "aclserver", kind: "server" },
+  ]}
+  edges={[
+    { from: "snap", to: "build" },
+    { from: "build", to: "serve", label: "neue Shards" },
+    { from: "watch", to: "inc", label: "Tupeländerungen" },
+    { from: "inc", to: "serve", label: "(T, s, e, t, d)", labelOffset: -22 },
+    { from: "acl", to: "serve", label: "Abfrage", dir: "both" },
+  ]}
+  caption="Der Offline-Pfad ist vollständig, aber veraltet; der inkrementelle Pfad ist aktuell, deckt aber nur Änderungen seit dem letzten Snapshot ab. Das Serving führt beide zusammen."
+/>
+
+- **Offline-Index-Builder.** Er "generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples." (erzeugt Index-Shards aus einem Snapshot von Zanzibar-Relationstupeln und -Konfigurationen und repliziert die Shards global. Er respektiert Userset-Umschreibregeln und expandiert Kanten in einem ACL-Graphen rekursiv, um Leopard-Indextupel zu bilden.) Server "swap old shards with new ones when they become available" (tauschen alte Shards gegen neue aus, sobald diese verfügbar werden).
+- **Inkrementelle Schicht.** Der Offline-Index allein "cannot do so at a fresh and consistent snapshot" (kann das nicht auf einem aktuellen und konsistenten Snapshot leisten), daher halten Server "an incremental layer that indexes all updates since the offline snapshot" (eine inkrementelle Schicht, die alle Aktualisierungen seit dem Offline-Snapshot indexiert), jede Aktualisierung ein Tupel `(T, s, e, t, d)`, "where *t* is the timestamp of the update and *d* is a deletion marker" (wobei *t* der Zeitstempel der Aktualisierung und *d* eine Löschmarkierung ist). "Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing." (Aktualisierungen mit Zeitstempeln kleiner oder gleich dem Abfragezeitstempel werden während der Abfrageverarbeitung über den Offline-Index gelegt.)
+- **Zufuhr.** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions." (der inkrementelle Indexer von Leopard ruft die Watch-API von Zanzibar auf, um einen zeitlich geordneten Stream von Zanzibar-Tupeländerungen zu empfangen, und wandelt die Aktualisierungen in einen zeitlich geordneten Stream von Hinzufügungen, Aktualisierungen und Löschungen von Leopard-Tupeln um.)
+
+Alle Zitate in dieser Liste stammen aus §3.2.4. Weil Aktualisierungen Zeitstempel tragen und bis zum Abfragezeitstempel zusammengeführt werden, kann eine Leopard-Antwort denselben Snapshot widerspiegeln wie der Rest des Check; der vom Paper genannte Zweck der inkrementellen Schicht ist "To support consistent ACL evaluation" (konsistente ACL-Auswertung zu unterstützen).
+
+## Der Preis: ein Schreibvorgang, viele Indexaktualisierungen
+
+Das Abflachen wird beim Schreiben bezahlt. Gehen Sie zurück zu der Zeit, bevor eng zu product hinzugefügt wurde, und nehmen Sie an, dass `group:eng` selbst zwei Untergruppen hat, `group:infra` und `group:web`. Nun fügt jemand eng zu product hinzu. Wie viele Indextupel ändern sich?
+
+<Graph
+  width={640}
+  height={380}
+  title="Ein Tupel-Schreibvorgang fächert sich in viele Indexaktualisierungen auf"
+  desc="Das Hinzufügen des Tupels group:product#member@group:eng#member macht group:eng, group:infra und group:web zu neuen Nachfahren sowohl von group:product als auch von group:all. Der inkrementelle Indexer macht aus dem einen Tupel sechs GROUP2GROUP-Hinzufügungen: product erhält eng, infra und web, und all erhält eng, infra und web."
+  nodes={[
+    { id: "t", x: 110, y: 40, label: "group:product#member\n@group:eng#member", kind: "store", mono: true },
+    { id: "inc", x: 110, y: 190, label: "inkrementeller\nIndexer", kind: "server" },
+    { id: "e1", x: 520, y: 30, w: 190, label: "+ G2G(product, eng)", kind: "group", mono: true },
+    { id: "e2", x: 520, y: 94, w: 190, label: "+ G2G(product, infra)", kind: "group", mono: true },
+    { id: "e3", x: 520, y: 158, w: 190, label: "+ G2G(product, web)", kind: "group", mono: true },
+    { id: "e4", x: 520, y: 222, w: 190, label: "+ G2G(all, eng)", kind: "group", mono: true },
+    { id: "e5", x: 520, y: 286, w: 190, label: "+ G2G(all, infra)", kind: "group", mono: true },
+    { id: "e6", x: 520, y: 350, w: 190, label: "+ G2G(all, web)", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "t", to: "inc", label: "1 Schreibvorgang" },
+    { from: "inc", to: "e1" },
+    { from: "inc", to: "e2" },
+    { from: "inc", to: "e3" },
+    { from: "inc", to: "e4" },
+    { from: "inc", to: "e5" },
+    { from: "inc", to: "e6" },
+  ]}
+  caption="1 Zanzibar-Tupel, 6 Leopard-Tupel (das Präfix group: ist weggelassen): jeder Vorfahre von product (product, all) mal jeder Nachfahre von eng (eng, infra, web). MEMBER2GROUP ändert sich nicht."
+/>
+
+Die Anzahl ist die Zahl der Vorfahren auf der einen Seite mal die Zahl der Nachfahren auf der anderen, wächst also mit Tiefe und Breite. Um sie zu berechnen, gilt: "Generating updates for the GROUP2GROUP tuples requires the incremental indexer to maintain group-to-group membership for denormalizing the effects of a relation tuple update to potentially multiple index updates." (Das Erzeugen von Aktualisierungen für die GROUP2GROUP-Tupel erfordert, dass der inkrementelle Indexer Gruppe-zu-Gruppe-Mitgliedschaften pflegt, um die Auswirkungen einer Relationstupel-Aktualisierung auf potenziell mehrere Indexaktualisierungen zu denormalisieren.) Im Maßstab von Google: "In practice, a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events." (§3.2.4) (In der Praxis kann ein einziges Hinzufügen oder Löschen eines Zanzibar-Tupels potenziell Zehntausende einzelner Leopard-Tupelereignisse erzeugen.)
+
+Ein Löschen ist heikler als die Abbildung: Ein Indextupel darf nur entfernt werden, wenn kein anderer Pfad die beiden Gruppen noch verbindet. Das Paper beschreibt nicht, wie der Indexer das entscheidet.
+
+Deshalb ist Leopard auch die Ausnahme. Anderswo "Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)" (§3.2.5) (vermeidet Zanzibar Denormalisierung im Speicher und stützt sich nur auf normalisierte Daten (mit Ausnahme der in §3.2.4 beschriebenen Fälle)), und Leopard wird nur für ausgewählte Namespaces verwendet, "that exhibit such structure" (§3.2.4) (die eine solche Struktur aufweisen).
+
+## Im Produktivbetrieb
+
+Aus §4.4, über 7 Tage: "The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile" (Der Leopard-Index verarbeitet 1,56 Mio. QPS im Median bzw. 2,22 Mio. QPS im 99. Perzentil), und "Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile." (Leopard-Server antworten im Median in weniger als 150 μs bzw. im 99. Perzentil in unter 1 ms.) Die inkrementelle Schicht "writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile." (schreibt im Median etwa 500 Indexaktualisierungen pro Sekunde und im 99. Perzentil etwa 1.500 Aktualisierungen pro Sekunde.) Aufrufe an Leopard werden wie Aufrufe an Spanner gehedgt (§3.2.7).
+
+## Quellen
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3.2.3, §3.2.4, §3.2.5, §3.2.7, §4.4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

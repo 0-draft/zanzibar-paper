@@ -22,8 +22,8 @@ A static Astro site that shows the Zanzibar paper (USENIX ATC '19) side by side:
 - `content/en.yaml` stays a word-for-word transcription. Do not fix the authors' wording or typos.
 - A translation never changes code spans, TeX or link targets, and has exactly the ids, fields and shapes of the source. `pnpm validate` enforces this; keep it green.
 - Strings in translation files are one-line YAML scalars. Folded scalars insert spaces into CJK text.
-- The unofficial-translation and AI-assistance notices stay on every reading page in every language.
-- One grid row per block, original and translation side by side, with two deliberate exceptions: the author footnote is shown with the byline, and the two tables are set once (Table 1: the tuple column once, the meaning in both languages; Table 2: the numbers once, in the reader's view language) with only their captions paired.
+- The unofficial-translation and AI-assistance notices stay on every reading page in every language. `/en/` shows the original alone, so it carries an unofficial-transcription notice and its own AI-assistance sentence instead.
+- One grid row per block, original and translation side by side, with two deliberate exceptions: the author footnote is shown with the byline, and the two tables are set once (Table 1: the tuple column once, the meaning in both languages; Table 2: the numbers once, in the reader's view language) with only their captions paired. `/en/` is the one page without a translation column: the same rows, original only, with the view fixed to "original" (`data-view-lock`).
 - Colour roles are documented at the top of `src/styles/global.css` (blue: where you are, yellow: under the pointer, green: stored notation). Do not use them decoratively.
 - Anchor offsets use `scroll-margin-top` on targets, not `scroll-padding` on the root: root scroll-padding makes the page jump when a control in the sticky bar takes focus.
 - Reading preferences live as attributes on `<html>` (`data-view`, `data-layout`, `data-first`, `data-theme`), set before first paint by the inline script in `Base.astro` and kept in sync by `reader.ts`. Narrow screens are always `stacked`.

@@ -1,0 +1,265 @@
+---
+title: "ACL、RBAC、ABAC、ReBAC: 誰が何をしてよいかを表す 4 つの方法"
+description: "「Chen は doc:readme を閲覧できるか」という 1 つのアクセス判定を、アクセス制御リスト、ロール、属性の規則、関係のグラフとしてモデル化し、その中で Zanzibar がどこに位置するかを示す。"
+section: guide
+part: background
+order: 1
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.3.1", "3.2.3", "3.2.4", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+どの認可システムも同じ種類の問いに答える。このユーザーはこのオブジェクトにこの操作を行ってよいか。論文はこれを "that a user has permission to carry out an operation on a digital object" (ユーザーがデジタルオブジェクトに対してある操作を行う権限を持っていること) を確認することとしている (§1)。一般的な 4 つのモデルは、何を格納し、問いが来たときに何を計算するかが異なる。
+
+1971 年、Butler Lampson は保護を行列として記述した。行はドメイン (今日の言葉では主体)、列はオブジェクトであり、各セルにはドメインがオブジェクトに対して持つアクセスが並ぶ ([Lampson, "Protection"](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf))。実際のシステムで行列全体を格納するものはない。ACL はその列を格納し、ロールと属性の規則はそのセルを計算し、関係のグラフは辺をたどってセルを導く。
+
+本ページでは 1 つのセルを 4 通りにモデル化する。通しの例: Anne、Beto、Chen (`user:anne`、`user:beto`、`user:chen`)、`folder:A` 内のドキュメント `doc:readme`、グループ `group:eng`。Anne は readme を所有し、Beto は eng に属し、eng のメンバーは readme を閲覧し、Chen はフォルダ A を閲覧する。判定は次のとおりである。
+
+```text
+Can user:chen view doc:readme?
+```
+
+期待される答えは yes であり、その理由はフォルダだけである。Chen は readme に対する直接の付与を持たない。
+
+## ACL: オブジェクト上のリスト
+
+アクセス制御リストは、各オブジェクトにエントリのリストを付ける。各エントリはプリンシパルと権利の集合である。Multics には "on segments and directories" (セグメントとディレクトリに対する) ACL があり、エントリは "a principal identifier and a set of permissions bits" (プリンシパルの識別子と権限ビットの集合) からなっていた (§5。Saltzer の SOSP '73 の論文を引用しており、その改訂版が [Saltzer 1974](https://dl.acm.org/doi/10.1145/361011.361067))。後のシステムでは、POSIX ACL のように、エントリがグループを指定できるようになった (§5)。
+
+readme 自身のリストは Chen について何と言っているか。
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={500}
+  title="doc:readme の ACL"
+  desc="2 つのリストが並んでいる。左は folder:A で、エントリは user:chen · view の 1 つ。右は doc:readme で、エントリは user:anne · owner、group:eng · view (破線、グループのエントリ)、user:chen · view の 3 つ。「アプリがコピー」とラベルの付いた強調された破線の矢印が、フォルダの Chen のエントリから readme の Chen のエントリへ向かう。"
+  nodes={[
+    { id: "fh", x: 130, y: 40, label: "folder:A", kind: "object", mono: true },
+    { id: "fc", x: 130, y: 100, label: "user:chen · view", kind: "object", mono: true, w: 200, on: true },
+    { id: "dh", x: 440, y: 40, label: "doc:readme", kind: "object", mono: true },
+    { id: "da", x: 440, y: 100, label: "user:anne · owner", kind: "object", mono: true, w: 200 },
+    { id: "dg", x: 440, y: 145, label: "group:eng · view", kind: "group", mono: true, w: 200 },
+    { id: "dc", x: 440, y: 190, label: "user:chen · view", kind: "object", mono: true, w: 200, on: true },
+  ]}
+  edges={[
+    { from: "fc", to: "dc", label: "アプリがコピー", dashed: true, on: true },
+  ]}
+  caption="各オブジェクトが自分のリストを持つ。readme の Chen のエントリは、何かがフォルダからコピーしたから存在するにすぎない。"
+/>
+
+チェックそのものは検索である。readme のリストから Chen を探す。フォルダがどこへ行ったかに注意したい。継承は ACL モデルの一部ではないので、エントリは readme にコピーされなければならない。ドキュメントの作成時にコピーされるか (VMS は "supports ACL inheritance for files created within a directory tree" (ディレクトリツリー内で作成されたファイルについて ACL の継承をサポートする)、§5)、アプリケーションがコピーするかである。一度コピーされると、エントリはどこから来たかを覚えていない。
+
+## RBAC: ユーザー、ロール、権限
+
+ロールベースアクセス制御は、ユーザーと権限の間に 1 つの層を置く。NIST の言葉では "RBAC controls all access through roles assigned to users. Each role assigns a collection of permissions to users" (RBAC はすべてのアクセスをユーザーに割り当てられたロールを通じて制御する。各ロールは権限の集まりをユーザーに割り当てる) ([Kuhn, Coyne and Weil 2010](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf))。Ferraiolo と Kuhn が 1992 年に提案し、統一された NIST モデルが 2004 年に ANSI INCITS 359-2004 となった ([NIST RBAC project](https://csrc.nist.gov/projects/role-based-access-control))。
+
+ロールはグローバルなので、1 つのドキュメントに対する付与には、そのドキュメントを名前に含むロールが必要になる。通しの例は 3 つのロールになる。
+
+| ユーザー | ロール | ロールが付与する権限 |
+| --- | --- | --- |
+| `user:anne` | `readme_owner` | `doc:readme` の編集、`doc:readme` の閲覧 |
+| `user:beto` | `eng` | `doc:readme` の閲覧 |
+| `user:chen` | `folderA_viewer` | `folder:A` の閲覧、`doc:readme` の閲覧 (およびフォルダ A 内の他のすべてのドキュメント) |
+
+Chen に閲覧権限を与えるのはどのロールか。
+
+<Graph
+  width={620}
+  height={280}
+  minWidth={520}
+  title="ユーザー、ロール、権限"
+  desc="3 つの列がある。左: user:anne、user:beto、user:chen のピル。中央: 破線のロールの箱 role:readme_owner、role:eng、role:folderA_viewer があり、各ユーザーは同じ行のロールに割り当てられている。右: 権限 edit doc:readme、view doc:readme、view folder:A。readme_owner は readme の編集と閲覧を付与し、eng は readme の閲覧を付与し、folderA_viewer はフォルダ A の閲覧と readme の閲覧を付与する。強調: user:chen から role:folderA_viewer、そして view doc:readme へ。"
+  nodes={[
+    { id: "anne", x: 70, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 70, y: 140, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 70, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "ro", x: 290, y: 50, label: "role:readme_owner", kind: "group", mono: true },
+    { id: "re", x: 290, y: 140, label: "role:eng", kind: "group", mono: true },
+    { id: "rf", x: 290, y: 230, label: "role:folderA_viewer", kind: "group", mono: true, on: true },
+    { id: "pe", x: 520, y: 50, label: "edit doc:readme", kind: "object", mono: true },
+    { id: "pv", x: 520, y: 140, label: "view doc:readme", kind: "object", mono: true, on: true },
+    { id: "pf", x: 520, y: 230, label: "view folder:A", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "ro", label: "保持" },
+    { from: "beto", to: "re", label: "保持" },
+    { from: "chen", to: "rf", label: "保持", on: true },
+    { from: "ro", to: "pe", label: "付与" },
+    { from: "ro", to: "pv" },
+    { from: "re", to: "pv", label: "付与" },
+    { from: "rf", to: "pf", label: "付与" },
+    { from: "rf", to: "pv", on: true },
+  ]}
+  caption="Chen は role:folderA_viewer を持ち、そのロールの権限の集合に view doc:readme が含まれている。"
+/>
+
+フォルダが名前としてしか残っていないことに注意したい。`folderA_viewer` は、システムが理解できる形では `folder:A` とまったくつながっていない。誰かがその権限の集合を「フォルダ A 内のすべて」と等しく保たなければならない。`readme_owner` のようなオブジェクトごとのロールは、下の表で扱うロール爆発につながるパターンである。
+
+## ABAC: 属性に対する述語
+
+属性ベースアクセス制御は付与をまったく格納しない。NIST SP 800-162 はこれを、認可が "is determined by evaluating attributes associated with the subject, object, requested operations, and, in some cases, environment against policy, rules, or relationships" (主体、オブジェクト、要求された操作、場合によっては環境に関連付けられた属性を、ポリシー、規則、または関係に照らして評価することで決定される) 方法論と定義している ([NIST SP 800-162](https://csrc.nist.gov/pubs/sp/800/162/upd2/final))。判定は属性の関数であり、リクエスト時に評価される。
+
+通しの例の 3 つの付与を、AWS が 2023 年にオープンソース化したポリシー言語 [Cedar](https://docs.cedarpolicy.com/policies/syntax-policy.html) の構文で規則として書くと次のようになる。
+
+```text
+// Anne: the owner may view
+permit (principal, action == Action::"view", resource)
+when { resource.owner == principal };
+
+// Beto: anyone whose team is listed on the document
+permit (principal, action == Action::"view", resource)
+when { resource.viewerTeams.contains(principal.team) };
+
+// Chen: anyone listed as a viewer of the document's folder
+permit (principal, action == Action::"view", resource)
+when { resource.folder.viewers.contains(principal) };
+```
+
+<Callout kind="warn" title="説明用の例">
+
+この 3 つのポリシーは Cedar の文書化された構文に従っているが、Cedar のバリデータには通していない。属性名 (`owner`、`viewerTeams`、`team`、`folder`、`viewers`) は本ページで考えたものである。
+
+</Callout>
+
+Chen のリクエストを判定するために、エンジンはどの属性を読むか。
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={520}
+  title="ABAC の判定が読む属性"
+  desc="左側はリクエストで、プリンシパル user:chen、アクション view、リソース doc:readme。これらが黄色の箱「ポリシー評価」に入る。右側では、4 つの緑の属性の箱が同じ評価に入る。doc:readme.owner = user:anne、doc:readme.viewerTeams = eng、doc:readme.folder = folder:A、folder:A.viewers = user:chen。最後の 2 つが強調されている。評価の下に判定 permit があり、強調されている。"
+  nodes={[
+    { id: "p", x: 85, y: 60, label: "principal\nuser:chen", kind: "subject", mono: true },
+    { id: "a", x: 85, y: 150, label: "action\nview", kind: "object", mono: true },
+    { id: "r", x: 85, y: 240, label: "resource\ndoc:readme", kind: "object", mono: true },
+    { id: "e", x: 290, y: 120, label: "ポリシー\n評価", kind: "server" },
+    { id: "d", x: 290, y: 250, label: "permit\n(3 つ目の規則)", kind: "object", on: true },
+    { id: "a1", x: 500, y: 40, label: "doc:readme.owner\n= user:anne", kind: "store", mono: true },
+    { id: "a2", x: 500, y: 110, label: "doc:readme.viewerTeams\n= [\"eng\"]", kind: "store", mono: true },
+    { id: "a3", x: 500, y: 180, label: "doc:readme.folder\n= folder:A", kind: "store", mono: true, on: true },
+    { id: "a4", x: 500, y: 250, label: "folder:A.viewers\n= [user:chen]", kind: "store", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "e" },
+    { from: "a", to: "e" },
+    { from: "r", to: "e" },
+    { from: "a1", to: "e" },
+    { from: "a2", to: "e" },
+    { from: "a3", to: "e", on: true },
+    { from: "a4", to: "e", on: true },
+    { from: "e", to: "d", label: "判定", on: true },
+  ]}
+  caption="規則は 1 度だけ格納され、規則が検査する事実はユーザー、ドキュメント、フォルダの属性として存在する。"
+/>
+
+強調された 2 つの属性に注意したい。`doc:readme.folder` と `folder:A.viewers` は属性値として格納された関係であり、規則は一方をたどって他方に至る。規則は短いままだが、データは属性に移っており、どの判定にどの属性が関わるかを規則の外で示すものは何もない。
+
+## ReBAC: 関係のグラフ
+
+関係ベースアクセス制御は、要求者とリソースの間の関係から判定する。Fong はこの用語を作ったのは Carrie Gates だとしており (彼女の 2007 年のワークショップ論文は本ページのために確認していない)、Philip Fong の 2011 年のモデルは判定を "on the relationship between the resource owner and the resource accessor" (リソースの所有者とリソースにアクセスする者との関係に) 基づかせる ([Fong 2011](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf))。Fong は、友人の友人のように二項関係は合成できる一方、ロールは単項述語であり、ブール結合以上のものはほとんど提供しないと強調している。
+
+Zanzibar は各関係をリレーションタプル `object#relation@user` として格納し (§2.1)、名前空間設定が関係の組み合わせ方を定める。論文の図 1 はまさにこの例をエンコードしている。所有者は編集者であり、編集者は閲覧者であり、"viewers of the parent folder are also viewers of the document" (親フォルダの閲覧者はそのドキュメントの閲覧者でもある)。論文は ReBAC という言葉を使っていない。
+
+格納されたタプルのグラフは、どのようにして Chen にたどり着くか。
+
+<Graph
+  width={620}
+  height={280}
+  minWidth={520}
+  title="フォルダを加えた表 1、Chen の経路を強調"
+  desc="左に 3 人のユーザーがいる。user:anne から doc:readme へ owner とラベルの付いた矢印がある。user:beto から破線のユーザーセット group:eng#member へ member とラベルの付いた矢印があり、そこから doc:readme へ viewer とラベルの付いた矢印がある。user:chen から folder:A へ viewer とラベルの付いた矢印があり、folder:A から doc:readme へ parent とラベルの付いた矢印がある。強調: user:chen、viewer の辺、folder:A、parent の辺、doc:readme、そして user:chen から doc:readme への「viewer (計算)」とラベルの付いた強調された破線の辺。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 240, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 240, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+    { from: "chen", to: "doc", label: "viewer (計算)", dashed: true, on: true, labelOffset: -14 },
+  ]}
+  caption="実線の辺は格納されたタプルである。破線の辺は格納されていない。Check が名前空間設定の parent の規則からそれを計算する。"
+/>
+
+ここではフォルダがフォルダのままであることに注意したい。readme は `parent` タプルで `folder:A` を指し、規則がチェック時に「親の閲覧者」を「readme の閲覧者」に変える。手順を追ったたどり方は [リレーションタプルのページ](../relation-tuples/) にある。
+
+## 同じ例をセルごとに
+
+| | ACL | RBAC | ABAC | ReBAC (Zanzibar) |
+| --- | --- | --- | --- | --- |
+| 格納されるもの | readme のリスト: Anne (owner)、`group:eng` (view)、Chen (view、フォルダ A からコピー) | 3 つのロール割り当てと、3 つのロールの権限の集合 | 3 つの規則と、ユーザー、readme、フォルダ A の属性 | 5 つのタプル (owner、eng のメンバー、eng の閲覧、parent、フォルダの閲覧) と 1 つの名前空間設定 |
+| readme を閲覧できるのは誰か | リストを読み、`group:eng` を展開する: Anne、Beto、Chen | 「`doc:readme` の閲覧」を付与するロールを持つ全員: Anne、Beto、Chen | どこにも格納されていない。すべてのユーザーについて規則を評価する。Anne、Beto、Chen | `doc:readme#viewer` を Expand する (§2.4.5): Anne、Beto、Chen |
+| Beto が eng を抜ける | Beto をグループから外す。readme のリストはそのまま | Beto の `eng` への割り当てを外す | `user:beto.team` を変更する | タプル `group:eng#member@user:beto` を 1 つ削除する |
+| readme がフォルダ A からフォルダ B に移る | A からコピーしたエントリを削除し、B のエントリをコピーする。readme と、一緒に移った他のすべてについて | 「`doc:readme` の閲覧」を `folderA_viewer` から外し、`folderB_viewer` ロールに加える | `doc:readme.folder` を変更する。規則はそのまま | `parent` タプルを 1 つ置き換える: `doc:readme#parent@folder:A#...` が `@folder:B#...` になる |
+| 難しい点 | 継承とグループは後付けである。「Chen は何を見られるか」はすべてのオブジェクトのリストを走査することを意味する | ロール爆発: "thousands of separate roles" (何千もの別々のロール)、n 個のブール条件には 2ⁿ 個のロールが必要になりうる ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf))。`readme_owner` のようなオブジェクトごとのロールは事態を悪化させる | 監査: ABAC は "is easy to set up, but analyzing or changing user permissions can be problematic" (設定は容易だが、ユーザーの権限の分析や変更が問題になりうる) ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf))。「attribute sprawl」は同じ問題を指す業界の略語であり、NIST の用語ではない | グラフの走査: "Recursive pointer chasing … has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups" (再帰的なポインタの追跡は、深く入れ子になったグループや多数の子グループを持つグループに対して低レイテンシを維持するのが難しい) (§3.2.4)。SpiceDB はデフォルトで深さを [50 ホップ](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth) に、OpenFGA の `resolveNodeLimit` は [25](https://openfga.dev/docs/getting-started/setup-openfga/configuration) に制限している |
+
+中央の 2 行に注意したい。Beto が eng を抜けるのは、どのモデルでも 1 つの変更である。ここでのどのモデルも何らかの形のグループを持っているからである。フォルダの移動で違いが出る。ACL と RBAC はフォルダの意味を readme の付与にコピーしたので、それらの付与を書き換えなければならない。ABAC と ReBAC はフォルダをデータとして保ったので、1 つの値が変わるだけである。ReBAC はさらに「誰が閲覧できるか」を格納されたデータから答えられるようにしており、規則だけの ABAC の版ではそれができない。
+
+## Zanzibar の位置
+
+Zanzibar は ReBAC のシステムである。リレーションタプルが辺であり、ユーザーセット書き換えルール (§2.3.1) が辺の組み合わせ方を定める。そのデータモデルは、Multics、UNIX、POSIX ACL、VMS に見られる "permissions, users, groups, and inheritance" (権限、ユーザー、グループ、継承) をサポートし (§5)、グループを単なるもう 1 つのオブジェクトとして扱う。これが "allows us to unify the concepts of ACLs and groups" (ACL とグループの概念を統一できる) ようにしている (§2.1)。
+
+RBAC はその上に載る。論文は、ロールは "are similar to Zanzibar relations" (Zanzibar の関係に似ている) と述べ、"A number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language" (多くの Zanzibar クライアントが、Zanzibar の名前空間設定言語の上に RBAC のポリシーを実装している) と述べている (§5)。どのようにしてかは述べていない。1 つの方法は、ロールを `member` 関係がユーザーセットであるオブジェクトにすることである。
+
+Chen のロールはタプルではどう見えるか。
+
+<Graph
+  width={620}
+  height={210}
+  minWidth={520}
+  title="Zanzibar におけるユーザーセットとしてのロール"
+  desc="user:chen から破線のユーザーセット role:folderA_viewer#member へ member とラベルの付いた矢印がある。そのユーザーセットから folder:A へ viewer とラベルの付いた矢印があり、doc:readme へもう 1 本 viewer とラベルの付いた矢印がある。Chen からロールを経て doc:readme に至る経路が強調されている。"
+  nodes={[
+    { id: "chen", x: 70, y: 105, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "role", x: 290, y: 105, label: "role:folderA_viewer#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 530, y: 45, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 530, y: 165, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "role", label: "member", on: true },
+    { from: "role", to: "folder", label: "viewer" },
+    { from: "role", to: "doc", label: "viewer", on: true },
+  ]}
+  caption="3 つのタプル: role:folderA_viewer#member@user:chen、folder:A#viewer@role:folderA_viewer#member、doc:readme#viewer@role:folderA_viewer#member。説明のための例であり、論文からのものではない。"
+/>
+
+ロールが `group:eng` と同じ形、すなわちユーザーセットであることに注意したい。Zanzibar では 2 本目の `viewer` の辺は不要である。parent の規則がすでにフォルダの閲覧者に readme を与えているので、ロールはフォルダの閲覧者でありさえすればよい。
+
+ABAC は論文が扱っていない部分である。時刻やネットワークのようなリクエストに対する条件は、格納されたオブジェクト間の関係ではない。Zanzibar 系のいくつかのシステムはそれを加えている。SpiceDB には CEL で書く条件である caveat があり ([SpiceDB schema docs](https://authzed.com/docs/spicedb/concepts/schema))、OpenFGA には [conditions](https://openfga.dev/docs/modeling/conditions) があり、Permify のスキーマには `attribute` と `rule` がある ([Permify docs](https://fusionauth.io/permify-docs/getting-started/modeling))。Cedar は逆の方向を取る。階層への所属を表す `in` を備えた属性の言語である ([Cedar syntax](https://docs.cedarpolicy.com/policies/syntax-policy.html))。
+
+<Callout kind="note" title="実際のシステムはモデルを混ぜる">
+
+実際に運用されているシステムで単一のモデルだけのものは少ない。ユーザーをロールに割り当てる Google の Cloud IAM は "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (Zanzibar の ACL ストレージと評価システムの上の層として構築されている) (§5)。上の Zanzibar 系のシステムがサポートする組み合わせは、共有と階層のための関係のグラフ、その中で名前付きの関係として表すロール、そしてコンテキストのための少数の属性の条件である。これは本ページとしてのまとめであり、論文の主張ではない。
+
+</Callout>
+
+<Callout kind="paper" title="論文では">
+
+問題の定義: §1。タプルとユーザーセット: §2.1。書き換えルール: §2.3.1。Multics、UNIX、POSIX ACL、VMS、RBAC、IAM のシステム: §5 関連研究。ポインタの追跡とそのコスト: §3.2.3 と §3.2.4。
+
+</Callout>
+
+## 出典
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- B. W. Lampson, "Protection", 1971; ACM SIGOPS OSR 8(1), 1974 に再録, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
+- J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
+- D. R. Kuhn, E. J. Coyne, T. R. Weil, "Adding Attributes to Role-Based Access Control", IEEE Computer 43(6), 2010, [PDF](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)
+- NIST, Role Based Access Control project, [csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
+- NIST SP 800-162, Guide to Attribute Based Access Control, [csrc.nist.gov/pubs/sp/800/162/upd2/final](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)
+- Philip W. L. Fong, "Relationship-Based Access Control: Protection Model and Policy Language", CODASPY '11, [PDF](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)
+- Cedar のポリシー構文, [docs.cedarpolicy.com/policies/syntax-policy.html](https://docs.cedarpolicy.com/policies/syntax-policy.html)
+- SpiceDB の再帰と最大深さ, [authzed.com/docs/spicedb/modeling/recursion-and-max-depth](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)
+- SpiceDB のスキーマ言語 (ベンダーのドキュメント), [authzed.com/docs/spicedb/concepts/schema](https://authzed.com/docs/spicedb/concepts/schema)
+- OpenFGA の設定, [openfga.dev/docs/getting-started/setup-openfga/configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)
+- OpenFGA の conditions, [openfga.dev/docs/modeling/conditions](https://openfga.dev/docs/modeling/conditions)
+- Permify のモデリング, [fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)

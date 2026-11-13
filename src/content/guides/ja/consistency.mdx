@@ -1,0 +1,328 @@
+---
+title: "一貫性、スナップショット、zookie"
+description: "認可システムが ACL と内容の変更順序を尊重しなければならない理由と、Zanzibar が Spanner のタイムスタンプと zookie でそれを実現する方法。"
+section: guide
+part: mechanisms
+order: 4
+checked: "2026-11-13"
+paper: ["2.2", "2.4", "2.4.4", "3.2.1", "3.2.5", "4.1"]
+---
+
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+ACL チェックは「このユーザーはいま、これを行ってよいか」に答える。世界中に複製されたシステムでは、難しいのは「いま」の部分である。サーバーごとに、見てきた書き込みが異なるからである。このページでは、Zanzibar がどの順序を尊重すると約束しているか、[Spanner](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf) がその約束を低コストで守れるようにしている仕組み、そして *zookie* によってクライアントがチェックに必要な最低限の新しさを指定できる仕組みを説明する。
+
+## 「new enemy」問題
+
+論文は §2.2 を 1 つの規則で始める。"ACL checks must respect the order in which users modify ACLs and object contents to avoid unexpected sharing behaviors." (予期しない共有の挙動を避けるため、ACL チェックはユーザーが ACL やオブジェクトの内容を変更した順序を尊重しなければならない。) 論文はこの失敗を「new enemy」問題と呼ぶ。ACL から削除されたばかりのユーザーが、その削除によって隠すはずだった内容をまだ見られてしまう、という問題である。
+
+論文は 2 つの例を挙げている。§2.2 と並べて読めるように、このページではこの 2 つの例に限って論文自身の名前 Alice、Bob、Charlie を使う。それ以外の箇所では、共通の例である Anne、Beto、Chen を使う。
+
+<Callout kind="paper" title="§2.2、例 A：ACL 更新の順序の無視">
+
+1. Alice がフォルダの ACL から Bob を削除する。
+2. 次に Alice が Charlie に、新しいドキュメントをそのフォルダに移動するよう依頼する。ドキュメントの ACL はフォルダの ACL を継承する。
+3. Bob は新しいドキュメントを見られないはずだが、ACL チェックが 2 つの ACL 変更間の順序を無視すると、見えてしまう可能性がある。
+
+</Callout>
+
+チェックが 2 つ目の変更を見て 1 つ目を見なかった場合、何が問題になるのか。左のコマは順序付けのないシステムであり、右のコマは Zanzibar における同じ流れである。
+
+<Frames>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="時間"
+  ticks={["T_A1", "T_A2"]}
+  title="順序付けのない例 A"
+  desc="Alice がフォルダの ACL から Bob を削除し (A1)、次に Charlie に依頼して、Charlie が新しいドキュメントをフォルダに移動する (A2)。Bob のチェックは A2 を含み A1 を含まないデータで評価されるので、Bob は新しいドキュメントを読むことを許可される。これが違反である。"
+  events={[
+    { lane: 0, t: 0, label: "A1: フォルダから\nBob を削除", kind: "write" },
+    { lane: 1, t: 1, label: "A2: 新しい文書を\nフォルダへ移動", kind: "write" },
+    { lane: 2, t: 2, label: "チェックは A2 を\n見て A1 を見ない", kind: "bad" },
+    { lane: 2, t: 3, label: "Bob が新しい\n文書を見る", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "依頼" }]}
+  caption="違反：チェックが A1 なしで A2 を適用し、Bob が新しいドキュメントを読む。"
+/>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="時間"
+  ticks={["T_A1", "T_A2"]}
+  title="Zanzibar における例 A"
+  desc="A1 と A2 には T_A1 が T_A2 より小さいタイムスタンプが割り当てられる。T_A2 より前のスナップショットでのチェックには、フォルダ内のドキュメントが見えない。T_A2 以降のスナップショットでのチェックには A1 も見えるので、どちらの場合も Bob は拒否される。"
+  events={[
+    { lane: 0, t: 0, label: "A1: フォルダから\nBob を削除", kind: "write" },
+    { lane: 1, t: 1, label: "A2: 新しい文書を\nフォルダへ移動", kind: "write" },
+    { lane: 2, t: 2, label: "T < T_A2 で\nチェック", kind: "read", mono: true },
+    { lane: 2, t: 3, label: "文書はまだ\nフォルダにない", kind: "good" },
+    { lane: 2, t: 4, label: "T ≥ T_A2 で\nチェック", kind: "read", mono: true },
+    { lane: 2, t: 5, label: "A1 が見える:\nBob は拒否", kind: "good" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "依頼" }]}
+  caption="Zanzibar：A2 を含むスナップショットは必ず A1 も含む。"
+/>
+
+</Frames>
+
+A2 を含み A1 を含まないスナップショットは存在しないことに注意されたい。保証はこれに尽きる。§2.2 の説明によれば、チェックが `T < T_A2` で実行されれば "the document ACLs will not include the folder ACL" (ドキュメントの ACL にはフォルダの ACL が含まれない)、`T ≥ T_A2 > T_A1` で実行されれば "will observe update A1, which removed Bob from the folder ACL" (Bob をフォルダの ACL から削除した更新 A1 を観測する)。
+
+<Callout kind="paper" title="§2.2、例 B：古い ACL の新しい内容への誤適用">
+
+1. Alice がドキュメントの ACL から Bob を削除する。
+2. 次に Alice が Charlie に、そのドキュメントに新しい内容を追加するよう依頼する。
+3. Bob は新しい内容を見られないはずだが、Bob が削除される前の古い ACL で ACL チェックが評価されると、見えてしまう可能性がある。
+
+</Callout>
+
+例 B が異なるのは 1 点だけである。2 つ目の変更はドキュメントの *内容* に対するものであり、内容は Zanzibar ではなくクライアントアプリケーションのストレージにある。Zanzibar はその書き込みを一切見ない。それでは、新しい内容についてのチェックが十分に新しくなければならないことを、Zanzibar はどうやって知るのか。
+
+<Frames>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="時間"
+  ticks={["T_B1", "T_B2"]}
+  title="順序付けのない例 B"
+  desc="Alice がドキュメントの ACL から Bob を削除し (B1)、次に Charlie に依頼して、Charlie が新しい内容を追加する (B2)。Bob のチェックは B1 より前の古いスナップショットで評価されるので、まだ Bob を許可し、Bob は新しい内容を読む。これが違反である。"
+  events={[
+    { lane: 0, t: 0, label: "B1: 文書の ACL\nから Bob を削除", kind: "write" },
+    { lane: 1, t: 1, label: "B2: 新しい内容\nを追加", kind: "write" },
+    { lane: 2, t: 2, label: "古い T < T_B1\nでチェック", kind: "bad", mono: true },
+    { lane: 2, t: 3, label: "Bob が新しい\n内容を見る", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "依頼" }]}
+  caption="違反：古い ACL が新しい内容に適用される。"
+/>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="時間"
+  ticks={["T_B1", "T_B2"]}
+  title="Zanzibar における例 B"
+  desc="Alice が Bob を削除する (B1)。Charlie の内容変更は、そのタイムスタンプ T_B2 をエンコードした zookie を受け取り、それを新しい内容とともに格納する。Bob のチェックはその zookie を伴うので、T_B2 以降のスナップショットで評価される。そのスナップショットは B1 を含むので、Bob は拒否される。"
+  events={[
+    { lane: 0, t: 0, label: "B1: 文書の ACL\nから Bob を削除", kind: "write" },
+    { lane: 1, t: 1, label: "B2 + zookie\n(T_B2)", kind: "write" },
+    { lane: 2, t: 2, label: "チェックが\nzookie を伴う", kind: "read" },
+    { lane: 2, t: 3, label: "B1 が見える:\nBob は拒否", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "依頼" },
+    { from: [1, 1], to: [2, 2], label: "zookie", dashed: true },
+  ]}
+  caption="Zanzibar：B2 とともに格納された zookie により、スナップショットは T_B2 以降に強制される。"
+/>
+
+</Frames>
+
+破線の矢印が解決策である。zookie は内容とともに移動するので、B2 についてのチェックは B2 より古いスナップショットでは実行できず、そのようなスナップショットはすべて B1 をすでに含んでいる。このページの残りでは、これが依拠する 2 つの特性と、zookie を受け渡すプロトコルを説明する。
+
+## 因果的に意味のあるタイムスタンプ
+
+§2.2 は 2 つの特性を挙げている。*外部一貫性* と *有界な古さを伴うスナップショット読み取り* である。論文は外部一貫性について [Gifford の 1981 年の博士論文](#出典) を引用している。Spanner の論文はトランザクションについて同じ特性を "if a transaction T1 commits before another transaction T2 starts, then T1's commit timestamp is smaller than T2's" (トランザクション T1 が別のトランザクション T2 の開始前にコミットするなら、T1 のコミットタイムスタンプは T2 のものより小さい) と述べ、これが "equivalently, linearizability" (同値な言い方をすれば線形化可能性) であるとして [Herlihy と Wing (1990)](https://doi.org/10.1145/78969.78972) を引用している。
+
+Zanzibar の言葉では (§2.2)、因果的に関連する 2 つの更新 `x ≺ y` には `T_x < T_y` となるタイムスタンプが割り当てられる。タイムスタンプ `T` におけるスナップショット読み取りは "observes all updates with timestamps ≤ T" (タイムスタンプが ≤ T であるすべての更新を観測する)。合わせると、読み取りが `y` を見るなら、`y` より前に起きたことすべても見ることになる。これが成り立つのはストアがマルチバージョンだからである。Spanner はスナップショット読み取りを "a read in the past that executes without locking" (ロックなしで実行される過去の時点の読み取り) と定義しており ([Spanner §4.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf))、マルチバージョンのストアでは "each write on a data item produces a new copy (or version)" (データ項目への各書き込みが新しいコピー (すなわちバージョン) を生成する) ([Bernstein と Goodman, 1983](https://doi.org/10.1145/319996.319998))。
+
+この規則のもとで読み手には何が見え、結果整合性のレプリカの読み手には何が見えうるのか。この変形例では、readme は最初 `folder:A` の外にある。Anne はまず Chen を `folder:A` の閲覧者から削除し (`x`、T=10 でコミット)、次に `doc:readme` を `folder:A` に移動する (`y`、T=20)。
+
+<Swimlane
+  lanes={["ACL 書き込み", "スナップショット読み取り", "結果整合レプリカ"]}
+  laneWidth={170}
+  rowHeight={64}
+  timeLabel="時間"
+  ticks={["T=10", "T=20"]}
+  title="スナップショット読み取りと結果整合性のレプリカ"
+  desc="書き込み x はタイムスタンプ 10 で Chen を folder:A から削除し、書き込み y はタイムスタンプ 20 で doc:readme を folder:A に移動する。x は y より前に起きる。T=15 のスナップショット読み取りは x だけを見て、T=25 のスナップショット読み取りは x と y を見る。結果整合性のレプリカは x より先に y を適用し、その間 Chen は readme を見られる。"
+  events={[
+    { lane: 0, t: 0, label: "x: folder:A から\nChen を削除", kind: "write" },
+    { lane: 0, t: 1, label: "y: readme を\nfolder:A へ移動", kind: "write" },
+    { lane: 1, t: 2, label: "T=15 のスナップ\nショット: x のみ", kind: "good" },
+    { lane: 2, t: 2, label: "y はあるが\nx はまだない", kind: "bad" },
+    { lane: 1, t: 3, label: "T=25 のスナップ\nショット: x と y", kind: "good" },
+    { lane: 2, t: 3, label: "Chen が readme を\n見る (x 未適用)", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [0, 1], label: "x ≺ y" }]}
+  caption="任意の T におけるスナップショットは因果的順序の接頭辞である。結果整合性のレプリカは、追いつくまで x なしで y を見せうる。"
+/>
+
+2 つのスナップショット読み取りは、見える *量* は異なるが *順序* が異なることはないことに注意されたい。どちらも履歴の接頭辞である。結果整合性のレプリカもいずれは収束するが、それまでは一度も存在しなかった状態を見せうる。論文自身も §5 でこの対比を示している。TAO は "offers eventual global consistency with asynchronous replication" (非同期レプリケーションによる結果的なグローバル一貫性を提供する) のに対し、Zanzibar は "provides external consistency and snapshot reads with bounded staleness" (外部一貫性と、有界な古さを伴うスナップショット読み取りを提供する)。
+
+## タイムスタンプの出どころ：TrueTime
+
+Zanzibar はこれらのタイムスタンプを自分で計算しない。ACL を Spanner に格納しており、Spanner の "TrueTime mechanism assigns each ACL write a microsecond-resolution timestamp, such that the timestamps of writes reflect the causal ordering between writes" (TrueTime 機構は各 ACL 書き込みにマイクロ秒分解能のタイムスタンプを割り当て、書き込みのタイムスタンプが書き込み間の因果的順序を反映するようにする) (§2.2)。その仕組みの概要は [Spanner の論文 (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf) の §3、§4.1.2、§4.2.1 にある。
+
+- `TT.now()` は区間 `[earliest, latest]` を返し、その区間は呼び出された絶対時刻を含むことが保証される。不確かさ `ε` は区間の幅の半分である。Google の本番環境では "typically a sawtooth function of time, varying from about 1 to 7 ms over each poll interval" (典型的には時間ののこぎり波状の関数であり、各ポーリング間隔の中で約 1 ms から 7 ms まで変化する) であった。
+- **開始**：リーダーは書き込みに、`TT.now().latest` 以上のコミットタイムスタンプ `s` を与える。
+- **コミット待ち**：`TT.after(s)` が真になるまで、つまり `s` がどこにおいても確実に過ぎるまで、クライアントはその書き込みを見られない。Spanner は "the expected wait is at least 2 ∗ ε̄" (期待される待ち時間は少なくとも 2 ∗ ε̄ である) と述べている。ここで `ε̄` は平均の誤差上限である (§4.2.1)。
+
+待つことでタイムスタンプが因果的になるのはなぜか。
+
+<Graph
+  width={640}
+  height={300}
+  title="Spanner のコミット待ち"
+  desc="書き込みがリーダーに届き、リーダーは TT.now() を呼んで earliest から latest まで、幅 2 イプシロンの区間を得る。リーダーは s を latest とする。次に TT.after(s) が真になるまで約 2 イプシロン待ち、その後で初めて書き込みを可視にして応答する。応答の後に始まるトランザクションは TT.now() をより後に呼ぶので、その latest、したがってそのタイムスタンプは s より大きい。"
+  nodes={[
+    { id: "ear", x: 70, y: 55, label: "earliest", kind: "note" },
+    { id: "lat", x: 240, y: 55, label: "latest", kind: "note" },
+    { id: "req", x: 70, y: 150, label: "書き込み到着\nTT.now()", kind: "server" },
+    { id: "s", x: 240, y: 150, label: "s = latest", kind: "server", mono: true },
+    { id: "after", x: 420, y: 150, label: "TT.after(s)\nis true", kind: "server", mono: true },
+    { id: "vis", x: 568, y: 150, label: "書き込みが可視、\nクライアントに通知", kind: "store", on: true },
+    { id: "next", x: 568, y: 255, label: "次の書き込み:\nタイムスタンプ > s", kind: "client" },
+  ]}
+  edges={[
+    { from: "ear", to: "lat", label: "不確かさ: 2ε", dir: "both", labelOffset: -16 },
+    { from: "lat", to: "s", label: "開始規則", dashed: true },
+    { from: "req", to: "s", label: "s を選ぶ" },
+    { from: "s", to: "after", label: "コミット待ち", on: true, labelOffset: -34 },
+    { from: "after", to: "vis" },
+    { from: "vis", to: "next", label: "原因となる" },
+  ]}
+  minWidth={520}
+  caption="時間は左から右へ、そして下の次の書き込みへと進む。不確かさの分だけ待つことで、誰かがその書き込みに基づいて行動する前に s は過去になっている。"
+/>
+
+最後のステップに注意されたい。書き込みを原因とするものはすべて、クライアントが通知を受けた後、つまり `s` が確実に過ぎた後に始まる。したがってその `TT.now().latest`、ひいてはそのタイムスタンプは `s` より大きい。これが外部一貫性であり、その代償は書き込みごとの数ミリ秒の待ち時間である。Zanzibar の論文の §5 はこれを、Zanzibar は "builds on Spanner’s TrueTime abstraction" (Spanner の TrueTime 抽象の上に構築され)、"provide linearizable commit timestamps encoded as zookies" (zookie としてエンコードされた線形化可能なコミットタイムスタンプを提供する) とまとめている。
+
+同じ論文は、Zanzibar が代わりに論理時計を使えない理由も説明している。Lamport クロックは "require explicit participation of all 'processes', where in Zanzibar’s use cases some of the 'processes' can be external clients or even human users" (すべての「プロセス」の明示的な参加を必要とするが、Zanzibar のユースケースでは「プロセス」の一部が外部クライアントや人間のユーザーでさえありうる) (§5)。例 A における「依頼」の矢印は Alice が Charlie に話しかけることであり、どの時計にも見えない経路である。
+
+## zookie プロトコル
+
+順序のよく定まったタイムスタンプでのスナップショット読み取りは、例 A を解決する。例 B ではさらに、チェックが *十分に新しい* ことが必要である。すべてのチェックを最新のスナップショットで評価する方法もありうるが、§2.2 はそれを退けている。それは "would require global data synchronization with high-latency round trips and limited availability" (高レイテンシのラウンドトリップを伴うグローバルなデータ同期が必要となり、可用性も制限される)。代わりに、クライアント自身が必要な新しさを *zookie* として持ち運ぶ。zookie とは "an opaque byte sequence encoding a globally meaningful timestamp that reflects an ACL write, a client content version, or a read snapshot" (ACL の書き込み、クライアントのコンテンツバージョン、または読み取りスナップショットを反映する、グローバルに意味を持つタイムスタンプをエンコードした不透明なバイト列) である (§2.4)。
+
+各ステップで zookie を持っているのは誰か。図では、Anne が `doc:readme` への編集を保存し、その後 Beto がそれを開く。
+
+<Swimlane
+  lanes={["クライアントアプリ", "クライアントストレージ", "Zanzibar", "Spanner"]}
+  laneWidth={142}
+  rowHeight={64}
+  timeLabel="時間"
+  title="zookie プロトコル"
+  desc="1. Anne が編集を保存する。クライアントアプリは Zanzibar にコンテンツ変更チェックを送り、Zanzibar は Spanner の最新スナップショットでそれを評価する。2. Zanzibar は、それ以前のすべての ACL 書き込みより後のタイムスタンプを持つ zookie とともに、許可と答える。3. アプリは新しい内容と zookie を、1 回のアトミックな書き込みで自身のストレージに書き込む。4. 後で Beto が readme を開く。アプリは内容とその zookie を読み込む。5. アプリは zookie を伴うチェックを送る。6. Zanzibar は zookie と少なくとも同じだけ新しいスナップショットでそれを評価し、答えを返す。"
+  events={[
+    { lane: 0, t: 0, label: "Anne が編集を保存", kind: "note" },
+    { lane: 0, t: 1, label: "コンテンツ変更\nチェック", kind: "read" },
+    { lane: 2, t: 1, label: "最新スナップ\nショットで評価", kind: "read" },
+    { lane: 3, t: 1, label: "最新スナップショット", kind: "good" },
+    { lane: 2, t: 2, label: "許可 +\nzookie z", kind: "good" },
+    { lane: 0, t: 2, label: "z を受け取る", kind: "note" },
+    { lane: 0, t: 3, label: "v2 + z を書く", kind: "write" },
+    { lane: 1, t: 3, label: "readme v2, z", kind: "write", mono: true },
+    { lane: 0, t: 4, label: "Beto が readme\nを開く", kind: "note" },
+    { lane: 0, t: 5, label: "check(Beto, z)", kind: "read", mono: true },
+    { lane: 2, t: 5, label: "スナップショット\n≥ z で評価", kind: "read", mono: true },
+    { lane: 3, t: 5, label: "T ≥ z で\n読む", kind: "good", mono: true },
+    { lane: 2, t: 6, label: "そのスナップ\nショットで回答", kind: "good" },
+    { lane: 0, t: 6, label: "v2 を表示/非表示", kind: "note" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [2, 1], label: "zookie なし" },
+    { from: [2, 1], to: [3, 1] },
+    { from: [2, 2], to: [0, 2], label: "zookie z" },
+    { from: [0, 3], to: [1, 3], label: "アトミック" },
+    { from: [1, 3], to: [0, 4], label: "v2, z を読み込む", dashed: true },
+    { from: [0, 5], to: [2, 5], label: "z を伴う" },
+    { from: [2, 5], to: [3, 5] },
+    { from: [2, 6], to: [0, 6] },
+  ]}
+  caption="zookie はコンテンツ変更チェックによって発行され、内容の隣に格納され、そのバージョンに対する後続のすべてのチェックで返される。"
+/>
+
+§2.2 と §2.4.4 に沿って、1 ステップずつ見ていく。
+
+1. **コンテンツ変更チェック。** ユーザーが変更を保存しようとするとき、クライアントは *コンテンツ変更* チェックを送る。これは "does not carry a zookie and is evaluated at the latest snapshot" (zookie を伴わず、最新のスナップショットで評価される) (§2.4.4)。
+2. **zookie の発行。** 変更が許可されれば、レスポンスに zookie が含まれる。Zanzibar は "encodes a current global timestamp in the zookie and ensures that all prior ACL writes have lower timestamps" (現在のグローバルタイムスタンプを zookie にエンコードし、それ以前のすべての ACL 書き込みがより小さいタイムスタンプを持つことを保証する) (§2.2)。
+3. **内容とともに格納。** "The client stores the zookie with the content change in an atomic write to the client storage" (クライアントは、クライアントストレージへのアトミックな書き込みで、内容の変更とともに zookie を格納する) (§2.2)。チェック自体は、内容の書き込みと同じトランザクション内にある必要はない。
+4. **後続のチェックが持ち運ぶ。** そのコンテンツバージョンに対する後続のチェックはすべて、格納された zookie を送る。
+5. **少なくとも同じだけ新しく評価。** "A check is always evaluated at a consistent snapshot no earlier than the given zookie" (チェックは常に、与えられた zookie より前でない一貫したスナップショットで評価される) (§2.4.4)。
+
+例 B では、新しい内容とともに格納された zookie は `T_B2` をエンコードしており、`T_B2 > T_B1` なので、ステップ 5 における Bob のチェックは彼の削除を見ることになる。
+
+zookie は意図的に不透明にされている。論文は "an opaque cookie instead of the actual timestamp to discourage our clients from choosing arbitrary timestamps and to allow future extensions" (クライアントが任意のタイムスタンプを選ぶのを抑止し、将来の拡張を可能にするため、実際のタイムスタンプではなく不透明な cookie) を用いている (§2.4)。§5 はさらに、このプロトコルは "does *not* let clients read or evaluate ACLs at an arbitrary snapshot" (クライアントが任意のスナップショットで ACL を読み取ったり評価したりすることを *許さない*) と述べている。これにより選択が Zanzibar に委ねられる。
+
+## 「ちょうどその時点」ではなく「少なくとも同じだけ新しい」理由
+
+zookie は下限である。Zanzibar はチェックを zookie のタイムスタンプで評価してもよいし、それより後の任意のタイムスタンプで評価してもよい。§2.2 はこれをプロトコルの「at-least-as-fresh semantics」(少なくとも同じだけ新しいというセマンティクス) と呼び、それが "allow[s] Zanzibar to choose any timestamp fresher than the one encoded in a zookie" (Zanzibar が zookie にエンコードされたものより新しい任意のタイムスタンプを選択できるようにする) と述べている。この自由は 3 つの形で使われる。
+
+- **デフォルトの古さ (§3.2.1)。** zookie がない場合、サーバーは "a default staleness chosen to ensure that all transactions are evaluated at a timestamp that is as recent as possible without impacting latency" (レイテンシに影響を与えずに可能な限り新しいタイムスタンプですべてのトランザクションが評価されるように選ばれたデフォルトの古さ) を選ぶ。各サーバーは、ある古さでの読み取りがゾーンの外に出なければならなかった頻度を追跡し、デフォルトを "the lowest 'safe' value" (最も低い「安全な」値) に動かす。論文は、これが "is purely a performance optimization" (純粋に性能の最適化である) と述べている。"Zanzibar always respects zookies when provided" (zookie が与えられれば、Zanzibar は常にそれを尊重する) からである。
+- **量子化 (§3.2.5)。** 評価タイムスタンプは "rounded up to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies" (リクエストの zookie による古さの制約を尊重しつつ、1 秒や 10 秒といった粗い粒度に切り上げられる)。*切り上げ* が下限を破ることはない。
+- **キャッシュの共有 (§3.2.5)。** キャッシュキーにはスナップショットのタイムスタンプが含まれるので、異なるスナップショットの結果が混ざることはない。切り上げのおかげで "the vast majority of recent checks and reads" (最近のチェックと読み取りの大多数) が同じタイムスタンプで評価され、"share cache results" (キャッシュ結果を共有する)。
+
+3 つのチェックが数百ミリ秒ずつ異なる zookie を伴って届いたとき、切り上げによって何が得られるか。
+
+<Graph
+  width={620}
+  height={250}
+  title="評価タイムスタンプの切り上げ"
+  desc="doc:readme に対する Anne、Beto、Chen の 3 つのチェックは、同じ 1 秒の中でマイクロ秒単位の異なるタイムスタンプを持つ zookie を伴う。Zanzibar はそれぞれを、すべての zookie 以上である同じ粗いタイムスタンプ T_q に切り上げるので、3 つは 1 つのスナップショットで評価され、T_q をキーとするキャッシュエントリを共有する。リーダーにある最新のデータまでの、それより後の任意のタイムスタンプも許される。"
+  nodes={[
+    { id: "a", x: 90, y: 50, label: "Anne のチェック\nzookie 12.104 s", kind: "client" },
+    { id: "b", x: 90, y: 125, label: "Beto のチェック\nzookie 12.380 s", kind: "client" },
+    { id: "c", x: 90, y: 200, label: "Chen のチェック\nzookie 12.911 s", kind: "client" },
+    { id: "q", x: 330, y: 125, label: "T_q = 13 s\nで評価", kind: "server", on: true },
+    { id: "cache", x: 330, y: 220, label: "キャッシュキーは\nT_q を含む", kind: "server" },
+    { id: "now", x: 530, y: 125, label: "最新のデータ\n(リーダー)", kind: "store" },
+  ]}
+  edges={[
+    { from: "a", to: "q", label: "切り上げ", on: true },
+    { from: "b", to: "q", on: true },
+    { from: "c", to: "q", label: "切り上げ", on: true },
+    { from: "q", to: "cache", label: "共有" },
+    { from: "q", to: "now", label: "これも可", dashed: true },
+  ]}
+  minWidth={480}
+  caption="3 つの zookie はいずれも下限であり、13 s はそのすべてを満たす。タイムスタンプは説明のためのもので、論文のものではない。"
+/>
+
+`T_q` はわずかに未来であってもよいことに注意されたい。§3.2.5 はこの場合を扱っている。Spanner は "ensures that a snapshot read at timestamp T will observe all writes up to T—this holds even if T is in the future, in which case the read will wait until TrueTime has moved past T." (タイムスタンプ T でのスナップショット読み取りが T までのすべての書き込みを観測することを保証する。これは T が未来であっても成り立ち、その場合、読み取りは TrueTime が T を過ぎるまで待つ。)
+
+## Safe リクエストと Recent リクエスト
+
+新しさの代償は距離である。"When a zookie timestamp is higher than that of the most recent data replicated to the region, the storage reads require cross-region round trips to the leader replica" (zookie のタイムスタンプがそのリージョンに複製された最新データのタイムスタンプより大きい場合、ストレージの読み取りにはリーダーレプリカへのリージョンをまたぐラウンドトリップが必要となる) (§4.1)。ストレージは "replication heartbeats with 8-second intervals" (8 秒間隔のレプリケーションハートビート) で複製を行うので、§4.1 はリクエストを 10 秒で分けている。
+
+- *Safe* リクエストは "have zookies more than 10 seconds old and can be served within the region most of time" (10 秒より古い zookie を持ち、ほとんどの場合リージョン内で処理できる)。
+- *Recent* リクエストは "have zookies less than 10 seconds old and often require inter-region round trips" (10 秒未満の zookie を持ち、しばしばリージョン間のラウンドトリップを必要とする)。
+
+8 秒は Spanner の論文と一致する。Spanner では "a leader by default advances MinNextTS() values every 8 seconds" (リーダーはデフォルトで 8 秒ごとに MinNextTS() の値を進める) ので、レプリカは "can serve reads at timestamps greater than 8 seconds old in the worst case" (最悪の場合でも 8 秒より古いタイムスタンプでの読み取りを処理できる) ([Spanner §4.2.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf))。
+
+論文の表 2 (§4.2) は、2018 年 12 月の 7 日間について、各種リクエストのレイテンシをミリ秒単位で、平均 (標準偏差) として示している。
+
+| | API | 50%ile | 95%ile | 99%ile |
+| --- | --- | --- | --- | --- |
+| Safe | Check | 3.0 (0.091) | 9.46 (0.3) | 15.0 (1.19) |
+| Safe | Read | 2.18 (0.031) | 3.71 (0.094) | 8.03 (3.28) |
+| Safe | Expand | 4.27 (0.313) | 8.84 (0.586) | 34.1 (4.35) |
+| Recent | Check | 2.86 (0.087) | 60.0 (2.1) | 76.3 (2.59) |
+| Recent | Read | 2.21 (0.054) | 40.1 (2.03) | 86.2 (3.84) |
+| Recent | Expand | 5.79 (0.224) | 45.6 (3.44) | 121.0 (2.38) |
+| Recent | Write | 127.0 (3.65) | 233.0 (23.0) | 401.0 (133.0) |
+
+中央値は近いが、テールは近くない。Recent の Check の 95 パーセンタイルは 60.0 ms で、Safe の 9.46 ms に対して大きい。これがリージョンをまたぐ往復のコストである。書き込みが最も遅いのは、書き込みが "always require distributed coordination among Spanner servers" (常に Spanner サーバー間の分散協調を必要とする) からである (§4.2)。Spanner ではその協調にコミット待ちが含まれる。§4.1 と図 3 によれば、Safe リクエストは Recent リクエストより "about two orders of magnitude" (約 2 桁) 多く、"which allows Zanzibar to serve the vast majority of ACL checks locally" (これにより Zanzibar は ACL チェックの大多数をローカルで処理できる)。大半のリクエストが Safe でいられるのは、zookie が下限にすぎないからである。古い内容に対するチェックは、すでに複製済みの古いデータを使ってよい。
+
+<Callout kind="note" title="未検証">
+
+論文は Gifford の研究を 1981 年の Stanford の博士論文 (参考文献 18) として引用しているが、Spanner の論文は同じ研究を Xerox PARC の技術報告 CSL-81-8 (1982 年 7 月) として引用している。このページのためにオンラインのコピーは確認していない。
+
+</Callout>
+
+## 出典
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.2, §2.4, §2.4.4, §3.2.1, §3.2.5, §4.1, §4.2 (Table 2), §5.
+- James C. Corbett et al., [Spanner: Google's Globally-Distributed Database](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), OSDI '12, §1, §3, §4.1, §4.1.2, §4.2.1.
+- Maurice P. Herlihy and Jeannette M. Wing, [Linearizability: A Correctness Condition for Concurrent Objects](https://doi.org/10.1145/78969.78972), ACM TOPLAS 12(3), July 1990, pp. 463–492.
+- Philip A. Bernstein and Nathan Goodman, [Multiversion Concurrency Control: Theory and Algorithms](https://doi.org/10.1145/319996.319998), ACM TODS 8(4), December 1983.
+- David K. Gifford, *Information Storage in a Decentralized Computer System*, PhD thesis, Stanford, 1981 (Zanzibar の参考文献 18)。Xerox PARC CSL-81-8 (Spanner の参考文献 16) としても引用されている。リンクは確認していない。

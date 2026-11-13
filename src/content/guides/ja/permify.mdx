@@ -1,0 +1,218 @@
+---
+title: "Permify"
+description: "Zanzibar をモデルにしたオープンソースの認可サービス。現在は FusionAuth が所有し AGPL-3.0 でライセンスされ、スキーマ言語、snap token、PostgreSQL のデータストアを持つ。"
+section: ecosystem
+order: 3
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3.2.4"]
+product:
+  name: Permify
+  maintainer: FusionAuth (acquisition announced 2025-11-20)
+  license: AGPL-3.0 (Apache-2.0 until 2025-05-12)
+  language: Go
+  repo: https://github.com/Permify/permify
+  docs: https://fusionauth.io/permify-docs
+  status: "開発継続中"
+  latest: v1.7.6 (2026-11-05)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+Permify は Go で書かれた認可サービスである。ドキュメントは Permify を "an open-source authorization service for creating fine-grained and scalable authorization systems" (きめ細かくスケーラブルな認可システムを構築するためのオープンソースの認可サービス) であり、"inspired by Google's consistent, global authorization system, Google Zanzibar" (Google の一貫性を備えたグローバル認可システムである Google Zanzibar に着想を得た) ものと説明している ([Permify docs](https://fusionauth.io/permify-docs))。Permify Schema でエンティティ型とその関係を記述し、関係をタプルとして書き込み、主体が権限を持つかどうかを gRPC または HTTP でサーバーに問い合わせる。
+
+FusionAuth による Permify の買収は 2025-11-20 に発表された ([Permify の発表](https://permify.co/post/fusionauth-acquires-permify/)、[FusionAuth の発表](https://fusionauth.io/blog/fusionauth-acquires-permify))。FusionAuth は現在この製品を "FusionAuth FGA by Permify" と呼んでおり ([FusionAuth のサポート記事](https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify))、ドキュメントは [fusionauth.io/permify-docs](https://fusionauth.io/permify-docs) にある。Permify の記事は "The core Permify project remains open source and will continue to live on GitHub." (中核の Permify プロジェクトはオープンソースのままであり、今後も GitHub 上で存続する) と述べている。
+
+## 論文と Permify の対応
+
+各行は、論文の概念と、Permify が文書化している最も近いものを並べたものである。Permify に相当するものがない場合はその旨を記す。
+
+| 論文 | Permify |
+| --- | --- |
+| 名前空間設定 (§2.3) | Permify Schema の `entity` ブロック。`relation`、`permission` (同義語の `action`)、`attribute`、`rule` を持つ ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling)) |
+| リレーションタプル `object#relation@user` (§2.1) | リレーショナルタプル `entity#relation@subject`。例: `doc:readme#owner@user:anne` ([storing data](https://fusionauth.io/permify-docs/getting-started/sync-data)) |
+| `_this` | `relation` に格納されたタプル。permission はその関係の名前を書くことでそれらを含める |
+| `computed_userset` | 同じエンティティの別の relation または permission の名前を書く。`view = viewer or edit` の中の `edit` がその例 |
+| `tuple_to_userset` | 関係をたどるドット記法。`parent.view` など |
+| 和集合、積集合、除外 | `or`、`and`、`not` |
+| zookie (§2.2, §2.4) | snap token、すなわち `snap_token` フィールド ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)) |
+| Check (§2.4.4) | `Permission.Check`、および `BulkCheck` ([service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)) |
+| Read (§2.4.1) | `Data.ReadRelationships`、および `ReadAttributes` |
+| Write (§2.4.2) | `Data.Write`、`WriteRelationships`、`Delete`、`DeleteRelationships` |
+| Watch (§2.4.3) | `Watch.Watch`。サーバーストリーム ([Watch operations](https://fusionauth.io/permify-docs/operations/watch)) |
+| Expand (§2.4.5) | `Permission.Expand` |
+| Leopard (§3.2.4) | 相当するものは文書化されていない |
+| Spanner (§3.1) | PostgreSQL、またはインメモリエンジン (設定のデフォルト) ([configuration](https://fusionauth.io/permify-docs/setting-up/configuration)) |
+
+Permify には、論文に記述のない検索系の呼び出し `LookupEntity`、`LookupSubject`、`SubjectPermission` もある。
+
+## Permify Schema で書いた共通の例
+
+論文の図 1 は、ドキュメントに同心円状の 3 つの関係を与える。所有者は編集者であり、編集者は閲覧者であり、親フォルダの閲覧者はそのドキュメントの閲覧者である (§2.3.1)。以下は、そのモデルを共通の例の型を使って Permify Schema で書いたものである。
+
+```text
+entity user {}
+
+entity group {
+    relation member @user
+}
+
+entity folder {
+    relation viewer @user @group#member
+
+    permission view = viewer
+}
+
+entity doc {
+    relation parent @folder
+    relation owner @user
+    relation editor @user @group#member
+    relation viewer @user @group#member
+
+    permission edit = owner or editor
+    permission view = viewer or edit or parent.view
+}
+```
+
+`@group#member` により、関係はユーザーセット、すなわち「このグループのメンバー全員」を保持できる。`parent.view` は `parent` 関係をたどってフォルダに移り、そこでフォルダの `view` 権限を評価する。ドキュメントには "The same traversal rule applies to both `relation.userset` and `relation.permission`" (同じたどり方の規則が `relation.userset` と `relation.permission` の両方に適用される) とある ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling))。
+
+<Callout title="ドキュメントと照合済み、実行はしていない">
+このスキーマは 2026-11-13 時点で文書化されている構文に従っている。参照したのは [modeling のページ](https://fusionauth.io/permify-docs/getting-started/modeling) と、メンテナーによるサンプル [google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml) である。Permify のバリデータには通していない。
+</Callout>
+
+共通の例は 5 つのタプルから成る。
+
+```text
+doc:readme#owner@user:anne
+group:eng#member@user:beto
+doc:readme#viewer@group:eng#member
+doc:readme#parent@folder:A
+folder:A#viewer@user:chen
+```
+
+3 人がそれぞれ readme にアクセスできるのは、どの格納済みタプルとどの規則によるのか。
+
+<Graph
+  width={600}
+  height={260}
+  title="Permify の関係で表した共通の例"
+  desc="5 つの関係。user:anne は doc:readme の owner である。user:beto は group:eng の member である。group:eng#member は doc:readme の viewer である。folder:A は doc:readme の parent である。user:chen は folder:A の viewer である。Chen からフォルダ A を経て readme に至る経路が強調されており、これは規則 parent.view によって解決される。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer (#member)", dashed: true },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Anne は owner → edit → view で、Beto はグループのユーザーセットで、Chen は parent.view で閲覧できる。破線は単一のユーザーではなくユーザーセットを表す。"
+/>
+
+`folder:A` から readme への矢印は格納されたタプル (`doc:readme#parent@folder:A`) である一方、Chen のフォルダへのアクセスから readme へ至る一歩はどこにも格納されていない点に注意してほしい。スキーマの `parent.view` が、論文の `tuple_to_userset` と同じように、チェック時にそれを計算する。
+
+## アーキテクチャ
+
+Permify のサーバー群はどのように作業を分担し、タプルはどこに置かれるのか。
+
+<Graph
+  width={620}
+  height={290}
+  title="ドキュメントに記述された Permify のデプロイ"
+  desc="サービスは Permify の Pod を、ポート 3478 の gRPC またはポート 3476 の HTTP で呼び出す。分散モードでは Pod がコンシステントハッシュリングを形成し、Pod 2 にハッシュされたリクエストは Pod 2 のローカルな Ristretto キャッシュから応答される。両方の Pod が PostgreSQL を読み書きし、PostgreSQL には書き込み用と読み取り用の接続を別々に設定できる。Watch のコンシューマーは 1 つの Pod へのストリームを保持する。"
+  nodes={[
+    { id: "app", x: 95, y: 60, label: "あなたのサービス", kind: "client" },
+    { id: "watch", x: 95, y: 235, label: "Watch コンシューマー", kind: "client" },
+    { id: "p1", x: 315, y: 60, label: "Permify Pod 1\nローカルキャッシュ", kind: "server" },
+    { id: "p2", x: 315, y: 235, label: "Permify Pod 2\nローカルキャッシュ", kind: "server" },
+    { id: "pg", x: 530, y: 148, label: "PostgreSQL\nwriter + reader", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "p1", label: "Check, Write" },
+    { from: "p1", to: "p2", label: "ハッシュリング", dir: "both", dashed: true },
+    { from: "p1", to: "pg", label: "SQL" },
+    { from: "p2", to: "pg", label: "SQL" },
+    { from: "p2", to: "watch", label: "Watch ストリーム" },
+  ]}
+  caption="黄: Permify サーバー。緑: データストア。青: クライアント。リングは任意 (分散モード)。"
+/>
+
+構成要素は以下のとおりで、いずれもドキュメントによる。
+
+- サーバーはデフォルトで HTTP のポート 3476 と gRPC のポート 3478 で待ち受ける ([configuration](https://fusionauth.io/permify-docs/setting-up/configuration))。データベースの設定項目では、`writer` と `reader` の URI を別々に指定できる。
+- 各 Pod は、チェック結果をプロセスローカルな [Ristretto](https://github.com/dgraph-io/ristretto) キャッシュに保持する。"there is no shared cache layer" (共有キャッシュ層はない) ([cache](https://fusionauth.io/permify-docs/operations/cache))。
+- `distributed.enabled` を指定すると、Pod は各リクエストをコンシステントハッシュリング上にハッシュする。そのため "subsequent API calls with the same hash will retrieve the response from the instance 2, regardless of which instance that API called from" (同じハッシュを持つ後続の API 呼び出しは、どのインスタンスから呼ばれたかにかかわらず、インスタンス 2 から応答を取得する)。サーキットブレーカーは、データベースが停止している間、データベースへの呼び出しを止める。
+- PostgreSQL は MVCC でタプルを格納する。Permify は "a separate database snapshot for each write and delete operation" (書き込みと削除の操作ごとに別のデータベーススナップショット) を作成し、任意のガベージコレクタが古いバージョンを削除する。
+- 各 Watch ストリームは "opens a long-lived connection with a continuous polling loop against the database" (データベースに対して継続的なポーリングループを回す長寿命の接続を開く) ([Watch operations](https://fusionauth.io/permify-docs/operations/watch))。
+
+## 一貫性
+
+Permify の snap token は zookie の役割を果たす。Write がそれを返し、クライアントはそれをリソースとともに保存し、後のチェックで `snap_token` として送り返す。ドキュメントはこれを "a token that consists of an encoded timestamp" (エンコードされたタイムスタンプから成るトークン) と説明し、アクセスチェックにおいて "to ensure that the snapshot of the access control is at least as fresh as the resource timestamp" (アクセス制御のスナップショットが少なくともリソースのタイムスタンプと同じだけ新しいことを保証するために) 比較されるとしている ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens))。これは、zookie を伴うチェックに対する論文の保証、すなわち与えられた zookie より "a consistent snapshot no earlier than" (前でない一貫したスナップショット) と同じものである (§2.4.4)。
+
+共有設定の変更後に行うチェックは、どのようにしてその変更を観測するのか。
+
+<Swimlane
+  lanes={["あなたのサービス", "Permify", "PostgreSQL"]}
+  timeLabel="時間"
+  title="snap token の往復"
+  desc="サービスがタプル doc:readme#viewer@group:eng#member を書き込む。Permify はそれを PostgreSQL の新しいトランザクションとして記録し、snap token を返す。サービスはそのトークンを readme とともに保存する。後で Beto の readme に対するチェックがそのトークンを送ると、Permify はトークンより古くないスナップショットでチェックを評価するので、新しい viewer タプルが見える。"
+  events={[
+    { lane: 0, t: 0, label: "Write: eng#member が\nreadme を閲覧", kind: "write" },
+    { lane: 1, t: 0, label: "Data.Write", kind: "write" },
+    { lane: 2, t: 0, label: "新しいトランザクション\nを記録", kind: "write" },
+    { lane: 1, t: 1, label: "snap_token\nを返す", kind: "note" },
+    { lane: 0, t: 1, label: "トークンを\nreadme とともに保存", kind: "write" },
+    { lane: 0, t: 2, label: "Check beto view\n+ snap_token", kind: "read" },
+    { lane: 1, t: 2, label: "トークンより古くない\nスナップショット", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 0] },
+    { from: [1, 1], to: [0, 1], label: "snap_token" },
+    { from: [0, 2], to: [1, 2] },
+  ]}
+  caption="論文の zookie と同じように、トークンはコンテンツとともに運ばれる (§2.2)。"
+/>
+
+トークンがない場合の挙動に注意してほしい。論文では、Zanzibar は "choose a reasonably recent snapshot, possibly offering a lower-latency response" (適度に新しいスナップショットを選択し、より低レイテンシな応答を返せる可能性がある) (§2.4.1)。Permify はそうせず、`transactions` テーブルから最新のトランザクションの ID を読み、そのスナップショットで評価する。結果はその ID を含むキーでキャッシュされる ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens))。キャッシュキーは `check_{tenant_id}_{schema_version}:{snapshot_token}:{check_request}` である ([cache](https://fusionauth.io/permify-docs/operations/cache))。したがって新しい書き込みは、古いキーを無効化するのではなく新しいキーを生む。
+
+## 論文との違い
+
+- **属性と規則。** Permify Schema は属性ベースのチェックのために `attribute` と `rule` を追加している。例: `permission view = check_ip_range(ip_range) or admin` ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling))。Zanzibar の書き換えはタプルだけを対象とする (§2.3.1)。
+- **コンテキストタプル。** "dynamically added to permission request operations" (権限リクエストの操作に動的に追加される) 関係は、格納済みの関係とともに評価され、書き込まれることはない ([contextual tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples))。
+- **テナント。** `Tenancy` サービスがテナントを作成、一覧、削除する ([service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto))。論文にはテナントの概念はない。
+- **ストレージ。** Spanner ではなく、MVCC スナップショットを伴う PostgreSQL を使う。Spanner では TrueTime 機構がすべての ACL 書き込みにタイムスタンプを付ける (§2.2, §3.1)。分散キャッシュは "across availability zones (within an AWS region)" (アベイラビリティゾーンをまたいで (1 つの AWS リージョン内で)) 動作する ([cache](https://fusionauth.io/permify-docs/operations/cache))。
+- **非正規化インデックスがない。** 論文は深く入れ子になったグループのチェックに Leopard で応える (§3.2.4)。Permify が文書化しているのは結果のキャッシュとコンシステントハッシュであり、集合インデックスではない。
+- **Lookup。** `LookupEntity` と `LookupSubject` は「どのリソースか」「どの主体か」という問いに答える。論文の API はこれを扱わない。
+
+## 現状
+
+- 最初のリリースは 2022-08-03 の v0.0.0-alpha1。最新は 2026-11-05 の v1.7.6。デフォルトブランチへの最後のコミットは 2026-11-10。スター数は約 6.0k ([releases](https://github.com/Permify/permify/releases)、GitHub API、2026-11-13)。
+- ライセンス: LICENSE ファイルは 2023-02-14 に Apache-2.0 の本文に置き換えられ ([commit 97285f9](https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7))、2025-05-12 に "docs: update license" という題のコミットで AGPL-3.0 の本文に置き換えられた ([commit 26912d9](https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5))。それ以前の 2022 年には、このファイルは Apache-2.0 の本文 (2022-07-14)、次に GPL-3.0 (2022-08-25)、次に AGPL-3.0 (2022-08-26) だった ([LICENSE の履歴](https://github.com/Permify/permify/commits/master/LICENSE))。
+- 所有者: FusionAuth が買収し、2025-11-20 に Permify のブログで発表された ([記事](https://permify.co/post/fusionauth-acquires-permify/))。FusionAuth の発表ページには日付が記されていない ([記事](https://fusionauth.io/blog/fusionauth-acquires-permify))。どちらもベンダー自身が書いたものである。
+- ドキュメントは docs.permify.co から [fusionauth.io/permify-docs](https://fusionauth.io/permify-docs) に移った。
+
+## 出典
+
+- Permify リポジトリ: [https://github.com/Permify/permify](https://github.com/Permify/permify)
+- Permify ドキュメント (FusionAuth): [https://fusionauth.io/permify-docs](https://fusionauth.io/permify-docs)
+- Modeling: [https://fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)
+- Storing data: [https://fusionauth.io/permify-docs/getting-started/sync-data](https://fusionauth.io/permify-docs/getting-started/sync-data)
+- Snap tokens: [https://fusionauth.io/permify-docs/operations/snap-tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)
+- Cache mechanisms: [https://fusionauth.io/permify-docs/operations/cache](https://fusionauth.io/permify-docs/operations/cache)
+- Watch operations: [https://fusionauth.io/permify-docs/operations/watch](https://fusionauth.io/permify-docs/operations/watch)
+- Contextual tuples: [https://fusionauth.io/permify-docs/operations/contextual-tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples)
+- Configuration: [https://fusionauth.io/permify-docs/setting-up/configuration](https://fusionauth.io/permify-docs/setting-up/configuration)
+- gRPC サービス: [https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)
+- サンプルスキーマ: [https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml)
+- ライセンスの履歴: [https://github.com/Permify/permify/commits/master/LICENSE](https://github.com/Permify/permify/commits/master/LICENSE)
+- ライセンスのコミット: [https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7](https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7)、[https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5](https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5)
+- 買収: [https://permify.co/post/fusionauth-acquires-permify/](https://permify.co/post/fusionauth-acquires-permify/)、[https://fusionauth.io/blog/fusionauth-acquires-permify](https://fusionauth.io/blog/fusionauth-acquires-permify)
+- 製品名: [https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify](https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify)

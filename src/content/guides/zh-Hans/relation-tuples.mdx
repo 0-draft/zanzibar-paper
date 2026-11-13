@@ -1,0 +1,384 @@
+---
+title: "关系元组与用户集"
+description: "Zanzibar 如何把每一项权限存为一条小事实，命名空间配置如何把这些事实变成有效 ACL，以及 Check 如何把结果当作图来遍历。"
+section: guide
+part: mechanisms
+order: 3
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "2.3.1", "2.4.1", "2.4.5", "3.2.3"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar 把权限存储为*关系元组*：每行一条事实，读作“该用户与该对象具有该关系”。本页其余的内容，即重写规则、Check 和 Expand，都是根据这些行计算出来的。
+
+贯穿全站的示例：Anne、Beto 和 Chen（`user:anne`、`user:beto`、`user:chen`）；位于 `folder:A` 中的文档 `doc:readme`；组 `group:eng`。Anne 拥有 readme，Beto 属于 eng，eng 的成员可以查看 readme，Chen 可以查看文件夹 A。
+
+## 语法
+
+论文（§2.1）用四条规则给出了文本表示法：
+
+```text
+⟨tuple⟩   ::= ⟨object⟩ ‘#’ ⟨relation⟩ ‘@’ ⟨user⟩
+⟨object⟩  ::= ⟨namespace⟩ ‘:’ ⟨object_id⟩
+⟨user⟩    ::= ⟨user_id⟩ | ⟨userset⟩
+⟨userset⟩ ::= ⟨object⟩ ‘#’ ⟨relation⟩
+```
+
+一个元组由三部分组成。*对象*是命名空间加一个 ID，例如 `doc:readme`。*关系*是命名空间所定义的名称，例如 `owner` 或 `viewer`。*用户*要么是单个用户 ID，要么是一个*用户集*。在论文中用户 ID 是整数；本站写作 `user:anne`，以便示例易读。
+
+单个元组表达的是什么？
+
+<Graph
+  width={560}
+  height={150}
+  title="一个关系元组"
+  desc="一个标有 user:anne 的胶囊形框，一条标有 owner 的箭头指向标有 doc:readme 的方框。这就是元组 doc:readme#owner@user:anne。"
+  nodes={[
+    { id: "anne", x: 110, y: 75, label: "user:anne", kind: "subject", mono: true },
+    { id: "doc", x: 450, y: 75, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner" }]}
+  caption="doc:readme#owner@user:anne，画成一条从用户指向对象的边。"
+/>
+
+它只表达一件事：Anne 与 `doc:readme` 具有关系 `owner`。论文列出了标识一个元组的主键：命名空间、对象 ID、关系和用户。
+
+## 用户集：指向一个组的元组
+
+语法的第四条规则最值得关注。用户集本身就是一个对象加一个关系：`group:eng#member` 表示“与 `group:eng` 具有 `member` 关系的每一个用户”。当一个元组的用户是用户集时，一行就把某种权限授予了一整组用户，而这组用户由其他行来定义。
+
+一个元组如何让 eng 的每个成员都能访问 readme？
+
+<Graph
+  width={600}
+  height={170}
+  minWidth={480}
+  title="用户为用户集的元组"
+  desc="user:beto 有一条标有 member 的箭头指向虚线框 group:eng#member。该虚线框有一条标有 viewer 的箭头指向 doc:readme。Beto 只能经由该组到达 readme。"
+  nodes={[
+    { id: "beto", x: 80, y: 85, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 85, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 515, y: 85, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+  ]}
+  caption="两个元组：group:eng#member@user:beto 和 doc:readme#viewer@group:eng#member。虚线框是用户集，而不是单个用户。"
+/>
+
+注意，没有任何一行同时提到 Beto 和 readme。Beto 是查看者，是因为他属于第二个元组所指向的集合。向 eng 添加一个成员，该成员就能查看 readme，而 readme 的 ACL 无需任何改动。
+
+同样的手法可以嵌套。组的成员可以是另一个用户集，例如 `group:eng#member@group:sre#member`（一个假设的子团队，不属于贯穿示例），成员关系随后会沿着元组所描述的层级一直传递下去。论文用一句话概括了这一点："a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership"（⟨*userset*⟩ 允许 ACL 引用组，从而支持表示嵌套的组成员关系）（§2.1）。论文也说明了这样做的好处：用元组而非按对象的 ACL 来建模 "allows us to unify the concepts of ACLs and groups"（使我们能够统一 ACL 与组的概念）（§2.1）。组只是一个对象，其 `member` 关系就是一个 ACL。
+
+## 把表 1 画成一张图
+
+论文的表 1 列出了四个示例元组。把用户 10 和 11 改名为 Anne 和 Beto，再为 Chen 添加一个元组，它们是：
+
+| 元组 | 含义 |
+| --- | --- |
+| `doc:readme#owner@user:anne` | Anne 是 readme 的所有者 |
+| `group:eng#member@user:beto` | Beto 是 eng 的成员 |
+| `doc:readme#viewer@group:eng#member` | eng 的成员是 readme 的查看者 |
+| `doc:readme#parent@folder:A#...` | readme 位于文件夹 A 中 |
+| `folder:A#viewer@user:chen` | Chen 是文件夹 A 的查看者（不在表 1 中） |
+
+第四行中的 `#...` 是论文的记法，表示 "a relation that does not affect the semantics of the tuple"（一个不影响元组语义的关系）（表 1 标题）：该元组指向文件夹本身，而不是指向其用户的某个集合。
+
+五行放在一起是什么样子？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="表 1 与 Chen 的元组合成一张图"
+  desc="左侧是三个用户。user:anne 有一条标有 owner 的箭头直接指向右侧的 doc:readme。user:beto 有一条标有 member 的箭头指向虚线用户集 group:eng#member，后者有一条标有 viewer 的箭头指向 doc:readme。user:chen 有一条标有 viewer 的箭头指向 folder:A，后者有一条标有 parent 的箭头指向 doc:readme。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="每个已存储的元组都是一条边，从用户（或用户集）指向对象。"
+/>
+
+注意，`parent` 边并未涉及访问权限。正如论文所说，有些关系 "only define abstract relations between objects. These abstract relations may indirectly affect access control given userset rewrite rules specified in namespace configs"（仅定义对象之间的抽象关系。在命名空间配置中指定的用户集重写规则的作用下，这些抽象关系可能间接影响访问控制）（§2.1）。Chen 能否看到 readme 取决于这样一条规则，这是下一节的内容。
+
+## 命名空间配置
+
+在存储元组之前，客户端要先配置一个*命名空间*，例如 `doc` 或 `folder`（§2.3）。配置列出该命名空间的关系，每个关系有一个名称和一个*关系配置*，此外还有存储参数：分片设置和对象 ID 的编码方式。
+
+仅靠元组并不能定义有效 ACL。许多客户端希望每个编辑者同时也是查看者。为每个对象的每个编辑者额外存储一个 `viewer` 元组，用论文的话说，会 "wasteful and make it hard to make modifications across all objects"（既浪费，又使得跨所有对象的修改变得困难）（§2.3.1）。因此，关系配置可以带有一条*用户集重写规则*：一个以对象 ID 为输入、返回一棵用户集表达式树的函数。
+
+以下是论文的图 1，原样照录：
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+
+relation {
+ name: "editor"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "owner" } }
+} } }
+
+relation {
+ name: "viewer"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "editor" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+> 图 1：针对文档的具有同心关系的简单命名空间配置。所有所有者都是编辑者，所有编辑者都是查看者。此外，父文件夹的查看者也是该文档的查看者。
+
+重写树的叶节点有三种（§2.3.1）：
+
+| 叶节点 | 返回什么 | 在图 1 中 |
+| --- | --- | --- |
+| `_this` | 针对该对象和关系所存储的元组中的用户，包括这些元组所指向的用户集。关系没有规则时的默认行为。 | 存储在 `doc:readme` 上的 `viewer` 元组 |
+| `computed_userset` | 同一对象上另一个关系的用户集。 | 同一文档上的 `editor`；对于 `editor` 则是 `owner` |
+| `tuple_to_userset` | 从对象读取一个*元组集*，再根据找到的每个元组计算出一个用户集。 | 读取文档的 `parent` 元组，然后取每个父文件夹上的 `viewer` |
+
+叶节点通过并集、交集和排除进行组合（§2.3.1）。图 1 只用到了并集。交集要求用户属于每一个子节点，例如“同时属于 eng 的编辑者”；排除会去掉一个集合，例如“除黑名单之外的查看者”。这两个例子只是示意，并非出自论文。
+
+`viewer` 规则会为一个文档构建怎样的树？
+
+<Graph
+  width={620}
+  height={380}
+  minWidth={540}
+  title="doc:readme#viewer 的表达式树"
+  desc="根节点 doc:readme#viewer，其下是一个虚线 union 节点。union 有三个子节点：_this，读取已存储的 viewer 元组；computed_userset relation editor；以及 tupleset 为 parent、computed_userset 为 viewer 的 tuple_to_userset，它到达父文件夹的查看者。editor 子节点经由 editor 自身的规则展开为另一个 union，包含 _this 和 computed_userset relation owner。"
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "this1", x: 90, y: 180, label: "_this", kind: "group", mono: true },
+    { id: "cue", x: 310, y: 180, label: "computed_userset\nrelation: editor", kind: "group", mono: true },
+    { id: "ttu", x: 520, y: 180, label: "tuple_to_userset\ntupleset: parent\nthen: viewer", kind: "group", mono: true },
+    { id: "n1", x: 90, y: 250, label: "文档上已存储的\nviewer 元组", kind: "note" },
+    { id: "n3", x: 520, y: 270, label: "每个父文件夹的\n查看者", kind: "note" },
+    { id: "u2", x: 310, y: 262, label: "union", kind: "group", mono: true },
+    { id: "this2", x: 200, y: 345, label: "_this", kind: "group", mono: true },
+    { id: "cuo", x: 420, y: 345, label: "computed_userset\nrelation: owner", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "this1" },
+    { from: "u1", to: "cue" },
+    { from: "u1", to: "ttu" },
+    { from: "cue", to: "u2", label: "editor 的规则", dashed: true, labelOffset: 48 },
+    { from: "u2", to: "this2" },
+    { from: "u2", to: "cuo" },
+  ]}
+  caption="图 1 中的 viewer 规则，其中 editor 分支已按 editor 自身的规则展开。虚线框是计算得出的，而非存储的。"
+/>
+
+注意，`owner` 位于下面两层：所有者是编辑者，编辑者是查看者。这就是图 1 标题中“同心关系”的含义。右侧分支是唯一离开该文档的分支：它沿着一条已存储的 `parent` 边到达另一个对象。
+
+## 把 Check 看作图搜索
+
+Check 请求给出一个用户集 ⟨*object#relation*⟩ 和一个用户，询问该用户是否属于其中（§2.4.4）。不考虑重写规则时，论文把评估写成一个递归公式（§3.2.3）：如果存在元组 ⟨*object#relation@U*⟩，或者存在元组 ⟨*object#relation@U′*⟩ 且 U′ 是一个用户集、该用户属于 U′，则该用户属于 ⟨*object#relation*⟩。论文把这种递归称为“指针追逐”。重写规则 "are also translated to boolean expressions as part of check evaluation"（在检查评估过程中也会被转换为布尔表达式）（§3.2.3），因此上面的表达式树变成三个分支的 OR。
+
+接下来四幅图要回答的问题是：Chen 能否查看 `doc:readme`？每一帧使用同一张图，并高亮当前分支所读取的边。`folder` 命名空间配置不在论文中；这些帧假定 `folder#viewer` 没有重写规则，因此它就是 `_this`。
+
+<Callout kind="note" title="分帧展示，而非时间线">
+
+这些帧一次只展示一个分支，以便每一帧都能单独阅读。Zanzibar 并不会这样依次等待：它 "all leaf nodes of the boolean expression tree concurrently"（并发地评估布尔表达式树的所有叶节点），并在某个节点决定了子树的结果后取消该子树其余的部分（§3.2.3）。
+
+</Callout>
+
+### 第 1 步：`_this`
+
+readme 上已存储的 `viewer` 元组是否包含 Chen？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 第 1 步：_this 分支"
+  desc="与表 1 相同的图。高亮部分：从 group:eng#member 到 doc:readme 的 viewer 边、组节点，以及从 user:beto 进入该组的 member 边。user:chen 不在高亮路径上。该分支的结果：否。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="_this 找到一个 viewer 元组，它指向 group:eng#member。沿着它追下去只找到 Beto。分支结果：否。"
+/>
+
+唯一已存储的查看者是一个用户集，因此 Check 递归进入 `group:eng#member`。它唯一的成员是 Beto。该分支的结果为否。
+
+### 第 2 步：`computed_userset` editor，然后是 owner
+
+Chen 是编辑者或所有者吗？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 第 2 步：editor 与 owner 分支"
+  desc="同一张图。高亮部分：从 user:anne 到 doc:readme 的 owner 边。没有 editor 元组。user:chen 不在高亮路径上。该分支的结果：否。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="editor = _this ∪ owner。没有 editor 元组；唯一的所有者是 Anne。分支结果：否。"
+/>
+
+重写在同一对象上从 `viewer` 移到 `editor`，再移到 `owner`。前两跳不需要任何已存储的元组：它们来自配置。唯一的所有者是 Anne，因此该分支的结果也为否。
+
+### 第 3 步：`tuple_to_userset`，找到父文件夹
+
+readme 位于哪个文件夹中？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 第 3 步：读取 parent 元组集"
+  desc="同一张图。高亮部分：从 folder:A 到 doc:readme 的 parent 边，以及 folder:A 节点。这一步只找到文件夹，尚未作出任何判定。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="元组集 doc:readme#parent 中有一个元组，指向 folder:A。规则现在询问 folder:A#viewer。"
+/>
+
+`parent` 元组就是表 1 中的“抽象关系”。它本身不授予任何权限；重写规则把它变成关于另一个对象的新问题。
+
+### 第 4 步：`folder:A#viewer`
+
+Chen 是文件夹 A 的查看者吗？
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 第 4 步：得出“是”的路径"
+  desc="同一张图。高亮部分：user:chen、从 user:chen 到 folder:A 的 viewer 边、folder:A、指向 doc:readme 的 parent 边，以及 doc:readme。这是一条从 Chen 到 readme 的完整路径。结果：是。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="folder:A#viewer@user:chen 已存储。union 有一个为真的子节点，因此 Check 回答“是”。"
+/>
+
+路径 user:chen → folder:A → doc:readme 回答了这个问题。注意，每一帧中边的方向都相同，但搜索是从 readme 向外进行的：Check 从 ⟨*object#relation*⟩ 出发，寻找该用户。
+
+这样的指针追逐 "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide"（对大多数类型的 ACL 和组都很有效，但当间接 ACL 或组很深或很宽时代价可能很高）（§3.2.3）。对于这些命名空间，Zanzibar 使用 Leopard 索引，详见 [Leopard 页面](../leopard/)。
+
+## Read 与 Expand
+
+有两个 API 调用从不同的高度观察同一份数据。
+
+**Read**（§2.4.1）只返回已存储的元组。请求给出一个或多个*元组集*：单个元组键，或命名空间中某个对象 ID 或某个用户集的所有元组，并可选地限定为一个关系。论文明确指出 "Read results only depend on contents of relation tuples and do not reflect userset rewrite rules"（Read 的结果仅取决于关系元组的内容，不反映用户集重写规则）（§2.4.1）。在贯穿示例中，以关系 `viewer` 读取 `doc:readme` 会返回一行：
+
+```text
+doc:readme#viewer@group:eng#member
+```
+
+虽然每个所有者都是查看者，但结果中没有 Anne；虽然 Chen 能查看 readme，结果中也没有 Chen。
+
+**Expand**（§2.4.5）"follows indirect references expressed through userset rewrite rules"（会追踪通过用户集重写规则表达的间接引用）。它返回一棵*用户集树*：叶节点是用户 ID 或指向其他 ⟨*object#relation*⟩ 对的用户集，中间节点是并集、交集或排除。
+
+Expand 对 `doc:readme#viewer` 返回什么？
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={540}
+  title="doc:readme#viewer 的 Expand 结果"
+  desc="一棵树。根节点 doc:readme#viewer，然后是一个有三个子节点的 union。第一个子节点是用户集叶节点 group:eng#member。第二个是 editor 的 union，只有一个叶节点 user:anne，来自 owner。第三个是用户集叶节点 folder:A#viewer。用户集叶节点为虚线框；user:anne 为胶囊形框。"
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 100, y: 180, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 310, y: 180, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 520, y: 180, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "anne", x: 310, y: 262, label: "user:anne", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "eng", label: "_this" },
+    { from: "u1", to: "ed", label: "editor" },
+    { from: "u1", to: "fold", label: "parent → viewer" },
+    { from: "ed", to: "anne", label: "owner" },
+  ]}
+  caption="Expand 会应用重写规则；而 Read 只会返回 group:eng#member 这一行。"
+/>
+
+注意这两个虚线叶节点。根据 §2.4.5，叶节点可以是指向别处的用户集，因此想得到每一个个人（Beto、Chen）的客户端需要再依次展开这些叶节点。论文没有说明单次 Expand 调用会递归多深；本图停在该文档自身规则所能到达的用户集处。论文点明了用途：Expand 让客户端能够 "reason about the complete set of users and groups that have access to their objects, which allows them to build efficient search indices for access-controlled content"（推断有权访问其对象的完整用户和组集合，从而为受访问控制的内容构建高效的搜索索引）（§2.4.5）。
+
+<Callout kind="paper" title="论文出处">
+
+元组与语法：§2.1 和表 1。命名空间配置：§2.3。重写规则与图 1：§2.3.1。Read：§2.4.1。Check：§2.4.4。Expand：§2.4.5。检查评估与指针追逐：§3.2.3。术语汇总在[术语表](../glossary/)中。
+
+</Callout>
+
+## 来源
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

@@ -1,0 +1,159 @@
+---
+import { labelSize, placeLabel, textWidth } from "./place.ts";
+// Who did what, when: one column per actor, time running down. For orderings
+// such as the paper's "new enemy" examples, where the point is which event
+// comes first and which arrow crosses which.
+
+export interface LaneEvent {
+  lane: number;
+  /** Row on the time axis (0, 1, 2 …) */
+  t: number;
+  label: string;
+  kind?: "write" | "read" | "note" | "bad" | "good";
+  mono?: boolean;
+}
+export interface LaneArrow {
+  from: [number, number];
+  to: [number, number];
+  label?: string;
+  dashed?: boolean;
+}
+interface Props {
+  lanes: string[];
+  events: LaneEvent[];
+  arrows?: LaneArrow[];
+  title: string;
+  desc: string;
+  /** Label of the time axis, e.g. "time" */
+  timeLabel: string;
+  /** Optional time stamps per row, e.g. ["T₁", "T₂"] */
+  ticks?: string[];
+  laneWidth?: number;
+  rowHeight?: number;
+  caption?: string;
+}
+const {
+  lanes,
+  events,
+  arrows = [],
+  title,
+  desc,
+  timeLabel,
+  ticks = [],
+  laneWidth: laneWidthProp = 170,
+  rowHeight: rowHeightProp = 64,
+  caption,
+} = Astro.props;
+// stable across builds: derived from the figure's own title
+const uid = `s${[...title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)}`;
+// labels may break with "\n"; every box in a figure gets the tallest height
+const lineCount = Math.max(1, ...events.map((e) => e.label.split("\n").length));
+const boxH = 18 + 16 * lineCount;
+// lanes widen so the longest box label fits (box = lane - 22, 12px inner padding)
+const longest = Math.max(...events.flatMap((e) => e.label.split("\n").map((l) => textWidth(l, e.mono))));
+const laneWidth = Math.max(laneWidthProp, Math.ceil(longest * 0.95 + 22 + 16));
+// rows keep a gap of at least one label line between boxes, for arrow labels
+const rowHeight = Math.max(rowHeightProp, boxH + 28);
+const rows = Math.max(...events.map((e) => e.t), ...arrows.flatMap((a) => [a.from[1], a.to[1]])) + 1;
+const left = 56;
+const top = 52;
+const width = left + lanes.length * laneWidth + 12;
+const height = top + rows * rowHeight + 16;
+const cx = (lane: number) => left + lane * laneWidth + laneWidth / 2;
+const cy = (t: number) => top + t * rowHeight + rowHeight / 2;
+const boxW = laneWidth - 22;
+const boxes = events.map((e) => ({ x: cx(e.lane) - boxW / 2, y: cy(e.t) - boxH / 2, w: boxW, h: boxH }));
+---
+
+<figure class="dg sw" style={`--dg-min: ${Math.min(width, 640)}px`}>
+  <div class="dg-scroll">
+    <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} role="img" aria-labelledby={`${uid}-t ${uid}-d`}>
+      <title id={`${uid}-t`}>{title}</title>
+      <desc id={`${uid}-d`}>{desc}</desc>
+      <defs>
+        <marker id={`${uid}-a`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 10 5 0 10z" class="dg-head"></path>
+        </marker>
+      </defs>
+      <line x1={22} y1={top} x2={22} y2={height - 10} class="sw-axis" marker-end={`url(#${uid}-a)`}></line>
+      <text x={14} y={top - 14} class="sw-time">{timeLabel}</text>
+      {ticks.map((tk, i) => tk && <text x={30} y={cy(i)} dominant-baseline="central" class="sw-tick">{tk}</text>)}
+      {
+        lanes.map((name, i) => (
+          <g>
+            <line x1={cx(i)} y1={top - 6} x2={cx(i)} y2={height - 12} class="sw-lane" />
+            <text x={cx(i)} y={top - 20} text-anchor="middle" class="sw-head">
+              {name}
+            </text>
+          </g>
+        ))
+      }
+      {
+        arrows.map((a) => {
+          const x1 = cx(a.from[0]);
+          const y1 = cy(a.from[1]);
+          const x2 = cx(a.to[0]);
+          const y2 = cy(a.to[1]);
+          const sx = Math.sign(x2 - x1) || 0;
+          const sy = Math.sign(y2 - y1) || 0;
+          const pad = (dx: number, dy: number): [number, number] =>
+            dx !== 0 && Math.abs(dy) < Math.abs(dx) ? [(boxW / 2 + 2) * Math.sign(dx), 0] : [0, (boxH / 2 + 2) * Math.sign(dy)];
+          const [ax, ay] = pad(x2 - x1, y2 - y1);
+          const [bx, by] = pad(x1 - x2, y1 - y2);
+          const p = { x: x1 + ax, y: y1 + ay };
+          const q = { x: x2 + bx - sx * 2, y: y2 + by - sy * 2 };
+          const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+          const plate = a.label ? labelSize(a.label) : { w: 0, h: 0 };
+          const spot = a.label
+            ? placeLabel(
+                { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 },
+                { ux: (q.x - p.x) / len, uy: (q.y - p.y) / len, len },
+                plate,
+                boxes,
+                { x: 0, y: top - 4, w: width, h: height - top }, `${a.label} (${title})`,
+              )
+            : p;
+          return (
+            <g>
+              <line
+                x1={x1 + ax}
+                y1={y1 + ay}
+                x2={x2 + bx - sx * 2}
+                y2={y2 + by - sy * 2}
+                class:list={["dg-edge", a.dashed && "dashed"]}
+                marker-end={`url(#${uid}-a)`}
+              />
+              {a.label && (
+                <>
+                  <rect x={spot.x - plate.w / 2} y={spot.y - plate.h / 2} width={plate.w} height={plate.h} rx={3} class="dg-label-bg" />
+                  <text x={spot.x} y={spot.y} dominant-baseline="central" text-anchor="middle" class="dg-label">
+                    {a.label}
+                  </text>
+                </>
+              )}
+            </g>
+          );
+        })
+      }
+      {
+        events.map((e) => (
+          <g class:list={["dg-node", `e-${e.kind ?? "note"}`]}>
+            <rect x={cx(e.lane) - boxW / 2} y={cy(e.t) - boxH / 2} width={boxW} height={boxH} rx={6} />
+            {e.label.split("\n").map((line, i, all) => (
+              <text
+                x={cx(e.lane)}
+                y={cy(e.t) + (i - (all.length - 1) / 2) * 16}
+                dominant-baseline="central"
+                text-anchor="middle"
+                class:list={[e.mono && "mono"]}
+              >
+                {line}
+              </text>
+            ))}
+          </g>
+        ))
+      }
+    </svg>
+  </div>
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>

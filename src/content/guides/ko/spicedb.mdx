@@ -1,0 +1,233 @@
+---
+title: "SpiceDB"
+description: "인가 관계를 위한 AuthZed의 오픈 소스 데이터베이스를 Zanzibar 논문과 대조하며 읽는다."
+section: ecosystem
+order: 1
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4"]
+product:
+  name: SpiceDB
+  maintainer: AuthZed, Inc.
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/authzed/spicedb
+  docs: https://authzed.com/docs
+  status: 활발함
+  latest: v1.57.1 (2026-11-10)
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+SpiceDB는 Zanzibar 방식으로 관계를 저장하고 그에 대한 권한 쿼리에 답하는 오픈 소스 데이터베이스다. Go로 작성되었고, Apache-2.0 라이선스이며, AuthZed, Inc.가 유지 관리한다([저장소](https://github.com/authzed/spicedb)). 첫 GitHub 릴리스 v1.0.0의 날짜는 2021-09-30이다. AuthZed는 그 주변의 관리형 서비스와 상용 서비스도 판매하며, 아래에서는 그런 것을 그렇다고 밝혀 둔다. 이 페이지의 출처 대부분은 AuthZed 자신의 문서와 블로그다.
+
+## 논문의 용어와 SpiceDB의 용어
+
+| 논문 | SpiceDB |
+| --- | --- |
+| 네임스페이스 설정 (§2.3) | 스키마 안의 `definition`([스키마 문서](https://authzed.com/docs/spicedb/concepts/schema)) |
+| 관계 튜플 `object#relation@user` (§2.1) | 관계(relationship) `resource#relation@subject`. 예: `document:readme#editor@user:emilia`([relationships](https://authzed.com/docs/spicedb/concepts/relationships)) |
+| `_this` (§2.3.1) | 허용되는 주체 타입을 가진 `relation`, 그리고 그에 대해 저장된 관계 |
+| `computed_userset` | `permission` 표현식 안에서 다른 관계나 권한의 이름을 쓰는 것 |
+| `tuple_to_userset` | 화살표 `parent->view`(별칭 `parent.any(view)`) |
+| `union` / `intersection` / `exclusion` | `+` / `&` / `-` |
+| zookie (§2.4) | ZedToken([consistency](https://authzed.com/docs/spicedb/concepts/consistency)) |
+| Check (§2.4.4) | `CheckPermission`, `CheckBulkPermissions` |
+| Read (§2.4.1) | `ReadRelationships` |
+| Write (§2.4.2) | `WriteRelationships`, `DeleteRelationships` |
+| Watch (§2.4.3) | `Watch` |
+| Expand (§2.4.5) | `ExpandPermissionTree` |
+| 논문의 API에 없음 | `LookupResources`, `LookupSubjects`, `ImportBulkRelationships`, `ExportBulkRelationships` |
+| Leopard (§3.2.4) | AuthZed Materialize. AuthZed Dedicated 고객을 위한 상용 서비스([문서](https://authzed.com/docs/materialize/getting-started/overview)) |
+| Spanner (§3) | CockroachDB, Cloud Spanner, PostgreSQL, MySQL, memdb([datastores](https://authzed.com/docs/spicedb/concepts/datastores)) |
+
+API 이름은 AuthZed의 프로토콜 파일 [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)와 [`watch_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)에서 가져왔다.
+
+## 스키마로 쓴 예제
+
+논문의 그림 1은 소유자를 편집자로, 편집자를 열람자로, 상위 폴더의 열람자를 문서의 열람자로 만든다(§2.3.1). SpiceDB에서는 저장되는 관계와 계산되는 권한을 따로 선언한다. `relation` 줄은 관계에 누구를 쓸 수 있는지를, `permission` 줄은 접근이 어떻게 계산되는지를 말한다.
+
+```text
+definition user {}
+
+definition group {
+    relation member: user
+}
+
+definition folder {
+    relation viewer: user | group#member
+    permission view = viewer
+}
+
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+}
+```
+
+<Callout kind="note" title="검증기로 실행하지 않음">
+
+이 스키마는 2026-11-13 기준으로 SpiceDB의 [스키마 언어 페이지](https://authzed.com/docs/spicedb/concepts/schema)에 나오는 구문만 사용한다. `definition`, `user | group#member`를 가진 `relation`, `+`와 `->`를 가진 `permission`이다. `zed`나 SpiceDB Playground로 실행하지는 않았다.
+
+</Callout>
+
+Anne, Beto, Chen의 관계:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#parent@folder:A
+group:eng#member@user:beto
+doc:readme#viewer@group:eng#member
+folder:A#viewer@user:chen
+```
+
+각 사람을 readme에 대한 `view`로 이끄는 저장된 관계는 무엇인가?
+
+<Graph
+  width={600}
+  height={270}
+  title="SpiceDB 관계로 쓴 예제"
+  desc="관계 다섯 개. user:anne은 doc:readme의 owner다. user:beto는 group:eng의 member이고, group:eng#member는 doc:readme의 viewer다. user:chen은 folder:A의 viewer이고, folder:A는 doc:readme의 parent다. Chen에서 folder:A를 거쳐 readme에 이르는 경로가 강조되어 있다. 이것이 화살표 parent->view다."
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 225, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 280, y: 135, label: "group:eng", kind: "object", mono: true },
+    { id: "folder", x: 280, y: 225, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 500, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer\n(eng#member)" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="각 화살표는 저장된 관계 하나다. Anne은 edit(owner)를 통해, Beto는 그룹을 통해, Chen은 강조된 parent->view 화살표를 통해 view에 도달한다."
+/>
+
+어떤 관계도 `view`나 `edit`를 언급하지 않는다는 점에 주목하라. 둘 다 권한이며, 논문의 재작성 규칙이 저장되지 않고 계산되듯 검사 시점에 스키마로부터 계산된다(§2.3.1).
+
+## 아키텍처
+
+SpiceDB 배포 하나는 검사에 어떻게 답하는가? AuthZed는 SpiceDB를 선택적인 HTTP 게이트웨이를 가진 "fundamentally a gRPC service"(근본적으로 gRPC 서비스)로 설명한다([아키텍처 글, 2021-11-17](https://authzed.com/blog/spicedb-architecture)). 노드는 요청을 더 작은 질문들로 나누어 다른 노드에 포워딩하며, 이 과정을 디스패치라고 부른다. 각 노드는 "an in-memory cache of permissions queries it has resolved in the past"(과거에 해결한 권한 쿼리의 인메모리 캐시)를 유지한다([performance 문서](https://authzed.com/docs/spicedb/ops/performance)). 일관된 해시가 "the same (sub-)requests to the same server"(같은 (하위) 요청을 같은 서버로) 보낸다([아키텍처 글](https://authzed.com/blog/spicedb-architecture)). 모든 노드는 데이터 저장소 하나를 공유한다. Materialize를 쓰는 경우, 선택한 권한을 미리 계산하며, SpiceDB는 "can dispatch sub-queries to Materialize"(하위 쿼리를 Materialize로 디스패치할 수 있다)([performance 문서](https://authzed.com/docs/spicedb/ops/performance)).
+
+<Graph
+  width={640}
+  height={320}
+  minWidth={560}
+  title="SpiceDB 아키텍처"
+  desc="애플리케이션 클라이언트가 세 SpiceDB 노드 중 하나에 CheckPermission을 보낸다. 노드들은 일관된 해싱으로 라우팅되는 하위 요청을 서로 디스패치한다. 세 노드 모두 공유 데이터 저장소 하나(CockroachDB, Spanner, PostgreSQL 또는 MySQL)를 읽고 쓴다. Watch 소비자는 SpiceDB 노드로부터 변경 스트림을 받는다. 상용 서비스인 AuthZed Materialize는 데이터 저장소를 감시하고 그 주기적 스냅샷을 읽으며, SpiceDB가 디스패치하는 하위 쿼리에 답한다."
+  nodes={[
+    { id: "app", x: 320, y: 40, label: "애플리케이션\n(gRPC / HTTP 클라이언트)", kind: "client" },
+    { id: "a", x: 170, y: 150, label: "SpiceDB\n노드", kind: "server" },
+    { id: "b", x: 320, y: 150, label: "SpiceDB\n노드", kind: "server" },
+    { id: "c", x: 470, y: 150, label: "SpiceDB\n노드", kind: "server" },
+    { id: "ds", x: 320, y: 275, label: "데이터 저장소\nCockroachDB · Spanner\nPostgreSQL · MySQL", kind: "store" },
+    { id: "watch", x: 80, y: 275, label: "Watch\n소비자", kind: "client" },
+    { id: "mat", x: 565, y: 275, label: "AuthZed Materialize\n(상용)", kind: "server" },
+  ]}
+  edges={[
+    { from: "app", to: "b", label: "CheckPermission" },
+    { from: "a", to: "b", label: "디스패치", dir: "both" },
+    { from: "b", to: "c", label: "디스패치", dir: "both" },
+    { from: "a", to: "ds", dir: "both" },
+    { from: "b", to: "ds", label: "읽기 / 쓰기", dir: "both" },
+    { from: "c", to: "ds", dir: "both" },
+    { from: "a", to: "watch", label: "Watch" },
+    { from: "ds", to: "mat", label: "변경, 스냅샷", dashed: true },
+    { from: "c", to: "mat", label: "하위 쿼리", dashed: true },
+  ]}
+  caption="노랑: 서버. 초록: 공유 데이터 저장소. 파랑: 클라이언트. 점선: 선택적인 상용 Materialize 경로."
+/>
+
+논문의 그림 2(§3)와 비교해 보라. 거기서도 `aclservers`는 클러스터의 다른 서버로 작업을 팬아웃하지만, 저장소는 항상 Spanner이고, Watch는 변경 로그를 추적하는 별도의 `watchservers`가 제공하며, Leopard는 Watch뿐 아니라 오프라인 스냅샷도 읽는다. 여기서 인용한 문서에서 SpiceDB에는 별도의 watch 서버 유형이 없다. `Watch`는 같은 서비스의 RPC다.
+
+## 일관성: ZedToken과 zookie
+
+AuthZed는 ZedToken을 "the SpiceDB equivalent of Google Zanzibar's Zookie concept which protects users from the New Enemy Problem"(사용자를 New Enemy 문제로부터 보호하는 Google Zanzibar의 Zookie 개념에 해당하는 SpiceDB의 것)이라고 부른다([consistency 문서](https://authzed.com/docs/spicedb/concepts/consistency)). 쓰기는 ZedToken을 반환하고(`written_at`), 검사도 반환한다(`checked_at`). 요청은 네 가지 모드 중 하나를 고를 수 있다.
+
+| 모드 | 요청하는 것 | 논문의 대응 |
+| --- | --- | --- |
+| `minimize_latency` | 서버가 가장 빨리 답할 수 있는 것 | zookie 없음: "a reasonably recent snapshot"(적당히 최근의 스냅샷)(§2.4.1) |
+| `at_least_as_fresh` + ZedToken | 토큰보다 오래되지 않은 스냅샷 | 검사나 읽기의 zookie(§2.2, §2.4) |
+| `at_exact_snapshot` + ZedToken | 정확히 토큰의 스냅샷 | "the same snapshot as a previous read"(이전 읽기와 같은 스냅샷)를 얻기 위해 재사용하는 읽기 zookie(§2.4.1) |
+| `fully_consistent` | 최신 데이터 | 직접적인 대응은 없음. 논문의 content-change 검사는 최신 스냅샷에서 평가된다(§2.4.4) |
+
+CockroachDB에서 문서는 `fully_consistent`가 "does not guarantee read-after-write consistency"(쓰기 후 읽기 일관성을 보장하지 않는다)라고 경고한다. 노드 시계가 클러스터의 `max_offset`까지 차이 날 수 있기 때문이다. 대신 `at_least_as_fresh`와 ZedToken을 권한다([consistency 문서](https://authzed.com/docs/spicedb/concepts/consistency)).
+
+`fully_consistent`는 `WriteRelationships`, `DeleteRelationships`, `ReadSchema`, `WriteSchema`의 기본값이고, `minimize_latency`는 그 밖의 모든 API의 기본값이다([consistency 문서](https://authzed.com/docs/spicedb/concepts/consistency)).
+
+편집 전에 폴더 A에서 제거된 Chen이 편집된 readme를 보지 못하게 ZedToken은 어떻게 막는가?
+
+<Swimlane
+  lanes={["애플리케이션", "SpiceDB", "앱 데이터베이스"]}
+  laneWidth={190}
+  timeLabel="시간"
+  title="ZedToken을 zookie처럼 쓰기"
+  desc="애플리케이션이 WriteRelationships로 폴더 A에 대한 Chen의 열람을 제거한다. SpiceDB는 이를 커밋하고 written_at으로 ZedToken Z1을 반환한다. 애플리케이션은 새 readme 내용을 Z1과 함께 저장한다. 나중에 readme에 대한 Chen의 검사가 at_least_as_fresh Z1과 함께 보내진다. SpiceDB는 Z1보다 오래되지 않은 스냅샷에서 이를 평가하므로 제거가 보이고 Chen은 거부된다."
+  events={[
+    { lane: 0, t: 0, label: "A에서 Chen 제거", kind: "write" },
+    { lane: 1, t: 0, label: "커밋", kind: "write" },
+    { lane: 0, t: 1, label: "Z1 보관", kind: "note", mono: true },
+    { lane: 0, t: 2, label: "readme + Z1 저장", kind: "write" },
+    { lane: 2, t: 2, label: "content, Z1", kind: "write", mono: true },
+    { lane: 0, t: 3, label: "Chen이 볼 수 있나?", kind: "read" },
+    { lane: 1, t: 3, label: "스냅샷 ≥ Z1", kind: "read" },
+    { lane: 1, t: 4, label: "거부", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0], label: "WriteRelationships" },
+    { from: [1, 0], to: [0, 1], label: "written_at = Z1" },
+    { from: [0, 2], to: [2, 2] },
+    { from: [0, 3], to: [1, 3], label: "at_least_as_fresh Z1" },
+    { from: [1, 4], to: [0, 4], dashed: true },
+  ]}
+  caption="토큰은 논문의 zookie처럼 콘텐츠와 함께 이동한다(§2.2). 토큰이 없으면 minimize_latency 검사는 제거 이전의 캐시로 답해질 수 있다."
+/>
+
+논문에서 콘텐츠와 함께 저장되는 zookie는 content-change 검사에서 온다(§2.2, §2.4.4). SpiceDB 문서는 리소스가 바뀔 때 "a new ZedToken is either returned or it should be requested by performing a check with full consistency"(새 ZedToken이 반환되거나, 완전한 일관성으로 검사를 수행하여 요청해야 한다)라고 하므로, 두 경로가 모두 있다([consistency 문서](https://authzed.com/docs/spicedb/concepts/consistency)).
+
+`Watch`도 ZedToken을 쓴다. 요청은 `optional_start_cursor`에서 시작할 수 있고, 각 응답은 재개 지점인 `changes_through`를 담는다. 이는 논문의 하트비트 zookie(§2.4.3)에 해당한다([`watch_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)).
+
+## 논문과의 차이
+
+- **저장소.** 논문은 모든 것을 Spanner에 저장한다(§3.1). SpiceDB는 데이터 저장소를 교체할 수 있다. CockroachDB("high throughput and/or multi-region", 높은 처리량 그리고/또는 다중 리전), Cloud Spanner, PostgreSQL("single-region", 단일 리전), MySQL("Not recommended", 권장하지 않음), memdb(로컬 개발과 테스트)([datastores](https://authzed.com/docs/spicedb/concepts/datastores)).
+- **관계와 권한이 분리되어 있다.** 논문은 유저셋 재작성을 관계에 붙인다(§2.3.1). SpiceDB는 저장되는 `relation`과 계산되는 `permission`을 나눈다([schema](https://authzed.com/docs/spicedb/concepts/schema)).
+- **caveat.** 관계는 이름 붙은 CEL 표현식을 가질 수 있으며, 스키마에서 `with`로 붙인다(예: `relation viewer: user | user with ip_allowlist`)([caveats](https://authzed.com/docs/spicedb/concepts/caveats)). 논문의 튜플(§2.1)에는 그런 필드가 없다.
+- **와일드카드.** `relation viewer: user | user:*`는 공개 부여를 허용한다([schema](https://authzed.com/docs/spicedb/concepts/schema)). 논문의 튜플 문법에는 사용자 ID나 유저셋이 있을 뿐 와일드카드는 없다(§2.1).
+- **교집합 화살표.** `.all()`은 관계된 모든 객체가 권한을 부여할 것을 요구한다([schema](https://authzed.com/docs/spicedb/concepts/schema)). 논문의 세 가지 재작성 리프(§2.3.1)에는 그런 형태가 없다.
+- **기본 오래된 정도.** 논문은 존 밖 읽기 통계로부터 기본 오래된 정도를 적응적으로 고르고(§3.2.1), 이와 별도로 캐시 항목을 공유하도록 평가 타임스탬프를 "to a coarse granularity, such as one or ten seconds"(1초나 10초 같은 거친 단위로) 올림한다(§3.2.5). SpiceDB에는 올림만 있다. 캐시 항목을 재사용할 수 있도록 `--datastore-revision-quantization-interval`이 정하는 구간으로 요청 리비전을 묶는다. AuthZed는 "the default is 5s"(기본값은 5초)라고 하며([핫스팟 캐싱 글, 2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)), 이는 [소스](https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go)의 `RevisionQuantization: 5 * time.Second`와 일치한다.
+- **조회 API.** `LookupResources`와 `LookupSubjects`는 "어떤 리소스"와 "어떤 주체" 질문에 답한다([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). 논문의 API에는 Read, Write, Watch, Check, Expand가 있다(§2.4).
+- **Leopard.** "AuthZed Materialize takes inspiration from the Leopard index component described in the Zanzibar paper"(AuthZed Materialize는 Zanzibar 논문에 기술된 Leopard 인덱스 구성 요소에서 영감을 얻었다)([Materialize 문서](https://authzed.com/docs/materialize/getting-started/overview)). 이는 오픈 소스 SpiceDB가 아니라 AuthZed 유료 제품의 일부다. 문서는 그 Accelerated Queries 기능이 "generally available to users of AuthZed Dedicated"(AuthZed Dedicated 사용자에게 정식 제공된다)라고 말한다.
+
+## 현황
+
+2026-11-13 기준: 활발함. 최신 릴리스 v1.57.1은 2026-11-10, 저장소는 아카이브되지 않았고, GitHub 스타 약 7.2k, Apache-2.0([저장소](https://github.com/authzed/spicedb), [릴리스](https://github.com/authzed/spicedb/releases)).
+
+AuthZed는 논문에 주석을 단 사본도 [zanzibar.tech](https://zanzibar.tech)에 공개한다("Annotations © 2026 AuthZed, Inc. Zanzibar Paper © USENIX and original authors").
+
+## 출처
+
+- [https://github.com/authzed/spicedb](https://github.com/authzed/spicedb)
+- [https://github.com/authzed/spicedb/releases](https://github.com/authzed/spicedb/releases)
+- [https://authzed.com/docs](https://authzed.com/docs)
+- [https://authzed.com/docs/spicedb/concepts/schema](https://authzed.com/docs/spicedb/concepts/schema)
+- [https://authzed.com/docs/spicedb/concepts/relationships](https://authzed.com/docs/spicedb/concepts/relationships)
+- [https://authzed.com/docs/spicedb/concepts/consistency](https://authzed.com/docs/spicedb/concepts/consistency)
+- [https://authzed.com/docs/spicedb/concepts/datastores](https://authzed.com/docs/spicedb/concepts/datastores)
+- [https://authzed.com/docs/spicedb/concepts/caveats](https://authzed.com/docs/spicedb/concepts/caveats)
+- [https://authzed.com/docs/spicedb/ops/performance](https://authzed.com/docs/spicedb/ops/performance)
+- [https://authzed.com/docs/materialize/getting-started/overview](https://authzed.com/docs/materialize/getting-started/overview)
+- [https://authzed.com/blog/spicedb-architecture](https://authzed.com/blog/spicedb-architecture)
+- [https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go](https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go)
+- [https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)
+- [https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- [https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)
+- [https://zanzibar.tech](https://zanzibar.tech)

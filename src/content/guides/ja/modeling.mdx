@@ -1,0 +1,645 @@
+---
+title: "モデリングのパターン: 書き換えルールから実際の権限まで"
+description: "よくある 8 つの認可要件を、タプル、可能な場合は論文の名前空間設定の表記によるルール、そして SpiceDB と OpenFGA のスキーマ言語で書き表す。"
+section: guide
+part: practice
+order: 10
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4.2", "3.2.3", "5", "6"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+論文はデータモデルと設定言語を説明しているが、具体的なポリシーの例は図 1 の 1 つしか示していない。結論ではもっと多くを主張している。"simple yet flexible data model and configuration language support a variety of access control policies from both consumer and enterprise applications" (シンプルでありながら柔軟なデータモデルと設定言語が、コンシューマー向けとエンタープライズ向けの両方のアプリケーションのさまざまなアクセス制御ポリシーをサポートする) (§6)。関連研究の節では、カバーするパターンを挙げている。Multics、UNIX、POSIX ACL、VMS に見られるように "Zanzibar’s data model supports permissions, users, groups, and inheritance" (Zanzibar のデータモデルは権限、ユーザー、グループ、継承をサポートする)、そして "a number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language" (多くの Zanzibar クライアントが、Zanzibar の名前空間設定言語の上に RBAC ポリシーを実装している) (§5)。
+
+本ページでは、実務でよく出てくる 8 つの要件を書き出す。各節では、そのパターンが答える問い、タプル、論文で表現できる場合は図 1 の表記によるルール、同じルールを SpiceDB のスキーマ言語と OpenFGA の DSL で書いたもの、そして答えを決める経路を強調したタプルのグラフを示す。パターンの一覧は OpenFGA の [モデリングガイド](https://openfga.dev/docs/modeling) に従っている。表記の説明は [タプルのページ](../relation-tuples/) にある。
+
+共通の例: Anne、Beto、Chen (`user:anne`、`user:beto`、`user:chen`)、`folder:A` の中のドキュメント `doc:readme`、グループ `group:eng`。Anne は readme を所有し、Beto は eng に属し、eng のメンバーは readme を閲覧でき、Chen は folder A を閲覧できる。
+
+<Callout kind="note" title="本ページのスキーマの確認方法">
+
+論文の表記は図 1 から写している。図 1 は `union` しか使っていない。論文は積集合と除外の名前を挙げている (§2.3.1) が、その書き方は示していないので、それらを使う 2 つのブロックは類推で書いており、その旨を記している。SpiceDB のスキーマは、AuthZed の [スキーマのドキュメント](https://authzed.com/docs/spicedb/concepts/schema) とモデリングのページに示された構文だけを使っている。OpenFGA のモデルは、OpenFGA の [設定言語のページ](https://openfga.dev/docs/configuration-language) に載っている DSL のキーワード (`or`、`and`、`but not`、`from`、`[user, user:*, team#member]` のような型制約) だけを使っている。各ブロックはそのパターンに必要な型だけを示す。すべて 2026-11-13 にドキュメントと照合したが、バリデータ、`zed`、OpenFGA CLI、どちらの Playground にもかけていない。
+
+</Callout>
+
+## ロールと権限
+
+問い: Anne は readme を編集できるか。Beto はどうか。*ロール* は付与するもの (owner、editor、viewer) である。*権限* はチェックするもの (edit、view) である。ロールを付与して権限をチェックするようにすると、ロールが変わってもチェックは変わらない。
+
+タプル:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+```
+
+論文の表記では、ロールはタプルが格納される関係であり、権限はルールに `_this` を含まない関係である。そのため、権限に直接タプルを書き込むことは誰にもできない。必要なのは `union` と `computed_userset` だけで、どちらも図 1 にある。
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+relation { name: "editor" }
+relation { name: "viewer" }
+
+relation {
+ name: "edit"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "owner" } }
+   child { computed_userset { relation: "editor" } }
+} } }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+} } }
+```
+
+図 1 は同じことを別のやり方で行っている。`_this` とより上位のロールを同じ関係に入れるのである ("All owners are editors, and all editors are viewers"、すべての所有者は編集者であり、すべての編集者は閲覧者である)。どちらの形も書き換えルールである。上の形は、付与に使う名前とチェックに使う名前を分けている。
+
+SpiceDB は構文で 2 種類を分けている。`relation` の行は格納できるもの、`permission` の行は計算されるものである。ドキュメントには "relations should be named as nouns" (関係は名詞で名付けるべきである)、"permissions should be named as verbs or nouns" (権限は動詞か名詞で名付けるべきである) とある ([スキーマのドキュメント](https://authzed.com/docs/spicedb/concepts/schema))。
+
+```text
+definition user {}
+
+definition group {
+    relation member: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*SpiceDB のスキーマ。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+OpenFGA の関係は 1 種類しかない。角括弧の型制約を持たない関係には直接書き込めない。OpenFGA の [ロールと権限のガイド](https://openfga.dev/docs/modeling/roles-and-permissions) はそうした関係 (`booking_viewer`、`booking_adder`) を権限として使っており、他のガイドではそれらに `can_` という接頭辞を付けている。
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA の DSL。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+Anne の `edit` はどこから来るのか。
+
+<Graph
+  width={600}
+  height={220}
+  minWidth={500}
+  title="ロールと権限: Anne の edit"
+  desc="user:anne から doc:readme#owner へ、格納された owner の辺がある。doc:readme#owner から破線の箱 doc:readme#edit へ「書き換え」とラベルの付いた破線の矢印があり、edit から破線の箱 doc:readme#view へももう 1 本ある。Anne から owner を経て edit に至る経路が強調されている。user:beto はグループを通じて doc:readme#viewer に至り、viewer からは view にだけ破線の矢印がある。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 170, label: "user:beto", kind: "subject", mono: true },
+    { id: "owner", x: 300, y: 50, label: "doc:readme#owner", kind: "object", mono: true, on: true },
+    { id: "viewer", x: 300, y: 170, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "edit", x: 510, y: 50, label: "doc:readme#edit", kind: "group", mono: true, on: true },
+    { id: "view", x: 510, y: 170, label: "doc:readme#view", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "owner", label: "タプル", on: true },
+    { from: "beto", to: "viewer", label: "group:eng 経由", dashed: true },
+    { from: "owner", to: "edit", label: "書き換え", dashed: true, on: true },
+    { from: "viewer", to: "view", label: "書き換え", dashed: true },
+    { from: "edit", to: "view", label: "書き換え", dashed: true },
+  ]}
+  caption="実線の矢印は格納されたタプル、破線の矢印と箱は書き換えルールによって計算されるもの。Anne は所有者なので編集できる。Beto は view には至るが edit には至らない。"
+/>
+
+`edit` と `view` がタプルを持たない点に注目してほしい。新しいロール、たとえば `commenter` を追加するには、関係を 1 つ増やし、権限のルールに子を 1 つ加えるだけでよい。既存のタプルは変わらない。
+
+### 関係の数
+
+このスタイルへのよくある批判は名前に関するものである。Oso のブログ記事「Google Zanzibar Isn't Flexible」(Oso は競合する認可製品を販売している) で、Greg Sarjeant は "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`" (ReBAC に関する文献には `can_delete` や `can_archive` のような「関係」があふれている) と書き、それを "essentially the same thing as creating a relation for every authorized action" (認可されるアクションごとに関係を作るのと本質的に同じこと) と呼び、"an indication that relations are the wrong abstraction for authorization" (関係が認可にとって誤った抽象であることの表れ) だと結論づけている ([Oso、2024-11-01、2025-11-07 更新](https://www.osohq.com/post/google-zanzibar-isnt-flexible))。
+
+数が増えるのは確かである。アプリケーションがチェックするアクションにはすべて、スキーマ上の名前が必要になる。書き換えルールが小さく保つのは、格納されるタプルの数と、誰かが書き込む関係の数である。上のスキーマでは、タプルを持つ関係は 3 つ (`owner`、`editor`、`viewer`) で、権限はそれらの純粋な関数である。したがって `can_archive` を追加してもスキーマを 1 回変更するだけで、タプルには触れない。論文自身が書き換えを導入した動機も同じである。派生した関係をオブジェクトごとにタプルとして格納するのは "would be wasteful and make it hard to make modifications across all objects" (無駄であり、全オブジェクトにまたがる変更も困難になる) (§2.3.1)。スキーマ上の権限名がコストなのかドキュメントなのかは、Oso と Zanzibar 型の製品の意見が分かれる点であり、本ページはそれに決着をつけない。
+
+## 親子の継承
+
+問い: folder A を閲覧できる Chen は、その中の readme を閲覧できるか。コンテナからの継承は `tuple_to_userset` の葉である。オブジェクトの `parent` タプルを読み、各親についてある関係を問う。
+
+タプル:
+
+```text
+doc:readme#parent@folder:A#...
+folder:A#viewer@user:chen
+```
+
+論文の図 1 は、このルールを `viewer` の 3 番目の子としてすでに含んでいる。前節の `view` 権限に加えると次のようになる。
+
+```text
+relation { name: "parent" }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+SpiceDB では、矢印 `parent->view` が `parent` 関係をたどり、見つかったものに対して `view` を問う ([スキーマのドキュメント](https://authzed.com/docs/spicedb/concepts/schema))。
+
+```text
+definition folder {
+    relation parent: folder
+    relation viewer: user | group#member
+    permission view = viewer + parent->view
+}
+
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+}
+```
+
+*SpiceDB のスキーマ。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+OpenFGA では同じことを `X from Y` で書く。[親子のガイド](https://openfga.dev/docs/modeling/parent-child) はこれを使って、フォルダの編集者をその中のドキュメントの編集者にしている。
+
+```text
+type folder
+  relations
+    define parent: [folder]
+    define viewer: [user, group#member] or viewer from parent
+
+type doc
+  relations
+    define parent: [folder]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA の DSL。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+どちらの製品版も、`folder` に `folder` を指す `parent` を持たせている。これによりフォルダは上位のフォルダから継承し、連鎖はタプルが作る分だけ深くなる。論文の図 1 はドキュメント側しか示していない。
+
+Chen のアクセスを決めるのはどのタプルか。
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="親子: Chen は folder A を通じて readme を閲覧する"
+  desc="user:chen から folder:A へ viewer の辺があり、folder:A から doc:readme へ parent の辺がある。両方の辺と 3 つのノードすべてが強調されている。user:anne から doc:readme への owner の辺は強調されていない。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 150, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "folder", x: 300, y: 150, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 515, y: 100, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Chen と readme を一緒に名指しするタプルはない。parent タプルが、readme についての問いを folder A についての問いに変える。"
+/>
+
+readme を別のフォルダに移すのは 1 つのタプルの変更 (`parent` タプルを 1 つ削除し、別のものを書き込む) であり、継承されたすべての付与がそれに従う点に注目してほしい。これは論文の「new enemy」の例 A が扱っているのと同じ操作である。"document ACLs inherit from folder ACLs" (ドキュメントの ACL はフォルダの ACL を継承する) (§2.2) ので、ACL の変更と移動の順序が重要になる。[一貫性](../consistency/) を参照。
+
+## グループと入れ子のグループ
+
+問い: Beto はサブチームに属している。eng への付与は彼に届くか。この共通の例の変形では、仮のサブチーム `group:sre` を加え、Beto を sre に、sre を eng に入れる。
+
+タプル:
+
+```text
+group:sre#member@user:beto
+group:eng#member@group:sre#member
+doc:readme#viewer@group:eng#member
+```
+
+論文では、グループに書き換えルールは要らない。`member` は普通の関係であり、タプルのユーザーはユーザーセットでもよいので、"a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership" (⟨*userset*⟩ によって ACL がグループを参照でき、それにより入れ子のグループメンバーシップを表現できる) (§2.1)。
+
+```text
+name: "group"
+
+relation { name: "member" }
+```
+
+論文の設定は、関係がどの種類のユーザーを受け付けるかについて何も述べていない。2 つの製品はどちらもそれをスキーマで要求する。入れ子が機能するのは、`group#member` が許可されたサブジェクトとして列挙されている場合だけである。
+
+```text
+definition group {
+    relation member: user | group#member
+}
+```
+
+*SpiceDB のスキーマ。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+```text
+type group
+  relations
+    define member: [user, group#member]
+```
+
+*OpenFGA の DSL。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+付与はどうやって Beto に届くのか。
+
+<Graph
+  width={600}
+  height={210}
+  minWidth={480}
+  title="入れ子のグループ: Beto は sre と eng を通じて readme に至る"
+  desc="user:beto から破線のユーザーセット group:sre#member へ member の辺がある。group:sre#member から破線のユーザーセット group:eng#member へ member の辺がある。group:eng#member から doc:readme へ viewer の辺がある。連鎖全体が強調されている。"
+  nodes={[
+    { id: "beto", x: 80, y: 50, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "sre", x: 310, y: 50, label: "group:sre#member", kind: "group", mono: true, on: true },
+    { id: "eng", x: 310, y: 160, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "doc", x: 525, y: 160, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "sre", label: "member", on: true },
+    { from: "sre", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+  ]}
+  caption="3 つのタプル、3 ホップ。Check は Beto が見つかるまで、readme から外側へユーザーセットをたどる。"
+/>
+
+sre が eng に加わったとき、ドキュメントのタプルは変わらなかった点に注目してほしい。グループは ACL と同じタプルで書かれるユーザーセットなので (§2.1)、メンバーシップの変更はグループの中にとどまる。深いグループや大きいグループをポインタ追跡でチェックすると遅いのも、この同じ間接参照のためである。論文の答えは [Leopard インデックス](../leopard/) である (§3.2.4)。
+
+## ブロックリスト (除外)
+
+問い: eng のメンバーは readme を閲覧できるが、1 人だけ例外にしたい。この変形では、Beto が readme でブロックされている。除外は、ある集合から別の集合を取り除く。
+
+タプル:
+
+```text
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+doc:readme#blocked@user:beto
+```
+
+論文は除外を演算子として (§2.3.1)、また Expand のユーザーセット木のノードとして (§2.4.5) 挙げているが、図 1 はその書き方を示していない。下のブロックは図 1 の形を写し、`union` の代わりに `exclusion` を置いたものである。このキーワードと、1 番目の子が基になり 2 番目が差し引かれるという規則は本ページの仮定であり、論文の構文ではない。
+
+```text
+relation { name: "blocked" }
+
+relation {
+ name: "can_view"
+ userset_rewrite {
+  exclusion {
+   child { computed_userset { relation: "view" } }
+   child { computed_userset { relation: "blocked" } }
+} } }
+```
+
+SpiceDB は除外を `-` と書く ([スキーマのドキュメント](https://authzed.com/docs/spicedb/concepts/schema))。ブロックを考慮した権限を `view` の上に定義すれば、式に括弧が要らない。
+
+```text
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+    relation blocked: user
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+    permission can_view = view - blocked
+}
+```
+
+*SpiceDB のスキーマ。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+OpenFGA はこれを `but not` (JSON 形式では `difference`) と書く。その [ブロックリストのガイド](https://openfga.dev/docs/modeling/blocklists) は、チームが編集できるドキュメントについて、チームの 1 人のメンバーの編集をブロックしている。
+
+```text
+type doc
+  relations
+    define parent: [folder]
+    define blocked: [user]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: (viewer or can_edit) but not blocked
+```
+
+*OpenFGA の DSL。2026-11-13 時点のドキュメントの構文に従う (設定言語のページは、演算子をまとめる括弧を認めている)。バリデータは実行していない。*
+
+決め手になるのはどのタプルか。
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="ブロックリスト: Beto は除外される"
+  desc="user:beto から破線のユーザーセット group:eng#member へ member の辺があり、そこから doc:readme へ viewer の辺がある。それとは別に、user:beto から doc:readme へ直接 blocked の辺がある。blocked の辺が強調されており、これが答え (no) を決める。"
+  nodes={[
+    { id: "beto", x: 80, y: 150, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 45, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 520, y: 150, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "beto", to: "doc", label: "blocked", on: true },
+  ]}
+  caption="Beto は (eng を通じて) view に含まれ、blocked にも含まれる。view から blocked を引いた集合には含まれないので、can_view は no と答える。"
+/>
+
+ドキュメントへの経路があるだけでは足りなくなった点に注目してほしい。除外は両側を見なければならない。Zanzibar が部分木の残りをキャンセルするのは "when the outcome of one node determines the result of a subtree" (あるノードの結果が部分木の結果を決めたとき) だけである (§3.2.3)。和集合は 1 つの yes で決まる。除外では、基になる側の yes は、差し引く側がわかるまで何も決めない。また、何がブロックされるかにも注目してほしい。`can_view` は `view` 全体から差し引くので、ブロックされた所有者も `can_view` を失う。
+
+## 公開アクセス (ワイルドカード)
+
+問い: 公開ドキュメントを誰でも閲覧できるようにできるか。論文の表記にはその答えがない。⟨*user*⟩ は "⟨*user_id*⟩ | ⟨*userset*⟩" であり、ユーザー ID は "is an integer" (整数である) (§2.1)。すべてのユーザーを意味する値はなく、論文は公開オブジェクトについて論じていない。論文のモデルの範囲で最も近い構成は、すべてのユーザーを含むグループであり、ユーザーごとに 1 つのタプルが必要になる。Google が公開共有をどう扱っているかは説明されていない。
+
+2 つの製品はどちらも *ワイルドカード* のサブジェクト `user:*` を追加しており、スキーマで列挙した場所でのみ使える。タプル:
+
+```text
+doc:readme#viewer@user:*
+```
+
+```text
+definition doc {
+    relation viewer: user | user:* | group#member
+    permission view = viewer
+}
+```
+
+*SpiceDB のスキーマ。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+```text
+type doc
+  relations
+    define viewer: [user, user:*, group#member]
+```
+
+*OpenFGA の DSL。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+どちらのプロジェクトもこれについて注意を促している。AuthZed: "Be **very careful** with wildcard support in your schema!" (スキーマでのワイルドカードのサポートには **細心の注意** を払うこと!)、"**Only** grant it to read permissions, unless you intend to allow for universal writing" (誰でも書き込めるようにする意図がない限り、読み取り権限に **のみ** 付与すること) ([スキーマのドキュメント](https://authzed.com/docs/spicedb/concepts/schema))。OpenFGA: "type-bound public access is not a wildcard or a regex expression" (型に束縛された公開アクセスは、ワイルドカードでも正規表現でもない)。`user:*` はユーザーとしてのみ使え、オブジェクトとして (`document:*`) もユーザーセットの中で (`org:*#member`) も使えない ([公開アクセスのガイド](https://openfga.dev/docs/modeling/public-access))。
+
+## 複数の制約 (積集合)
+
+問い: ドキュメントを公開できるのは、そのドキュメントのチームのメンバーでもある所有者だけとしたい。Anne は readme を公開できるか。積集合は、ユーザーがすべての子に含まれることを要求する。
+
+この変形では、readme から `group:eng` への `team` 関係を加える。タプル:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#team@group:eng#...
+group:eng#member@user:beto
+```
+
+除外と同じく、論文は積集合の名前を挙げている (§2.3.1) が、書き方は示していない。このブロックは図 1 の形を写したもので、`intersection` というキーワードは仮定である。
+
+```text
+relation { name: "team" }
+
+relation {
+ name: "publish"
+ userset_rewrite {
+  intersection {
+   child { computed_userset { relation: "owner" } }
+   child { tuple_to_userset {
+     tupleset { relation: "team" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # the doc's team
+       relation: "member"
+   } } }
+} } }
+```
+
+SpiceDB は積集合を `&` と書く。
+
+```text
+definition doc {
+    relation owner: user
+    relation team: group
+    permission publish = owner & team->member
+}
+```
+
+*SpiceDB のスキーマ。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+OpenFGA はこれを `and` と書く。その [複数の制約のガイド](https://openfga.dev/docs/modeling/multiple-restrictions) は同じ形を作っており、`can_delete` を、所有する組織のメンバーでもある書き手としている。
+
+```text
+type doc
+  relations
+    define owner: [user]
+    define team: [group]
+    define can_publish: owner and member from team
+```
+
+*OpenFGA の DSL。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+Anne はなぜ拒否されるのか。
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="積集合: Anne は所有者だがチームに属していない"
+  desc="user:anne から doc:readme へ強調された owner の辺がある。group:eng から doc:readme へ team の辺がある。user:beto から group:eng へ member の辺がある。強調された注記は、タプル group:eng#member@user:anne が存在しないことを示している。積集合の一方の子は満たされ、もう一方は満たされないので、答えは no である。"
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 185, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 185, label: "group:eng", kind: "object", mono: true },
+    { id: "doc", x: 520, y: 115, label: "doc:readme", kind: "object", mono: true, on: true },
+    { id: "miss", x: 230, y: 112, label: "タプルなし\ngroup:eng#member@user:anne", kind: "note", on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "team" },
+  ]}
+  caption="publish = owner ∩ (team → member)。Anne は 1 つ目の集合に含まれるが 2 つ目には含まれないので、答えは no である。Beto は 2 つ目に含まれるが 1 つ目には含まれない。"
+/>
+
+決め手が存在しないタプルである点に注目してほしい。`group:eng#member@user:anne` を追加すれば、ドキュメントに触れずに答えは yes になる。
+
+## カスタムロール
+
+問い: 管理者が実行時に新しいロール「reviewer」を定義し、readme の閲覧アクセスを与える。そのロールを持つ Chen は readme を閲覧できるか。スキーマで固定されたロール (owner、editor) はスキーマが変わるときにしか変わらない。カスタムロールはデータである。
+
+OpenFGA の [カスタムロールのガイド](https://openfga.dev/docs/modeling/custom-roles) は、"because our roles are going to be dynamic and might change frequently" (ロールは動的で頻繁に変わりうるので) という理由で、これを別の型としてモデル化している。ユーザーは `role` オブジェクトに `assignee` として関係づけられ、ロールの assignee にはユーザーセットとして関係が付与される (`role:media-manager#assignee` を `asset-category:logos` の `editor` にする)。AuthZed の [ユーザー定義ロールの記事](https://authzed.com/blog/user-defined-roles) (2021-10-27) は、`role#member` で同じことをしている。
+
+タプル (変形: Chen はフォルダへの付与の代わりにロールを持つ):
+
+```text
+role:reviewer#assignee@user:chen
+doc:readme#viewer@role:reviewer#assignee
+doc:readme#editor@role:maintainer#assignee
+```
+
+論文では、これは名前空間名が違うだけのグループのパターンである。`role` は普通の関係を 1 つ持つ名前空間であり、readme の `viewer` はそれを指すユーザーセットを格納する。ルールは変わらない。
+
+```text
+name: "role"
+
+relation { name: "assignee" }
+```
+
+```text
+definition role {
+    relation assignee: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member | role#assignee
+    relation viewer: user | group#member | role#assignee
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*SpiceDB のスキーマ。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+```text
+type role
+  relations
+    define assignee: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member, role#assignee]
+    define viewer: [user, group#member, role#assignee]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA の DSL。2026-11-13 時点のドキュメントの構文に従う。バリデータは実行していない。*
+
+実行時に作ったロールはどうやってアクセスを付与するのか。
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="カスタムロール: Chen は reviewer ロールを通じて閲覧する"
+  desc="user:chen から破線のユーザーセット role:reviewer#assignee へ強調された assignee の辺があり、そこから doc:readme へ強調された viewer の辺がある。2 つ目の破線のユーザーセット role:maintainer#assignee から doc:readme へ editor の辺があり、こちらにはメンバーがいない。"
+  nodes={[
+    { id: "chen", x: 80, y: 70, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "rev", x: 300, y: 70, label: "role:reviewer#assignee", kind: "group", mono: true, on: true },
+    { id: "mnt", x: 300, y: 180, label: "role:maintainer#assignee", kind: "group", mono: true },
+    { id: "doc", x: 525, y: 125, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "rev", label: "assignee", on: true },
+    { from: "rev", to: "doc", label: "viewer", on: true },
+    { from: "mnt", to: "doc", label: "editor" },
+  ]}
+  caption="ロールの作成、Chen への割り当て、readme への付与は 3 回のタプル書き込みであり、スキーマは変わらない。"
+/>
+
+ロールの付与がオブジェクトごとである点に注目してほしい。「このリポジトリのどこでも issue の作成と削除ができる」という意味のロールにするには、その権限の集合もデータとして格納する必要がある。AuthZed の [アクセス制御管理のページ](https://authzed.com/docs/spicedb/modeling/access-control-management) は、そのより細かいパターンを示している。権限ごとに 1 つのワイルドカード関係を持つ `role` 定義 (`relation create_issue: user:*`)、ロールと付与先を結ぶ `role_grant` オブジェクト、そして `permission create_issue = role->create_issue & grantee` という形の権限である。その代償は権限ごとに 1 つのスキーマ上の関係であり、上で述べた名前の問題が戻ってくる。
+
+## 所有権の移転
+
+問い: Anne が readme を Beto に引き渡す。その後は Beto が所有者で Anne はそうでなく、両方が所有者である瞬間も、どちらも所有者でない瞬間もあってはならない。これはスキーマのパターンではない。3 つの表記のどれも「所有者はちょうど 1 人」とは宣言できず、ここで引用したスキーマのドキュメントにも基数制約は見当たらない。これは書き込みのパターンである。
+
+タプルの変更:
+
+```text
+delete  doc:readme#owner@user:anne
+write   doc:readme#owner@user:beto
+```
+
+論文の Write API がこれを扱う。クライアントは "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control" (楽観的並行性制御を用いた read-modify-write の手順によって、あるオブジェクトに関係するすべてのタプルを変更することもできる)。オブジェクトごとの「ロック」タプルを含めてオブジェクトのタプルを読み、書き込みを "along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read" (ロックタプルへの touch とともに … 読み取り以降にロックタプルが変更されていない場合にのみ書き込みがコミットされる、という条件付きで) 送り、そうでなければ再試行する (§2.4.2)。ロックタプルは、並行する 2 つの移転が両方とも成功するのを防ぐ。
+
+- **SpiceDB.** `WriteRelationships` は "atomically writes and/or deletes a set of specified relationships" (指定された関係の集合をアトミックに書き込み、または削除する)、そして "if any preconditions fail, the entire transaction will be reverted" (いずれかの前提条件が満たされなければ、トランザクション全体が取り消される) ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto))。`doc:readme#owner@user:anne` に対する `MUST_MATCH` の前提条件が論文のロックタプルの役割を果たす。Anne がもう所有者でなければ移転は失敗する。
+- **OpenFGA.** "You can combine both writes and deletes in a single transactional API request" (1 回のトランザクショナルな API リクエストで書き込みと削除を組み合わせられる)、そして "all operations in the request will either succeed together or fail together" (リクエスト内のすべての操作は、まとめて成功するかまとめて失敗するかのどちらかである)。上限は 1 リクエストあたり 100 タプルである ([タプルの更新](https://openfga.dev/docs/getting-started/update-tuples))。同じページには、すでに存在するタプルを書き込むと "would normally cause the whole request to fail" (通常はリクエスト全体が失敗する) とあり、"deleting tuples that might not exist" (存在しないかもしれないタプルを削除する) ための `on_missing: "ignore"` が用意されている (OpenFGA v1.10.0 以降)。これは、存在しないタプルの削除がデフォルトではリクエストを失敗させることを示唆しており、そうであれば削除がロックタプルのように働く。ただしページはそのデフォルトを明言しておらず、ここでは実行していない。
+
+何が変わるのか。
+
+<Frames min="16rem">
+
+<Graph
+  width={320}
+  height={150}
+  title="移転前の所有権"
+  desc="user:anne から doc:readme へ強調された owner の辺がある。user:beto には辺がない。"
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner", on: true }]}
+  caption="移転前: Anne の owner タプルが 1 つ。"
+/>
+
+<Graph
+  width={320}
+  height={150}
+  title="移転後の所有権"
+  desc="user:beto から doc:readme へ強調された owner の辺がある。user:anne には辺がない。"
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "beto", to: "doc", label: "owner", on: true }]}
+  caption="移転後: Beto の owner タプルが 1 つ。2 つの変更はまとめてコミットされるか、まったくコミットされないかのどちらかである。"
+/>
+
+</Frames>
+
+所有権から派生するもの (`edit`、`view`) がすべて、その 1 つのタプルとともに移る点に注目してほしい。Anne は、直接の `viewer` タプルやグループといった他の経路を通じたアクセスは保持する。Anne のアクセスをすべて取り除くべき移転では、それらのタプルも削除しなければならない。
+
+<Callout kind="paper" title="論文では">
+
+タプルとユーザーセット: §2.1。書き換えルール、3 種類の葉、演算子: §2.3.1 と図 1。ロックタプルを用いた Write: §2.4.2。和集合、積集合、除外を含む Expand のユーザーセット木: §2.4.5。論文がサポートするとしているパターン (権限、ユーザー、グループ、継承、RBAC): §5。用語は [用語集](../glossary/) にまとめてある。
+
+</Callout>
+
+## 出典
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- OpenFGA のモデリングガイド: [roles and permissions](https://openfga.dev/docs/modeling/roles-and-permissions)、[parent-child](https://openfga.dev/docs/modeling/parent-child)、[blocklists](https://openfga.dev/docs/modeling/blocklists)、[public access](https://openfga.dev/docs/modeling/public-access)、[multiple restrictions](https://openfga.dev/docs/modeling/multiple-restrictions)、[custom roles](https://openfga.dev/docs/modeling/custom-roles)
+- OpenFGA、[configuration language](https://openfga.dev/docs/configuration-language)
+- OpenFGA、[update tuples](https://openfga.dev/docs/getting-started/update-tuples)
+- AuthZed、[SpiceDB schema docs](https://authzed.com/docs/spicedb/concepts/schema)
+- AuthZed、[access-control management](https://authzed.com/docs/spicedb/modeling/access-control-management)
+- AuthZed、[User Defined Roles](https://authzed.com/blog/user-defined-roles)、2021-10-27
+- AuthZed、[`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- Greg Sarjeant、[Google Zanzibar Isn't Flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible)、Oso、2024-11-01 (2025-11-07 更新)

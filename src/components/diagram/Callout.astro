@@ -1,0 +1,14 @@
+---
+// An aside in the margin of the argument: a note, a pointer into the paper,
+// or a warning. Kept quiet on purpose: a rule on the left, no icon.
+interface Props {
+  kind?: "note" | "paper" | "warn";
+  title?: string;
+}
+const { kind = "note", title } = Astro.props;
+---
+
+<aside class:list={["callout", `callout-${kind}`]}>
+  {title && <p class="callout-title">{title}</p>}
+  <slot />
+</aside>

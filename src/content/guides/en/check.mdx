@@ -1,0 +1,279 @@
+---
+title: Inside one Check
+description: How Zanzibar turns one Check into a tree of sub-problems, evaluates the leaves at the same time, stops early, caches what it learned at a snapshot, and what products add that the paper leaves out, such as depth limits.
+section: guide
+part: mechanisms
+order: 6
+checked: "2026-11-13"
+paper: ["3.2.3", "3.2.4", "3.2.5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+A Check asks one question: is this user in this userset at this snapshot. Answering it can take dozens of reads spread over several servers. This page follows one Check from the inside: the boolean expression it becomes, the order in which its parts run, when it can stop early, what it leaves in the cache, and where it gives up.
+
+Two other pages cover the neighbouring ground. [Relation tuples and usersets](../relation-tuples/#check-as-a-graph-search) walks the same question one branch at a time as a graph search. [Architecture](../architecture/#one-check-step-by-step) follows the request across servers: consistent hashing, cache trees, the lock table, read pooling and hedging. This page stays inside the evaluation.
+
+## A Check is a boolean expression
+
+The paper starts from the case without rewrite rules: "Zanzibar evaluates ACL checks by converting check requests to boolean expressions" (§3.2.3). For a user `U` and a userset ⟨*object#relation*⟩, the paper's formula reads:
+
+```text
+CHECK(U, ⟨object#relation⟩) =   ∃ tuple ⟨object#relation@U⟩
+                              ∨ ∃ tuple ⟨object#relation@U′⟩, where
+                                U′ = ⟨object′#relation′⟩ s.t. CHECK(U, U′)
+```
+
+The first line is a direct hit: a stored tuple names the user. The second line is the recursion: a stored tuple names another userset, and the user is in that one. The paper calls following those references "pointer chasing" and notes that it "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide" (§3.2.3). Rewrite rules join the same expression: "Userset rewrite rules are also translated to boolean expressions as part of check evaluation."
+
+Take the paper's Figure 1 config for `doc` (§2.3.1). `viewer` is the union of its own tuples, `editor`, and the viewers of the parent folder; `editor` is the union of its own tuples and `owner`. Written out for Chen and the readme, assuming as the other pages do that `folder#viewer` has no rewrite rule:
+
+```text
+viewer(readme, chen) =   this(readme#viewer, chen)
+                       ∨ editor(readme, chen)
+                       ∨ ∃ parent tuple readme#parent@folder:X : viewer(folder:X, chen)
+
+editor(readme, chen) =   this(readme#editor, chen)
+                       ∨ this(readme#owner, chen)
+```
+
+Each `this(…)` is a tuple lookup, and each `∨` is a node in a tree. Which sub-problems does "can Chen view `doc:readme`?" split into?
+
+<Graph
+  width={640}
+  height={380}
+  minWidth={540}
+  title="The sub-problem tree for one Check"
+  desc="1: doc:readme#viewer, an OR node, has three children. 2: _this, the readme's viewer tuples. 3: editor, an OR node with two children, 4a: the readme's editor tuples, and 4b: owner, the readme's owner tuples. 5: tuple_to_userset over parent, which 6 reads the readme's parent tuples and finds folder:A, then 7 asks whether Chen is in folder:A#viewer. Step 7 is true, and the highlighted path 1, 5, 6, 7 answers yes."
+  nodes={[
+    { id: "root", x: 320, y: 40, label: "① doc:readme#viewer\nOR", kind: "group", on: true },
+    { id: "this", x: 90, y: 140, label: "② _this\nviewer tuples", kind: "object" },
+    { id: "ed", x: 270, y: 140, label: "③ editor\nOR", kind: "group" },
+    { id: "ttu", x: 520, y: 140, label: "⑤ tuple_to_userset\nparent → viewer", kind: "group", on: true },
+    { id: "edthis", x: 180, y: 250, label: "④a _this\neditor tuples", kind: "object" },
+    { id: "owner", x: 355, y: 250, label: "④b owner\nowner tuples", kind: "object" },
+    { id: "par", x: 520, y: 250, label: "⑥ read readme#parent\n→ folder:A", kind: "object", on: true },
+    { id: "fold", x: 520, y: 340, label: "⑦ folder:A#viewer\n@user:chen: true", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "root", to: "this" },
+    { from: "root", to: "ed" },
+    { from: "root", to: "ttu", on: true },
+    { from: "ed", to: "edthis" },
+    { from: "ed", to: "owner" },
+    { from: "ttu", to: "par", on: true },
+    { from: "par", to: "fold", label: "new sub-check", on: true },
+  ]}
+  caption="Check(user:chen, viewer, doc:readme). Dashed boxes are operators, plain boxes are tuple reads. Only branch ⑤ reaches Chen."
+/>
+
+Notice that the numbers name sub-problems, not a sequence. Leaves ②, ④a, ④b and ⑥ need only the readme's own tuples, which is why the paper keys forwarding on the object (§3.2.5): they can all be answered by the server that owns `doc:readme`. Step ⑦ is a new Check on a different object, so it is forwarded to the server for `folder:A`, and it is itself a tree, here a single `_this` lookup.
+
+## All leaves at once, and cancellation
+
+In what order do the leaves run? The paper does not walk the tree: "To minimize check latency, we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled." (§3.2.3)
+
+What does that look like over time for Chen's check?
+
+<Swimlane
+  lanes={["① viewer (OR)", "② viewer tuples", "③④ editor, owner", "⑤⑥⑦ parent folder"]}
+  laneWidth={138}
+  rowHeight={60}
+  timeLabel="time"
+  title="Leaves run concurrently; a decided OR cancels the rest"
+  desc="At the start, the root starts all leaves at once: the readme's viewer tuples, its editor and owner tuples, and its parent tuples. The viewer tuples come back without Chen, so that leaf is false. The parent read finds folder:A and a sub-check on folder:A#viewer is sent. Before the editor and owner reads finish, the folder sub-check returns true. The root OR is now decided as true, answers, and cancels the editor and owner reads."
+  events={[
+    { lane: 0, t: 0, label: "start all leaves", kind: "note" },
+    { lane: 1, t: 0, label: "read tuples", kind: "read" },
+    { lane: 2, t: 0, label: "read tuples", kind: "read" },
+    { lane: 3, t: 0, label: "read parent", kind: "read" },
+    { lane: 1, t: 1, label: "no Chen: false", kind: "note" },
+    { lane: 3, t: 1, label: "folder:A →\nsub-check", kind: "read", mono: true },
+    { lane: 2, t: 2, label: "still reading", kind: "note" },
+    { lane: 3, t: 2, label: "Chen is a\nviewer: true", kind: "good" },
+    { lane: 0, t: 3, label: "decided: true", kind: "good" },
+    { lane: 2, t: 3, label: "cancelled", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [1, 1], to: [0, 1], label: "false", dashed: true },
+    { from: [3, 2], to: [0, 3], label: "true" },
+    { from: [0, 3], to: [2, 3], label: "cancel", dashed: true },
+  ]}
+  caption="One true child decides an OR. The false answer from ② changes nothing; the true answer from ⑦ ends the whole tree."
+/>
+
+Notice that latency is set by the fastest path to a decisive answer, not by the slowest leaf. Had the parent branch been slow and Chen not been a viewer, the root would have had to wait for every child to say false.
+
+Cancellation saves work, but it leaves a gap. A cancelled sub-check never writes its result to the cache, and other requests may be waiting for that result in the [lock table](../architecture/#the-lock-table-collapses-identical-requests). The paper ran into exactly this: "indirect ACL checks are frequently cancelled when the result of the parent ACL check is already determined. This leaves the cache key unpopulated." Its fix: "we delay eager cancellation when there are waiters on the corresponding lock table entry" (§3.2.5).
+
+## When can each operator stop early
+
+The paper lists three ways to combine sub-expressions, "union, intersection, and exclusion" (§2.3.1), and states one cancellation rule for all of them. When a subtree is "determined" depends on the operator. Which single answer is enough for each?
+
+<Frames min="12rem">
+
+<Graph
+  width={300}
+  height={210}
+  title="Union stops at the first true"
+  desc="A union node with children A and B. B answers true first, which decides the union as true, so A is cancelled."
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∪ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A: running\n→ cancelled", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B: true", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "decides", on: true },
+  ]}
+  caption="Union: one true is enough. False needs every child."
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="Intersection stops at the first false"
+  desc="An intersection node with children A and B. B answers false first, which decides the intersection as false, so A is cancelled."
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A ∩ B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A: running\n→ cancelled", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B: false", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "decides", on: true },
+  ]}
+  caption="Intersection: one false is enough. True needs every child."
+/>
+
+<Graph
+  width={300}
+  height={210}
+  title="Exclusion stops on base false or excluded true"
+  desc="An exclusion node, A minus B. The excluded side B answers true first, which decides the exclusion as false, so the base A is cancelled. A false base would also decide it."
+  nodes={[
+    { id: "op", x: 150, y: 40, label: "A − B", kind: "group", on: true },
+    { id: "a", x: 70, y: 150, label: "A (base):\nrunning\n→ cancelled", kind: "object" },
+    { id: "b", x: 230, y: 150, label: "B (excluded):\ntrue", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "op", to: "a", dashed: true },
+    { from: "b", to: "op", label: "decides", on: true },
+  ]}
+  caption="Exclusion: a false base or a true excluded side is enough. True needs both answers."
+/>
+
+</Frames>
+
+Notice the asymmetry. Each operator has one answer that can arrive early and one that needs every child. For a union the early answer is *yes*; for intersection and exclusion it is *no*. So a permission written as a union answers "allowed" as fast as its quickest path, while a permission with an intersection or exclusion answers "allowed" only as fast as its slowest required part. The table spells it out:
+
+| Operator | Decided early by | Needs every child to say |
+| --- | --- | --- |
+| Union `A ∪ B` | any child true → true | false, to answer false |
+| Intersection `A ∩ B` | any child false → false | true, to answer true |
+| Exclusion `A − B` | base false, or excluded true → false | base true and excluded false, to answer true |
+
+Products follow the same logic. In OpenFGA's [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go) (v1.22.1), the union reducer returns on the first allowed result ("Short-circuit success"), the intersection reducer on the first not-allowed result ("Short-circuit failure"), and the exclusion reducer runs base and subtracted side concurrently and returns not-allowed when "base is false" or when "subtract is true". AuthZed's post on intersections and exclusions ([2022-03-03](https://authzed.com/blog/check-it-out-2)) says that for these operators "SpiceDB can only partially short-circuit the subproblems", and in its example "SpiceDB was able to cancel the other `check` immediately" once one branch of an intersection said no. For unions, its earlier post ([2021-03-17](https://authzed.com/blog/check-it-out)) puts it simply: "any path found suffices to grant permission!"
+
+## Caching sub-results at a snapshot
+
+Every node in the tree is a question with an answer, and the paper caches them all: the servers "form a distributed cache for both reads and check evaluations, including intermediate check results evaluated during pointer chasing" (§3.2.5). Step ⑦ above, "is Chen in `folder:A#viewer`", is such an intermediate result. Any later check that reaches the same question can reuse it.
+
+What makes reuse safe? A result is only true *at a snapshot*. The paper puts the snapshot in the key: "We avoid reusing results evaluated from a different snapshot by encoding snapshot timestamps in cache keys." It then rounds evaluation timestamps up, "to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies", so that most checks land on the same few timestamps (§3.2.5; the rounding is drawn on the [consistency page](../consistency/#why-at-least-as-fresh-and-not-exactly-at)).
+
+When does a cached sub-result help, and when is it a miss?
+
+<Graph
+  width={640}
+  height={300}
+  minWidth={540}
+  title="Sub-results are cached per snapshot"
+  desc="A check for Chen on the readme evaluated at T=13 s stores the sub-result folder:A#viewer@user:chen at 13 s, true. A second check in the same window, also rounded to 13 s, hits that entry. A third check evaluated after the next boundary, at T=14 s, uses a different key, misses, and reads folder tuples from Spanner again."
+  nodes={[
+    { id: "c1", x: 95, y: 50, label: "Chen's check\nT = 13 s", kind: "client" },
+    { id: "c2", x: 95, y: 145, label: "same check,\n0.4 s later\nT = 13 s", kind: "client" },
+    { id: "c3", x: 95, y: 250, label: "same check,\n1.2 s later\nT = 14 s", kind: "client" },
+    { id: "k13", x: 350, y: 95, label: "key: folder:A#viewer\n@user:chen @ 13 s\n= true", kind: "server", mono: true, on: true },
+    { id: "k14", x: 350, y: 250, label: "key: … @ 14 s\n(not cached yet)", kind: "server", mono: true },
+    { id: "db", x: 565, y: 250, label: "folder tuples\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "c1", to: "k13", label: "fill" },
+    { from: "c2", to: "k13", label: "hit", on: true },
+    { from: "c3", to: "k14", label: "miss" },
+    { from: "k14", to: "db", label: "read at 14 s" },
+  ]}
+  caption="The 13 s entry is never invalidated and never reused at 14 s. The timestamps are illustrative."
+/>
+
+Notice that there is no invalidation step. An entry keyed by snapshot can never become wrong, because the data at 13 s never changes; it just stops being asked for once evaluation moves to later timestamps. AuthZed's post on SpiceDB's version of this ([2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)) states the same idea: "For any given problem or sub-problem, at a specified time, the result to the check is immutable", and "if we were to change the evaluation timestamp, the cache keys would change as well".
+
+Two more mechanisms from §3.2.5 sit around this cache, and both are drawn on the architecture page: the [cache trees](../architecture/#both-ends-of-a-call-cache-the-answer) formed by caching "at both the caller and the callee of internal RPCs", and the [lock table](../architecture/#the-lock-table-collapses-identical-requests), where "Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated."
+
+In products:
+
+- SpiceDB rounds revisions into windows set by `--datastore-revision-quantization-interval`, default `5s` ([`dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go), v1.57.1), and wraps its dispatcher in a [`singleflight`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go) layer that counts "dispatch requests that were single flighted", which plays the lock table's role.
+- OpenFGA's check cache is off by default (`checkQueryCache.enabled` is `false`, TTL `10s` when on) ([configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)). Its entries expire after a TTL rather than belonging to a snapshot, which is why OpenFGA needs a `HIGHER_CONSISTENCY` mode to skip it ([consistency](https://openfga.dev/docs/interacting/consistency); see [Ordering without TrueTime](../without-truetime/)).
+
+## Reads are pooled per check
+
+The leaves ②, ④a, ④b and ⑥ all read rows of `doc:readme`. Rather than send each read on its own, "We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner" (§3.2.3). The paper does not describe the mechanism beyond that sentence. The [architecture page](../architecture/#reads-to-spanner-are-pooled) draws the four reads meeting on one server; the storage layout, sorted by object and relation (§3.1.1), is what lets them become range reads over adjacent rows.
+
+## How deep can it go
+
+The recursion in `CHECK(U, U′)` has no built-in bound: a group can contain a group that contains a group, and nothing in the data model forbids a cycle. What does a check do when it meets one?
+
+<Graph
+  width={640}
+  height={290}
+  minWidth={540}
+  title="A cycle in nested groups"
+  desc="A hypothetical misconfiguration: group:all#member contains group:eng#member, and group:eng#member contains group:all#member. A check for Anne on doc:readme#viewer reaches group:eng#member, then group:all#member, then group:eng#member again, and so on. SpiceDB keeps dispatching until the depth limit of 50 and returns an error. OpenFGA remembers the tuple keys it has visited, detects the repeat and treats the branch as not allowed; separately it errors at a depth of 25."
+  nodes={[
+    { id: "doc", x: 90, y: 60, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "eng", x: 320, y: 60, label: "group:eng#member", kind: "group", mono: true },
+    { id: "all", x: 320, y: 200, label: "group:all#member", kind: "group", mono: true },
+    { id: "sdb", x: 540, y: 60, label: "SpiceDB: hop 50\n→ error", kind: "note" },
+    { id: "fga", x: 540, y: 200, label: "OpenFGA: key seen\nbefore → cycle,\nnot allowed", kind: "note" },
+  ]}
+  edges={[
+    { from: "doc", to: "eng", label: "hop 1" },
+    { from: "eng", to: "all", label: "hop 2, 3, 4 …", dir: "both", on: true },
+    { from: "eng", to: "sdb", dashed: true },
+    { from: "all", to: "fga", dashed: true },
+  ]}
+  caption="The two group tuples are hypothetical, not part of the running example. Arrows follow the direction the check searches."
+/>
+
+The paper sets no number. It handles deep and wide nesting with Leopard for "selected namespaces that exhibit such structure" (§3.2.4; see [the Leopard page](../leopard/)), and §5 claims "safe pointer chasing despite potentially deep recursion (e.g. membership checks on hierarchical groups)" without saying what makes it safe beyond that. The per-client limits of §3.2.6 cap CPU and outstanding RPCs, not depth. Products choose explicit limits:
+
+| System | Limit | Default | When reached | Source |
+| --- | --- | --- | --- | --- |
+| Paper | none stated | none | not described | §3.2.4, §5 |
+| SpiceDB | `--dispatch-max-depth` | 50 | error: "the check request has exceeded the allowable maximum depth of 50" | [Cyclical relationships and traversal limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), [`serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go) |
+| OpenFGA | `resolveNodeLimit` | 25 | error; cycles are detected first and answer not allowed | [configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration), [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go) |
+| OpenFGA | `resolveNodeBreadthLimit` | 10 | caps "how many nodes on a given level can be evaluated concurrently" | [configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
+| Ory Keto | `limit.max_read_depth` | 5 | the global maximum; a request may only lower it | [`config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json) |
+
+SpiceDB's docs say it has no separate cycle detector: a cycle runs until it hits the depth limit and returns the same error as a very deep hierarchy, and the docs explain that tracking visited objects was avoided for reasons of semantics and performance ([recursion and max depth](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)). OpenFGA's `LocalChecker` keeps a set of visited tuple keys per request and returns not allowed with `CycleDetected` when one repeats ([`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go), `hasCycle`). Both limits count hops along one path, which is the depth of the tree in the first figure; `resolveNodeBreadthLimit` is the only one of these that bounds the paper's "evaluate all leaf nodes … concurrently".
+
+<Callout kind="note" title="Not verified">
+
+The research notes for this site record one former Google employee on Hacker News describing a maximum recursion depth in Zanzibar. That claim is not in the paper and was not checked against any Google source, so this page does not repeat a number for Zanzibar.
+
+</Callout>
+
+## Sources
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.3.1, §3.1.1, §3.2.3, §3.2.4, §3.2.5, §3.2.6, §5.
+- AuthZed, [Check it out: How permissions are answered in SpiceDB and Authzed](https://authzed.com/blog/check-it-out), 2021-03-17 (vendor blog).
+- AuthZed, [Check it out #2: How intersections and exclusions are computed in SpiceDB and Authzed](https://authzed.com/blog/check-it-out-2), 2022-03-03 (vendor blog).
+- AuthZed, [Hotspot Caching in Google Zanzibar and SpiceDB](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb), 2023-05-10 (vendor blog).
+- AuthZed, [Cyclical Relationships and Traversal Limits](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth), SpiceDB docs.
+- SpiceDB v1.57.1 source: [`pkg/cmd/serve.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/serve.go), [`pkg/cmd/datastore/dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go), [`internal/dispatch/singleflight/singleflight.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go).
+- OpenFGA, [Configuring OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configuration) and [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency).
+- OpenFGA v1.22.1 source: [`internal/graph/check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go).
+- Ory Keto, [`.schema/config.schema.json`](https://github.com/ory/keto/blob/master/.schema/config.schema.json) (`limit.max_read_depth`).
