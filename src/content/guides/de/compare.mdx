@@ -12,11 +12,11 @@ import Callout from "../../../components/diagram/Callout.astro";
 
 Mehrere Open-Source-Projekte beschreiben sich als von Zanzibar inspiriert oder nach Zanzibar modelliert. Diese Seite stellt sechs von ihnen dem Paper gegenüber, ein Aspekt pro Tabelle. Die Zellen sind kurz; die Quellen für jede Zeile stehen unter der jeweiligen Tabelle. Die Fakten wurden am 2026-11-13 geprüft und stammen aus dem eigenen Repository und der Dokumentation des jeweiligen Projekts, sind also meist vom Hersteller verfasst.
 
-Die sechs: [SpiceDB](https://github.com/authzed/spicedb) (AuthZed), [OpenFGA](https://github.com/openfga/openfga) (CNCF), [Permify](https://github.com/Permify/permify) (FusionAuth), [Ory Keto](https://github.com/ory/keto) (Ory), [Topaz](https://github.com/aserto-dev/topaz) (seine Maintainer, nachdem Aserto den Betrieb eingestellt hat) und [Warrant](https://github.com/warrant-dev/warrant) (WorkOS). Jedes hat eine eigene Seite: [SpiceDB](../spicedb/), [OpenFGA](../openfga/), [Permify](../permify/), [Ory Keto](../ory-keto/), [Topaz](../topaz/), [Warrant](../warrant/).
+Die sechs: [SpiceDB](https://github.com/authzed/spicedb) (AuthZed), [OpenFGA](https://github.com/openfga/openfga) (CNCF), [Permify](https://github.com/Permify/permify) (FusionAuth), [Ory Keto](https://github.com/ory/keto) (Ory), [Topaz](https://github.com/aserto-dev/topaz) (seine Maintainer, nachdem Aserto den Betrieb eingestellt hat) und [Warrant](https://github.com/warrant-dev/warrant) (WorkOS). Jedes Projekt hat eine eigene Seite: [SpiceDB](../spicedb/), [OpenFGA](../openfga/), [Permify](../permify/), [Ory Keto](../ory-keto/), [Topaz](../topaz/), [Warrant](../warrant/).
 
 ## Schemasprache
 
-Das Paper nennt es eine Namespace-Konfiguration: Relationen mit Userset-Umschreibregeln (§2.3). Abbildung 1 schreibt eine in einer Textsyntax im Stil von Protocol Buffers; das Paper benennt das Format nicht.
+Das Paper nennt das eine Namespace-Konfiguration: Relationen mit Userset-Umschreibregeln (§2.3). Abbildung 1 schreibt eine in einer Textsyntax im Stil von Protocol Buffers; das Paper benennt das Format nicht.
 
 | System | Schemasprache | Format |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ Quellen: [SpiceDB schema](https://authzed.com/docs/spicedb/concepts/schema) · [
 
 ## Tupelsyntax
 
-Das Paper schreibt ein Tupel als `object#relation@user`, wobei der Benutzer selbst ein Userset `object#relation` sein kann (§2.1). Die Zeilen unten zeigen Betos Gruppe als Betrachter des Readme, wo die Dokumentation eine String-Form angibt.
+Das Paper schreibt ein Tupel als `object#relation@user`, wobei der Benutzer selbst ein Userset `object#relation` sein kann (§2.1). Die Zeilen unten zeigen Betos Gruppe als Betrachter des Readmes, wo die Dokumentation eine String-Form angibt.
 
 | System | Name | Form |
 | --- | --- | --- |
@@ -108,15 +108,15 @@ Welche Produkte haben etwas an der Stelle des zookie?
 
 Nur die beiden durchgezogenen Verbindungen erlauben es einer Anwendung zu sagen „mindestens so aktuell wie mein Schreibvorgang“, und genau das schützt im Paper vor dem „New Enemy“-Problem (§2.2).
 
-## Watch und changelog
+## Watch und Changelog
 
-Watch streamt im Paper Tupeländerungen aus einem changelog, mit Heartbeat-zookies zum Fortsetzen (§2.4.3, §3).
+Watch streamt im Paper Tupeländerungen aus einem Changelog, mit Heartbeat-zookies zum Fortsetzen (§2.4.3, §3).
 
 | System | API | Form |
 | --- | --- | --- |
 | Paper | Watch | Stream, mit einem zookie fortsetzbar |
 | SpiceDB | `Watch` | Stream, mit einem ZedToken fortsetzbar (`changes_through`) |
-| OpenFGA | `ReadChanges` | Paginierter Lesevorgang mit Fortsetzungstoken (abgefragt) |
+| OpenFGA | `ReadChanges` | Paginierter Lesevorgang mit Fortsetzungstoken (per Polling) |
 | Permify | `Watch` | Stream (`stream WatchResponse`) |
 | Ory Keto | Keine | Kein Watch-Dienst in den Protokolldateien |
 | Topaz | Keine | Kein Watch-Dienst in den Protokolldateien |
@@ -142,7 +142,7 @@ Quellen: [AuthZed Materialize](https://authzed.com/docs/materialize/getting-star
 
 ## Speicherung
 
-Das Paper speichert Tupel, Konfigurationen und das changelog in Spanner (§3, §3.1).
+Das Paper speichert Tupel, Konfigurationen und das Changelog in Spanner (§3, §3.1).
 
 | System | Datenspeicher |
 | --- | --- |
@@ -176,7 +176,7 @@ Stand 2026-11-13.
 | System | Eigentümer | Neuestes Release | Status |
 | --- | --- | --- | --- |
 | SpiceDB | AuthZed | v1.57.1 (2026-11-10) | Aktiv |
-| OpenFGA | CNCF; Okta ist Core-Maintainer | v1.22.1 (2026-10-28) | Aktiv, CNCF Incubating (verschoben 2025-10-28, angekündigt 2025-11-11) |
+| OpenFGA | CNCF; Okta ist Core-Maintainer | v1.22.1 (2026-10-28) | Aktiv, CNCF Incubating (Wechsel am 2025-10-28, angekündigt am 2025-11-11) |
 | Permify | FusionAuth (übernommen 2025-11-20) | v1.7.6 (2026-11-05) | Aktiv; Dokumentation nach fusionauth.io umgezogen |
 | Ory Keto | Ory | v26.2.0 (2026-03-20) | Aktiv |
 | Topaz | Seine Maintainer, unter der Organisation `aserto-dev` | v0.33.27 (2026-11-10) | Aktiv; Aserto hat den Betrieb als Unternehmen eingestellt (Beitrag vom 2025-04-27) |

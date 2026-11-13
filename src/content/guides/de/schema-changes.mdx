@@ -13,23 +13,23 @@ import Graph from "../../../components/diagram/Graph.astro";
 import Frames from "../../../components/diagram/Frames.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 
-Ein Schema ist der Teil eines Autorisierungssystems, der sich am seltensten ändert und am meisten kaputtmacht, wenn er es tut. Im Paper ist es die *Namespace-Konfiguration*: "A namespace configuration specifies its relations as well as its storage parameters" (§2.3) (Eine Namespace-Konfiguration spezifiziert ihre Relationen sowie ihre Speicherparameter). Bei Google gab es "more than 1,500 namespaces" (mehr als 1.500 Namespaces), und ihre Konfigurationsdateien "range from tens of lines to thousands of lines, with the median near 500 lines" (§4) (reichen von Dutzenden bis zu Tausenden von Zeilen, mit einem Median von etwa 500 Zeilen). Diese Seite behandelt drei Dinge: wie das Paper verhindert, dass eine Konfigurationsänderung eine Anfrage in zwei Hälften teilt, wie heutige Produkte Sie eine Relation schrittweise entfernen lassen und wie man ein Modell testet, bevor es ausgeliefert wird.
+Ein Schema ist der Teil eines Autorisierungssystems, der sich am seltensten ändert und bei einer Änderung am meisten kaputtmacht. Im Paper ist es die *Namespace-Konfiguration*: "A namespace configuration specifies its relations as well as its storage parameters" (§2.3) (Eine Namespace-Konfiguration spezifiziert ihre Relationen sowie ihre Speicherparameter). Bei Google gab es "more than 1,500 namespaces" (mehr als 1.500 Namespaces), und ihre Konfigurationsdateien "range from tens of lines to thousands of lines, with the median near 500 lines" (§4) (reichen von Dutzenden bis zu Tausenden von Zeilen, mit einem Median von etwa 500 Zeilen). Diese Seite behandelt drei Dinge: wie das Paper verhindert, dass eine Konfigurationsänderung eine Anfrage in zwei Hälften teilt, wie heutige Produkte Sie eine Relation schrittweise entfernen lassen und wie man ein Modell testet, bevor es ausgeliefert wird.
 
 Die Relationskonfigurationen selbst (`_this`, `computed_userset`, `tuple_to_userset`) werden unter [Relationstupel und Usersets](../relation-tuples/) erklärt. Auf dieser Seite geht es darum, sie zu ändern.
 
 ## Wie das Paper Namespace-Konfigurationen versioniert
 
-Konfigurationen liegen in einer eigenen Spanner-Datenbank: "There is one database to store relation tuples for each client namespace, one database to hold all namespace configurations, and one changelog database shared across all namespaces" (§3) (Es gibt eine Datenbank für die Relationstupel jedes Client-Namespace, eine Datenbank für alle Namespace-Konfigurationen und eine changelog-Datenbank, die alle Namespaces teilen). Die Konfigurationsdatenbank ist eine Tabelle plus ein Log:
+Konfigurationen liegen in einer eigenen Spanner-Datenbank: "There is one database to store relation tuples for each client namespace, one database to hold all namespace configurations, and one changelog database shared across all namespaces" (§3) (Es gibt eine Datenbank für die Relationstupel jedes Client-Namespace, eine Datenbank für alle Namespace-Konfigurationen und eine Changelog-Datenbank, die alle Namespaces teilen). Die Konfigurationsdatenbank ist eine Tabelle plus ein Log:
 
 <Callout kind="paper" title="§3.1.3 Namespace Config Storage">
 
 Namespace configs are stored in a database with two tables. One table contains the configs and is keyed by namespace IDs. The other is a changelog of config updates and is keyed by commit timestamps. This structure allows a Zanzibar server to load all configs upon startup and monitor the changelog to refresh configs continuously.
 
-(Namespace-Konfigurationen werden in einer Datenbank mit zwei Tabellen gespeichert. Eine Tabelle enthält die Konfigurationen und ist nach Namespace-IDs verschlüsselt. Die andere ist ein changelog der Konfigurationsänderungen und ist nach Commit-Zeitstempeln verschlüsselt. Diese Struktur erlaubt es einem Zanzibar-Server, beim Start alle Konfigurationen zu laden und das changelog zu überwachen, um Konfigurationen fortlaufend zu aktualisieren.)
+(Namespace-Konfigurationen werden in einer Datenbank mit zwei Tabellen gespeichert. Eine Tabelle enthält die Konfigurationen und hat Namespace-IDs als Schlüssel. Die andere ist ein Changelog der Konfigurationsänderungen und hat Commit-Zeitstempel als Schlüssel. Diese Struktur erlaubt es einem Zanzibar-Server, beim Start alle Konfigurationen zu laden und das Changelog zu überwachen, um Konfigurationen fortlaufend zu aktualisieren.)
 
 </Callout>
 
-Jede Konfigurationsversion hat also einen Commit-Zeitstempel, und jeder Server hält einen gewissen Bereich von Versionen. Die Gefahr ist eine Anfrage, die sich auffächert (siehe [Architektur](../architecture/)): Hat der Server, der sie empfängt, bereits eine neue Konfiguration geladen und der Server, an den er delegiert, noch nicht, würden die beiden Hälften eines Check unter unterschiedlichen Regeln ausgewertet. Das Paper schließt das aus: "Zanzibar chooses a single snapshot timestamp for config metadata when evaluating each client request. All `aclservers` in a cluster use that same timestamp for the same request, including for any subrequests that fan out from the original client request" (§3.2.2) (Zanzibar wählt bei der Auswertung jeder Client-Anfrage einen einzigen Snapshot-Zeitstempel für die Konfigurationsmetadaten. Alle `aclservers` in einem Cluster verwenden für dieselbe Anfrage denselben Zeitstempel, einschließlich aller Teilanfragen, die sich aus der ursprünglichen Client-Anfrage auffächern).
+Jede Konfigurationsversion hat also einen Commit-Zeitstempel, und jeder Server hält einen gewissen Bereich von Versionen. Die Gefahr ist eine Anfrage, die sich auffächert (siehe [Architektur](../architecture/)): Hat der Server, der sie empfängt, bereits eine neue Konfiguration geladen und der Server, an den er delegiert, noch nicht, würden die beiden Hälften eines Checks unter unterschiedlichen Regeln ausgewertet. Das Paper schließt das aus: "Zanzibar chooses a single snapshot timestamp for config metadata when evaluating each client request. All `aclservers` in a cluster use that same timestamp for the same request, including for any subrequests that fan out from the original client request" (§3.2.2) (Zanzibar wählt bei der Auswertung jeder Client-Anfrage einen einzigen Snapshot-Zeitstempel für die Konfigurationsmetadaten. Alle `aclservers` in einem Cluster verwenden für dieselbe Anfrage denselben Zeitstempel, einschließlich aller Teilanfragen, die sich aus der ursprünglichen Client-Anfrage auffächern).
 
 Welchen Zeitstempel kann eine Anfrage verwenden, wenn die Server in einem Cluster unterschiedliche Konfigurationsversionen geladen haben?
 
@@ -39,7 +39,7 @@ Welchen Zeitstempel kann eine Anfrage verwenden, wenn die Server in einem Cluste
   rowHeight={62}
   timeLabel="Zeit"
   title="Ein Konfigurationszeitstempel pro Anfrage"
-  desc="Eine neue Konfigurationsversion wird zum Zeitstempel T2 im Konfigurationsspeicher committet. aclserver 1 liest sie aus dem changelog und hält nun Versionen bis T2; aclserver 2 hinkt hinterher und hält noch Versionen bis T1. Beide melden ihre Bereiche an den Überwachungsjob, der einen global verfügbaren Bereich meldet, der bei T1 endet. Eine Anfrage trifft bei aclserver 1 ein, der eine Zeit innerhalb dieses Bereichs wählt, also höchstens T1, und eine Teilanfrage mit demselben Konfigurationszeitstempel an aclserver 2 sendet. Später lädt aclserver 2 T2, und der globale Bereich wächst und umfasst T2."
+  desc="Eine neue Konfigurationsversion wird zum Zeitstempel T2 im Konfigurationsspeicher committet. aclserver 1 liest sie aus dem Changelog und hält nun Versionen bis T2; aclserver 2 hinkt hinterher und hält noch Versionen bis T1. Beide melden ihre Bereiche an den Überwachungsjob, der einen global verfügbaren Bereich meldet, der bei T1 endet. Eine Anfrage trifft bei aclserver 1 ein, der eine Zeit innerhalb dieses Bereichs wählt, also höchstens T1, und eine Teilanfrage mit demselben Konfigurationszeitstempel an aclserver 2 sendet. Später lädt aclserver 2 T2, und der globale Bereich wächst und umfasst T2."
   events={[
     { lane: 0, t: 0, label: "Konfig v2\ncommittet bei T2", kind: "write" },
     { lane: 2, t: 1, label: "lädt v2:\nhält ≤ T2", kind: "note" },
@@ -51,12 +51,12 @@ Welchen Zeitstempel kann eine Anfrage verwenden, wenn die Server in einem Cluste
     { lane: 1, t: 6, label: "globaler Bereich\nenthält nun T2", kind: "note" },
   ]}
   arrows={[
-    { from: [0, 0], to: [2, 1], label: "changelog" },
+    { from: [0, 0], to: [2, 1], label: "Changelog" },
     { from: [2, 1], to: [1, 2], dashed: true },
     { from: [3, 1], to: [1, 2], label: "Bereiche", dashed: true },
     { from: [1, 2], to: [2, 3], label: "Bereich" },
     { from: [2, 3], to: [3, 4], label: "Auffächerung" },
-    { from: [0, 0], to: [3, 5], label: "changelog", dashed: true },
+    { from: [0, 0], to: [3, 5], label: "Changelog", dashed: true },
   ]}
   caption="Die Anfrage wird auf beiden Servern unter v1 ausgewertet, weil v2 noch nicht auf jedem Server verfügbar ist."
 />
@@ -72,13 +72,13 @@ Die beiden am besten dokumentierten Produkte haben unterschiedlich entschieden.
 - **SpiceDB** hat ein aktuelles Schema pro Installation, das mit `WriteSchema` ersetzt wird. Die Dokumentation von AuthZed sagt, SpiceDB "processes all calls to the WriteSchema in a **safe** manner: it is not possible to break the type safety of a schema" (verarbeitet alle Aufrufe von WriteSchema auf **sichere** Weise: Es ist nicht möglich, die Typsicherheit eines Schemas zu brechen), was bedeutet: "it is not possible to accidentally remove a relation that is still referenced by one or more relationships" (es ist nicht möglich, versehentlich eine Relation zu entfernen, auf die noch eine oder mehrere Beziehungen verweisen) ([Migrating a Schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)). Ein Beitrag von AuthZed aus dem Jahr 2022 ergänzt, dass Schema-Schreibvorgänge vollständig konsistent sind, sodass Beziehungs-Schreibvorgänge nach einem Schema-Schreibvorgang unter dem neuen Schema ausgewertet werden ([Online Schema Migrations](https://authzed.com/blog/online-schema-migrations)).
 - **OpenFGA** behält jede Version. "Authorization Models in OpenFGA are immutable, they are created once and then can no longer be deleted or modified. Each time you write an authorization model, a new version is created." (Autorisierungsmodelle in OpenFGA sind unveränderlich; sie werden einmal angelegt und können danach weder gelöscht noch geändert werden. Jedes Mal, wenn Sie ein Autorisierungsmodell schreiben, wird eine neue Version angelegt.) Anfragen können eine `authorization_model_id` nennen; ohne sie "OpenFGA will use the last created Authorization Model for that store" (verwendet OpenFGA das zuletzt angelegte Autorisierungsmodell dieses Stores) ([Immutable Models](https://openfga.dev/docs/getting-started/immutable-models)). Die Dokumentation empfiehlt, die ID in der Konfiguration festzulegen, was auch Schattenprüfungen gegen ein neues Modell vor dem Umschalten erlaubt.
 
-Das Design des Papers liegt zwischen den beiden: ein nach Commit-Zeitstempel verschlüsseltes changelog wie die Versionshistorie von OpenFGA, aber mit Servern, die immer zur neuesten Version wechseln, wie SpiceDB. Mehr zu jedem Produkt: [SpiceDB](../../ecosystem/spicedb/), [OpenFGA](../../ecosystem/openfga/).
+Das Design des Papers liegt zwischen den beiden: ein Changelog mit Commit-Zeitstempeln als Schlüssel wie die Versionshistorie von OpenFGA, aber mit Servern, die immer zur neuesten Version wechseln, wie SpiceDB. Mehr zu jedem Produkt: [SpiceDB](../../ecosystem/spicedb/), [OpenFGA](../../ecosystem/openfga/).
 
 ## Eine Relation zu entfernen braucht drei Schritte
 
 Hinzufügen ist einfach. In SpiceDB gilt: "Adding a new `relation` to a `definition` is always allowed, as it cannot change any existing types or computation" (Eine neue `relation` zu einer `definition` hinzuzufügen ist immer erlaubt, da es keine bestehenden Typen oder Berechnungen ändern kann), und eine Änderung daran, wie eine Berechtigung berechnet wird, ist erlaubt, solange sie auf definierte Relationen oder Berechtigungen verweist ([Migrating a Schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)).
 
-Entfernen ist es nicht. Dieselbe Seite: "For type safety reasons, any removal of a `relation` with data, or a `relation` or `permission` referenced by _another_ `relation` or `permission` is disallowed." (Aus Gründen der Typsicherheit ist jedes Entfernen einer `relation` mit Daten oder einer `relation` oder `permission`, auf die eine _andere_ `relation` oder `permission` verweist, verboten.) Eine Relation kann erst gehen, wenn ihre Tupel weg sind, und ihre Tupel können erst sicher gehen, wenn nichts mehr Zugriff aus ihnen berechnet. Das Entfernen hat also eine Reihenfolge.
+Entfernen ist es nicht. Dieselbe Seite: "For type safety reasons, any removal of a `relation` with data, or a `relation` or `permission` referenced by _another_ `relation` or `permission` is disallowed." (Aus Gründen der Typsicherheit ist jedes Entfernen einer `relation` mit Daten oder einer `relation` oder `permission`, auf die eine _andere_ `relation` oder `permission` verweist, verboten.) Eine Relation kann erst entfernt werden, wenn ihre Tupel weg sind, und ihre Tupel können erst gefahrlos gelöscht werden, wenn nichts mehr Zugriff aus ihnen berechnet. Das Entfernen hat also eine Reihenfolge.
 
 Nehmen Sie das `doc` des durchgehenden Beispiels mit einer hypothetischen zusätzlichen Relation `editor`, die das Team entfernen will. In der Schemasprache von SpiceDB beginnt es so:
 
@@ -185,7 +185,7 @@ Was ändert jeder Schritt, und warum kann keiner übersprungen werden?
 
 Beachten Sie, wo sich der Zugriff tatsächlich ändert: in Schritt 1, nicht in Schritt 3. Sobald die Berechtigung `editor` nicht mehr liest, wird ein Bearbeiter, der nicht auch Eigentümer oder Betrachter ist, abgewiesen, während die Tupel noch auf der Platte liegen. Das ist der Punkt, an dem man anhalten und beobachten sollte. Der Beitrag von AuthZed, der seine Schritte anders nummeriert, sagt über diesen Zustand, bevor Daten gelöscht werden: "You can stay at step 2 for as long as desired, in production, to retain your ability to roll back the change" (Sie können in der Produktion so lange wie gewünscht bei Schritt 2 bleiben, um die Möglichkeit zu behalten, die Änderung zurückzunehmen) ([Online Schema Migrations](https://authzed.com/blog/online-schema-migrations)): Schritt 1 zurückzunehmen ist ein Schema-Schreibvorgang, während Schritt 2 zurückzunehmen bedeutet, Tupel wiederherzustellen. Die drei Schritte stammen aus der [Migrationsdokumentation von AuthZed](https://authzed.com/docs/spicedb/modeling/migrating-schema), die dasselbe Muster auch für das Entfernen eines erlaubten Subjekttyps aus einer Relation beschreibt (zuerst diese Beziehungen löschen, dann das Schema bearbeiten).
 
-Eine Relation umzubenennen ist ein Entfernen plus ein Hinzufügen. Die SpiceDB-Dokumentation geht es durch: die neue Relation hinzufügen und in die Berechtigung aufnehmen, die Anwendung beide schreiben lassen, nachfüllen, die alte Relation aus der Berechtigung nehmen, aufhören, sie zu schreiben, und sie dann mit den drei obigen Schritten entfernen ([Migrating a Schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)). Die OpenFGA-Variante derselben Aufgabe stützt sich auf unveränderliche Modelle: das neue Modell schreiben (eine neue ID, die die Produktion noch nicht verwendet), die Anwendung aktualisieren, die Tupel auf den neuen Relationsnamen kopieren und dann die Anwendung mit der neuen Modell-ID ausrollen ([Immutable Models](https://openfga.dev/docs/getting-started/immutable-models)).
+Eine Relation umzubenennen ist ein Entfernen plus ein Hinzufügen. Die SpiceDB-Dokumentation geht es durch: die neue Relation hinzufügen und in die Berechtigung aufnehmen, die Anwendung beide schreiben lassen, Bestandsdaten nachtragen (Backfill), die alte Relation aus der Berechtigung nehmen, aufhören, sie zu schreiben, und sie dann mit den drei obigen Schritten entfernen ([Migrating a Schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)). Die OpenFGA-Variante derselben Aufgabe stützt sich auf unveränderliche Modelle: das neue Modell schreiben (eine neue ID, die die Produktion noch nicht verwendet), die Anwendung aktualisieren, die Tupel auf den neuen Relationsnamen kopieren und dann die Anwendung mit der neuen Modell-ID ausrollen ([Immutable Models](https://openfga.dev/docs/getting-started/immutable-models)).
 
 <Callout kind="warn" title="Eine Berechtigung entfernen">
 
@@ -195,7 +195,7 @@ SpiceDB erlaubt das Entfernen einer Berechtigung, auf die nichts anderes im Sche
 
 ## Ein Modell mit Assertion-Dateien testen
 
-Beide Produkte lesen eine YAML-Datei, die ein Modell, einige Tupel und die erwarteten Antworten enthält. Die folgenden Beispiele kodieren das durchgehende Beispiel (Anne ist Eigentümerin des Readme; Beto ist in eng; die Mitglieder von eng sehen das Readme; Chen sieht Ordner A). Sie folgen dem dokumentierten Format des jeweiligen Produkts, wurden aber für diese Seite geschrieben und nicht ausgeführt.
+Beide Produkte lesen eine YAML-Datei, die ein Modell, einige Tupel und die erwarteten Antworten enthält. Die folgenden Beispiele kodieren das durchgehende Beispiel (Anne ist Eigentümerin des Readmes; Beto ist in eng; die Mitglieder von eng sehen das Readme; Chen sieht Ordner A). Sie folgen dem dokumentierten Format des jeweiligen Produkts, wurden aber für diese Seite geschrieben und nicht ausgeführt.
 
 ### OpenFGA: `.fga.yaml`
 
@@ -307,7 +307,7 @@ assertions:
 
 Beide Dateien testen das *Modell*, gegen Tupel, die man erfindet. Sie sind Unit-Tests für das Schema, keine Prüfung der Produktionsdaten.
 
-## Sie in der CI ausführen
+## Die Tests in der CI ausführen
 
 Wo gehört jede Art von Prüfung zwischen einem Pull Request und der Produktion hin?
 
@@ -375,12 +375,11 @@ Abschnitte des Papers: Namespace-Konfigurationen §2.3; Konfigurationsspeicher �
 
 ## Quellen
 
-
-- Zanzibar paper, §2.1, §2.3, §3, §3.1.3, §3.2.2, §4 (this site's transcription)
+- Zanzibar-Paper, §2.1, §2.3, §3, §3.1.3, §3.2.2, §4 (Transkription auf dieser Website)
 - AuthZed, Migrating a Schema in SpiceDB: [authzed.com/docs/spicedb/modeling/migrating-schema](https://authzed.com/docs/spicedb/modeling/migrating-schema)
-- AuthZed blog, Online Schema Migrations in SpiceDB (2022-02-03): [authzed.com/blog/online-schema-migrations](https://authzed.com/blog/online-schema-migrations)
+- AuthZed-Blog, Online Schema Migrations in SpiceDB (2022-02-03): [authzed.com/blog/online-schema-migrations](https://authzed.com/blog/online-schema-migrations)
 - AuthZed, Validation, Testing, Debugging SpiceDB Schemas: [authzed.com/docs/spicedb/modeling/validation-testing-debugging](https://authzed.com/docs/spicedb/modeling/validation-testing-debugging)
 - OpenFGA, Testing Models: [openfga.dev/docs/modeling/testing](https://openfga.dev/docs/modeling/testing)
 - OpenFGA, Immutable Authorization Models: [openfga.dev/docs/getting-started/immutable-models](https://openfga.dev/docs/getting-started/immutable-models)
 - OpenFGA Model Testing Action, action.yml: [github.com/openfga/action-openfga-test](https://github.com/openfga/action-openfga-test/blob/main/action.yml)
-- Carla Urrea Stabile, Continuous Authorization Testing: FGA, GitHub Actions, and CI/CD, Auth0 blog (2025-12-17): [auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/)
+- Carla Urrea Stabile, Continuous Authorization Testing: FGA, GitHub Actions, and CI/CD, Auth0-Blog (2025-12-17): [auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd](https://auth0.com/blog/continuous-authorization-testing-fga-github-ci-cd/)

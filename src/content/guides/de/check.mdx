@@ -15,7 +15,7 @@ import Frames from "../../../components/diagram/Frames.astro";
 
 Ein Check stellt eine Frage: Ist dieser Benutzer in diesem Userset zu diesem Snapshot? Die Antwort kann Dutzende von Lesevorgängen auf mehreren Servern erfordern. Diese Seite verfolgt einen Check von innen: den booleschen Ausdruck, zu dem er wird, die Reihenfolge, in der seine Teile laufen, wann er früh aufhören kann, was er im Cache hinterlässt und wo er aufgibt.
 
-Zwei andere Seiten decken das angrenzende Gebiet ab. [Relationstupel und Usersets](../relation-tuples/#check-als-graphsuche) geht dieselbe Frage Zweig für Zweig als Graphsuche durch. [Architektur](../architecture/#ein-check-schritt-für-schritt) verfolgt die Anfrage über die Server hinweg: konsistentes Hashing, Cache-Bäume, die Lock-Tabelle, das Bündeln von Lesevorgängen und Hedging. Diese Seite bleibt innerhalb der Auswertung.
+Zwei andere Seiten decken das angrenzende Gebiet ab. [Relationstupel und Usersets](../relation-tuples/#check-als-graphsuche) geht dieselbe Frage Zweig für Zweig als Graphsuche durch. [Architektur](../architecture/#ein-check-schritt-für-schritt) verfolgt die Anfrage über die Server hinweg: konsistentes Hashing, Cache-Bäume, die Sperrtabelle, das Bündeln von Lesevorgängen und Hedging. Diese Seite bleibt innerhalb der Auswertung.
 
 ## Ein Check ist ein boolescher Ausdruck
 
@@ -47,7 +47,7 @@ Jedes `this(…)` ist ein Tupel-Lookup, und jedes `∨` ist ein Knoten in einem 
   height={380}
   minWidth={540}
   title="Der Baum der Teilprobleme für einen Check"
-  desc="1: doc:readme#viewer, ein ODER-Knoten, hat drei Kinder. 2: _this, die viewer-Tupel des Readme. 3: editor, ein ODER-Knoten mit zwei Kindern, 4a: die editor-Tupel des Readme, und 4b: owner, die owner-Tupel des Readme. 5: tuple_to_userset über parent; 6 liest die parent-Tupel des Readme und findet folder:A, dann fragt 7, ob Chen in folder:A#viewer ist. Schritt 7 ist wahr, und der hervorgehobene Pfad 1, 5, 6, 7 antwortet mit Ja."
+  desc="1: doc:readme#viewer, ein ODER-Knoten, hat drei Kinder. 2: _this, die viewer-Tupel des Readmes. 3: editor, ein ODER-Knoten mit zwei Kindern, 4a: die editor-Tupel des Readmes, und 4b: owner, die owner-Tupel des Readmes. 5: tuple_to_userset über parent; 6 liest die parent-Tupel des Readmes und findet folder:A, dann fragt 7, ob Chen in folder:A#viewer ist. Schritt 7 ist wahr, und der hervorgehobene Pfad 1, 5, 6, 7 antwortet mit Ja."
   nodes={[
     { id: "root", x: 320, y: 40, label: "① doc:readme#viewer\nODER", kind: "group", on: true },
     { id: "this", x: 90, y: 140, label: "② _this\nviewer-Tupel", kind: "object" },
@@ -70,9 +70,9 @@ Jedes `this(…)` ist ein Tupel-Lookup, und jedes `∨` ist ein Knoten in einem 
   caption="Check(user:chen, viewer, doc:readme). Gestrichelte Kästen sind Operatoren, einfache Kästen sind Tupel-Lesevorgänge. Nur Zweig ⑤ erreicht Chen."
 />
 
-Die Nummern bezeichnen Teilprobleme, keine Abfolge. Die Blätter ②, ④a, ④b und ⑥ brauchen nur die eigenen Tupel des Readme; deshalb verschlüsselt das Paper die Weiterleitung nach dem Objekt (§3.2.5): Sie können alle von dem Server beantwortet werden, dem `doc:readme` gehört. Schritt ⑦ ist ein neuer Check auf einem anderen Objekt, wird also an den Server für `folder:A` weitergeleitet und ist selbst ein Baum, hier ein einzelner `_this`-Lookup.
+Die Nummern bezeichnen Teilprobleme, keine Abfolge. Die Blätter ②, ④a, ④b und ⑥ brauchen nur die eigenen Tupel des Readmes; deshalb verwendet das Paper bei der Weiterleitung das Objekt als Schlüssel (§3.2.5): Sie können alle von dem Server beantwortet werden, dem `doc:readme` gehört. Schritt ⑦ ist ein neuer Check auf einem anderen Objekt, wird also an den Server für `folder:A` weitergeleitet und ist selbst ein Baum, hier ein einzelner `_this`-Lookup.
 
-## Alle Blätter gleichzeitig, und Abbruch
+## Alle Blätter gleichzeitig und Abbruch
 
 In welcher Reihenfolge laufen die Blätter? Das Paper durchläuft den Baum nicht: "To minimize check latency, we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled." (§3.2.3) (Um die Latenz von Prüfungen zu minimieren, werten wir alle Blattknoten des booleschen Ausdrucksbaums gleichzeitig aus. Wenn das Ergebnis eines Knotens das Ergebnis eines Teilbaums bestimmt, wird die Auswertung der anderen Knoten im Teilbaum abgebrochen.)
 
@@ -84,7 +84,7 @@ Wie sieht das für Chens Prüfung über die Zeit aus?
   rowHeight={60}
   timeLabel="Zeit"
   title="Blätter laufen gleichzeitig; ein entschiedenes ODER bricht den Rest ab"
-  desc="Zu Beginn startet die Wurzel alle Blätter gleichzeitig: die viewer-Tupel des Readme, seine editor- und owner-Tupel und seine parent-Tupel. Die viewer-Tupel kommen ohne Chen zurück, also ist dieses Blatt falsch. Der parent-Lesevorgang findet folder:A, und eine Teilprüfung auf folder:A#viewer wird gesendet. Bevor die editor- und owner-Lesevorgänge fertig sind, gibt die Ordner-Teilprüfung wahr zurück. Das ODER an der Wurzel ist nun als wahr entschieden, antwortet und bricht die editor- und owner-Lesevorgänge ab."
+  desc="Zu Beginn startet die Wurzel alle Blätter gleichzeitig: die viewer-Tupel des Readmes, seine editor- und owner-Tupel und seine parent-Tupel. Die viewer-Tupel kommen ohne Chen zurück, also ist dieses Blatt falsch. Der parent-Lesevorgang findet folder:A, und eine Teilprüfung auf folder:A#viewer wird gesendet. Bevor die editor- und owner-Lesevorgänge fertig sind, gibt die Ordner-Teilprüfung wahr zurück. Das ODER an der Wurzel ist nun als wahr entschieden, antwortet und bricht die editor- und owner-Lesevorgänge ab."
   events={[
     { lane: 0, t: 0, label: "alle Blätter starten", kind: "note" },
     { lane: 1, t: 0, label: "Tupel lesen", kind: "read" },
@@ -107,7 +107,7 @@ Wie sieht das für Chens Prüfung über die Zeit aus?
 
 Die Latenz wird durch den schnellsten Pfad zu einer entscheidenden Antwort bestimmt, nicht durch das langsamste Blatt. Wäre der parent-Zweig langsam gewesen und Chen kein Betrachter, hätte die Wurzel warten müssen, bis jedes Kind falsch meldet.
 
-Der Abbruch spart Arbeit, hinterlässt aber eine Lücke. Eine abgebrochene Teilprüfung schreibt ihr Ergebnis nie in den Cache, und andere Anfragen warten womöglich in der [Lock-Tabelle](../architecture/#die-lock-tabelle-fasst-identische-anfragen-zusammen) auf genau dieses Ergebnis. Das Paper stieß genau darauf: "indirect ACL checks are frequently cancelled when the result of the parent ACL check is already determined. This leaves the cache key unpopulated." (indirekte ACL-Prüfungen werden häufig abgebrochen, wenn das Ergebnis der übergeordneten ACL-Prüfung bereits feststeht. Dadurch bleibt der Cache-Schlüssel leer.) Seine Lösung: "we delay eager cancellation when there are waiters on the corresponding lock table entry" (§3.2.5) (wir verzögern den frühzeitigen Abbruch, wenn auf den entsprechenden Eintrag der Lock-Tabelle gewartet wird).
+Der Abbruch spart Arbeit, hinterlässt aber eine Lücke. Eine abgebrochene Teilprüfung schreibt ihr Ergebnis nie in den Cache, und andere Anfragen warten womöglich in der [Sperrtabelle](../architecture/#die-sperrtabelle-fasst-identische-anfragen-zusammen) auf genau dieses Ergebnis. Das Paper stieß genau darauf: "indirect ACL checks are frequently cancelled when the result of the parent ACL check is already determined. This leaves the cache key unpopulated." (indirekte ACL-Prüfungen werden häufig abgebrochen, wenn das Ergebnis der übergeordneten ACL-Prüfung bereits feststeht. Dadurch bleibt der Cache-Schlüssel leer.) Seine Lösung: "we delay eager cancellation when there are waiters on the corresponding lock table entry" (§3.2.5) (wir verzögern den frühzeitigen Abbruch, wenn auf den entsprechenden Eintrag der Sperrtabelle gewartet wird).
 
 ## Wann jeder Operator früh aufhören kann
 
@@ -209,13 +209,13 @@ Wann hilft ein gecachtes Teilergebnis, und wann ist es ein Fehltreffer?
   caption="Der Eintrag für 13 s wird nie invalidiert und nie bei 14 s wiederverwendet. Die Zeitstempel dienen der Veranschaulichung."
 />
 
-Es gibt keinen Invalidierungsschritt. Ein nach Snapshot verschlüsselter Eintrag kann nie falsch werden, weil sich die Daten bei 13 s nie ändern; er wird einfach nicht mehr abgefragt, sobald die Auswertung zu späteren Zeitstempeln weiterzieht. Der Beitrag von AuthZed über die SpiceDB-Version davon ([2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)) formuliert dieselbe Idee: "For any given problem or sub-problem, at a specified time, the result to the check is immutable" (Für jedes gegebene Problem oder Teilproblem ist das Ergebnis der Prüfung zu einem bestimmten Zeitpunkt unveränderlich), und "if we were to change the evaluation timestamp, the cache keys would change as well" (würden wir den Auswertungszeitstempel ändern, würden sich auch die Cache-Schlüssel ändern).
+Es gibt keinen Invalidierungsschritt. Ein Eintrag mit dem Snapshot im Schlüssel kann nie falsch werden, weil sich die Daten bei 13 s nie ändern; er wird einfach nicht mehr abgefragt, sobald die Auswertung zu späteren Zeitstempeln weiterzieht. Der Beitrag von AuthZed über die SpiceDB-Version davon ([2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)) formuliert dieselbe Idee: "For any given problem or sub-problem, at a specified time, the result to the check is immutable" (Für jedes gegebene Problem oder Teilproblem ist das Ergebnis der Prüfung zu einem bestimmten Zeitpunkt unveränderlich), und "if we were to change the evaluation timestamp, the cache keys would change as well" (würden wir den Auswertungszeitstempel ändern, würden sich auch die Cache-Schlüssel ändern).
 
-Zwei weitere Mechanismen aus §3.2.5 umgeben diesen Cache, und beide sind auf der Architekturseite gezeichnet: die [Cache-Bäume](../architecture/#beide-enden-eines-aufrufs-cachen-die-antwort), die durch Caching "at both the caller and the callee of internal RPCs" (sowohl beim Aufrufer als auch beim Aufgerufenen interner RPCs) entstehen, und die [Lock-Tabelle](../architecture/#die-lock-tabelle-fasst-identische-anfragen-zusammen), bei der "Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated." (von den Anfragen, die denselben Cache-Schlüssel teilen, nur eine mit der Verarbeitung beginnt; die übrigen blockieren, bis der Cache gefüllt ist.)
+Zwei weitere Mechanismen aus §3.2.5 umgeben diesen Cache, und beide sind auf der Architekturseite gezeichnet: die [Cache-Bäume](../architecture/#beide-enden-eines-aufrufs-cachen-die-antwort), die durch Caching "at both the caller and the callee of internal RPCs" (sowohl beim Aufrufer als auch beim Aufgerufenen interner RPCs) entstehen, und die [Sperrtabelle](../architecture/#die-sperrtabelle-fasst-identische-anfragen-zusammen), bei der "Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated." (von den Anfragen, die denselben Cache-Schlüssel teilen, nur eine mit der Verarbeitung beginnt; die übrigen blockieren, bis der Cache gefüllt ist.)
 
 In Produkten:
 
-- SpiceDB rundet Revisionen in Fenster, die durch `--datastore-revision-quantization-interval` festgelegt werden, Standard `5s` ([`dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go), v1.57.1), und umhüllt seinen Dispatcher mit einer [`singleflight`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go)-Schicht, die "dispatch requests that were single flighted" (Dispatch-Anfragen, die per Single-Flight zusammengefasst wurden) zählt und damit die Rolle der Lock-Tabelle spielt.
+- SpiceDB rundet Revisionen in Fenster, die durch `--datastore-revision-quantization-interval` festgelegt werden, Standard `5s` ([`dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go), v1.57.1), und umhüllt seinen Dispatcher mit einer [`singleflight`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go)-Schicht, die "dispatch requests that were single flighted" (Dispatch-Anfragen, die per Single-Flight zusammengefasst wurden) zählt und damit die Rolle der Sperrtabelle spielt.
 - Der Check-Cache von OpenFGA ist standardmäßig ausgeschaltet (`checkQueryCache.enabled` ist `false`, TTL `10s`, wenn eingeschaltet) ([Konfiguration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)). Seine Einträge laufen nach einer TTL ab, statt zu einem Snapshot zu gehören; deshalb braucht OpenFGA einen Modus `HIGHER_CONSISTENCY`, um ihn zu umgehen ([Konsistenz](https://openfga.dev/docs/interacting/consistency); siehe [Reihenfolge ohne TrueTime](../without-truetime/)).
 
 ## Lesevorgänge werden pro Prüfung gebündelt

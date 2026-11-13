@@ -23,7 +23,7 @@ Welche Kästen gibt es, und in welche Richtung fließen Daten zwischen ihnen? Da
   height={400}
   minWidth={560}
   title="Zanzibar-Architektur, vereinfacht"
-  desc="Clients senden Check, Read, Expand und Write an die aclserver in einem Zanzibar-Serving-Cluster; der watchserver ist wie im Paper außerhalb des Clusters gezeichnet. Die aclserver laden Namespace-Konfigurationen aus Spanner, lesen und schreiben Relationstupel in einer Spanner-Datenbank pro Namespace und hängen jeden Schreibvorgang an das changelog an, ebenfalls in Spanner. Ein watchserver liest das changelog fortlaufend und streamt Änderungen an Clients (die Watch-API) und an Leopard (Abbildung 2 des Papers zeichnet Leopard als separates Indexierungssystem). Eine periodische Offline-Pipeline liest die Tupeldatenbanken, erstellt Snapshot-Dumps und entfernt alte Versionen per Garbage Collection; Leopard baut seinen Index aus diesen Snapshots auf und beantwortet Mengenberechnungen für die aclserver."
+  desc="Clients senden Check, Read, Expand und Write an die aclserver in einem Zanzibar-Serving-Cluster; der watchserver ist wie im Paper außerhalb des Clusters gezeichnet. Die aclserver laden Namespace-Konfigurationen aus Spanner, lesen und schreiben Relationstupel in einer Spanner-Datenbank pro Namespace und hängen jeden Schreibvorgang an das Changelog an, ebenfalls in Spanner. Ein watchserver liest das Changelog fortlaufend und streamt Änderungen an Clients (die Watch-API) und an Leopard (Abbildung 2 des Papers zeichnet Leopard als separates Indexierungssystem). Eine periodische Offline-Pipeline liest die Tupeldatenbanken, erstellt Snapshot-Dumps und entfernt alte Versionen per Garbage Collection; Leopard baut seinen Index aus diesen Snapshots auf und beantwortet Mengenberechnungen für die aclserver."
   groups={[
     { x: 178, y: 28, w: 184, h: 112, label: "Zanzibar-Serving-Cluster" },
     { x: 425, y: 20, w: 210, h: 262, label: "Spanner" },
@@ -35,7 +35,7 @@ Welche Kästen gibt es, und in welche Richtung fließen Daten zwischen ihnen? Da
     { id: "wcl", x: 55, y: 250, label: "Clients", kind: "client" },
     { id: "cfg", x: 531, y: 70, label: "Namespace-\nKonfigurationen", kind: "store" },
     { id: "tup", x: 531, y: 150, label: "Relationstupel\n(eine DB pro Namespace)", kind: "store" },
-    { id: "log", x: 495, y: 248, label: "changelog", kind: "store" },
+    { id: "log", x: 495, y: 248, label: "Changelog", kind: "store" },
     { id: "pipe", x: 585, y: 360, label: "Offline-\nPipeline\n(periodisch)", kind: "server" },
     { id: "leo", x: 120, y: 360, label: "Leopard", kind: "server" },
   ]}
@@ -54,13 +54,13 @@ Welche Kästen gibt es, und in welche Richtung fließen Daten zwischen ihnen? Da
   caption="Neu gezeichnet und vereinfacht nach Abbildung 2 des Papers. Pfeile zeigen die Richtung des Datenflusses. Clients erscheinen nur zweimal, damit die Linien getrennt bleiben: Dieselben Clients rufen die aclserver auf und abonnieren Watch."
 />
 
-Die Clients sprechen mit zwei Arten von Servern. `aclservers` beantworten die vier Anfragetypen; `watchservers` streamen nur Änderungen. In den Worten des Papers: `aclservers` "are organized in clusters and respond to Check, Read, Expand, and Write requests" (sind in Clustern organisiert und beantworten Check-, Read-, Expand- und Write-Anfragen), während `watchservers` "tail the changelog and serve a stream of namespace changes to clients in near real time" (§3) (das changelog fortlaufend lesen und Clients nahezu in Echtzeit einen Stream von Namespace-Änderungen liefern). Leopard ist ein Index für große und tief verschachtelte Gruppen; er hat [eine eigene Seite](../leopard/).
+Die Clients sprechen mit zwei Arten von Servern. `aclservers` beantworten die vier Anfragetypen; `watchservers` streamen nur Änderungen. In den Worten des Papers: `aclservers` "are organized in clusters and respond to Check, Read, Expand, and Write requests" (sind in Clustern organisiert und beantworten Check-, Read-, Expand- und Write-Anfragen), während `watchservers` "tail the changelog and serve a stream of namespace changes to clients in near real time" (§3) (das Changelog fortlaufend lesen und Clients nahezu in Echtzeit einen Stream von Namespace-Änderungen liefern). Leopard ist ein Index für große und tief verschachtelte Gruppen; er hat [eine eigene Seite](../leopard/).
 
 Die Offline-Pipeline erzeugt "dumps of the relation tuples in each namespace at a known snapshot timestamp" (Dumps der Relationstupel jedes Namespace zu einem bekannten Snapshot-Zeitstempel) und entfernt per Garbage Collection "tuple versions older than a threshold configured per namespace" (§3) (Tupelversionen, die älter sind als ein pro Namespace konfigurierter Schwellenwert).
 
 ## Ein Check, Schritt für Schritt
 
-Die Anfrage, der wir folgen: Ist Beto ein Betrachter des Readme? Im durchgehenden Beispiel gehören zu den Betrachtern des Readme die Mitglieder von `group:eng`, und Beto ist eines davon, also lautet die Antwort ja. Zanzibar muss das herausfinden, indem es zwei Objekte liest, `doc:readme` und `group:eng`.
+Die Anfrage, der wir folgen: Ist Beto ein Betrachter des Readmes? Im durchgehenden Beispiel gehören zu den Betrachtern des Readmes die Mitglieder von `group:eng`, und Beto ist eines davon, also lautet die Antwort ja. Zanzibar muss das herausfinden, indem es zwei Objekte liest, `doc:readme` und `group:eng`.
 
 ### Sie landet auf einem beliebigen Server, der sie auffächert
 
@@ -70,7 +70,7 @@ Welcher Server erledigt die Arbeit? Jeder kann die Anfrage annehmen, und die Arb
   width={640}
   height={260}
   title="Ein Check fächert sich über einen Cluster auf"
-  desc="Ein Client sendet Check an aclserver A. Server A fragt aclserver B, der für doc:readme zuständig ist, ob Beto ein Betrachter des Readme ist. Server B stellt fest, dass Mitglieder von group:eng Betrachter sind, und fragt aclserver C, der für group:eng zuständig ist, ob Beto ein Mitglied ist. Die Antworten laufen über dieselben Pfeile zurück zu A, der dem Client antwortet."
+  desc="Ein Client sendet Check an aclserver A. Server A fragt aclserver B, der für doc:readme zuständig ist, ob Beto ein Betrachter des Readmes ist. Server B stellt fest, dass Mitglieder von group:eng Betrachter sind, und fragt aclserver C, der für group:eng zuständig ist, ob Beto ein Mitglied ist. Die Antworten laufen über dieselben Pfeile zurück zu A, der dem Client antwortet."
   nodes={[
     { id: "cl", x: 60, y: 130, label: "Client", kind: "client" },
     { id: "a", x: 240, y: 130, label: "aclserver A\nempfängt Check", kind: "server" },
@@ -79,13 +79,13 @@ Welcher Server erledigt die Arbeit? Jeder kann die Anfrage annehmen, und die Arb
   ]}
   edges={[
     { from: "cl", to: "a", label: "Check", dir: "both" },
-    { from: "a", to: "b", label: "viewer des Readme?", dir: "both", labelOffset: -12 },
+    { from: "a", to: "b", label: "viewer des Readmes?", dir: "both", labelOffset: -12 },
     { from: "b", to: "c", label: "member von eng?", dir: "both" },
   ]}
   caption="Check(user:beto, viewer, doc:readme). Die Antworten kommen über dieselben Pfeile zurück; A antwortet dem Client."
 />
 
-Server A musste keines der beiden Objekte besitzen. Das Paper beschreibt genau diese Form: "Requests arrive at any server in a cluster and that server fans out the work to other servers in the cluster as necessary. Those servers may in turn contact other servers to compute intermediate results. The initial server gathers the final result and returns it to the client." (§3) (Anfragen treffen bei einem beliebigen Server eines Clusters ein, und dieser Server fächert die Arbeit nach Bedarf auf andere Server im Cluster auf. Diese Server können ihrerseits andere Server kontaktieren, um Zwischenergebnisse zu berechnen. Der erste Server sammelt das Endergebnis und gibt es an den Client zurück.)
+Server A musste keines der beiden Objekte besitzen. Das Paper beschreibt genau diese Form: "Requests arrive at any server in a cluster and that server fans out the work to other servers in the cluster as necessary. Those servers may in turn contact other servers to compute intermediate results. The initial server gathers the final result and returns it to the client." (§3) (Anfragen treffen bei einem beliebigen Server eines Clusters ein, und dieser Server fächert die Arbeit nach Bedarf auf andere Server im Cluster auf. Diese Server können ihrerseits andere Server kontaktieren, um Zwischenergebnisse zu berechnen. Der ursprüngliche Server sammelt das Endergebnis und gibt es an den Client zurück.)
 
 ### Konsistentes Hashing wählt den Partner
 
@@ -119,7 +119,7 @@ Woher wusste A, dass es B nach dem Readme fragen muss? Die Server eines Clusters
   caption="Beide Readme-Anfragen gehen an B, weil der Schlüssel das Objekt ist, nicht die Relation. Der Ring ist das Lehrbuchbild des konsistenten Hashings; das Paper sagt nicht, welche Variante Zanzibar verwendet."
 />
 
-`viewer` und `owner` auf dem Readme treffen sich auf demselben Server. Genau das ist der Zweck, nach dem Objekt zu verschlüsseln: "processing a check on ⟨*object#relation*⟩ often involves indirect ACL checks on other relations of the same object and reading relation tuples of the object. These checks and reads can be processed by the same server since they share the same forwarding key with the parent check request." (§3.2.5) (Die Verarbeitung einer Prüfung auf ⟨*object#relation*⟩ umfasst oft indirekte ACL-Prüfungen auf anderen Relationen desselben Objekts und das Lesen von Relationstupeln des Objekts. Diese Prüfungen und Lesevorgänge können vom selben Server verarbeitet werden, da sie denselben Weiterleitungsschlüssel wie die übergeordnete Check-Anfrage haben.) Karger et al. entwerfen konsistentes Hashing so, dass beim Hinzufügen oder Entfernen eines Caches nur der minimale Anteil an Objekten verschoben werden muss, der nötig ist, um die Last ausgeglichen zu halten; deshalb eignet es sich für einen Cache.
+`viewer` und `owner` auf dem Readme treffen sich auf demselben Server. Genau das ist der Zweck, den Schlüssel aus dem Objekt zu bilden: "processing a check on ⟨*object#relation*⟩ often involves indirect ACL checks on other relations of the same object and reading relation tuples of the object. These checks and reads can be processed by the same server since they share the same forwarding key with the parent check request." (§3.2.5) (Die Verarbeitung einer Prüfung auf ⟨*object#relation*⟩ umfasst oft indirekte ACL-Prüfungen auf anderen Relationen desselben Objekts und das Lesen von Relationstupeln des Objekts. Diese Prüfungen und Lesevorgänge können vom selben Server verarbeitet werden, da sie denselben Weiterleitungsschlüssel wie die übergeordnete Check-Anfrage haben.) Karger et al. entwerfen konsistentes Hashing so, dass beim Hinzufügen oder Entfernen eines Caches nur der minimale Anteil an Objekten verschoben werden muss, der nötig ist, um die Last ausgeglichen zu halten; deshalb eignet es sich für einen Cache.
 
 Für heiße Schlüssel ergänzt das Paper, dass es [Slicer](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya) verwendet, "to help distribute hot keys to multiple servers" (§3.2.5) (um heiße Schlüssel auf mehrere Server zu verteilen).
 
@@ -150,7 +150,7 @@ Was passiert, wenn viele Server gleichzeitig C nach `group:eng` fragen, etwa wei
 
 Die Caches der Aufrufer und der Cache des Aufgerufenen stapeln sich zu einem Baum: "To handle hot forwarding keys, we cache results at both the caller and the callee of internal RPCs, effectively forming cache trees." (§3.2.5) (Um heiße Weiterleitungsschlüssel zu behandeln, cachen wir Ergebnisse sowohl beim Aufrufer als auch beim Aufgerufenen interner RPCs und bilden so effektiv Cache-Bäume.) Cache-Schlüssel enthalten den Snapshot-Zeitstempel, und Zeitstempel werden "rounded up to a coarse granularity, such as one or ten seconds" (auf eine grobe Granularität aufgerundet, etwa eine oder zehn Sekunden), sodass die meisten aktuellen Anfragen Einträge teilen (§3.2.5). Im Produktivbetrieb hatte das Caching von Prüfungen "a 10% hit rate on the delegate’s side" (eine Trefferquote von 10 % auf der Seite des Delegierten) und "a 2% hit rate" (eine Trefferquote von 2 %) auf der Seite des Delegierenden; das Paper merkt an, dass diese Quoten zwar niedrig aussehen, "they prevent 500K internal RPCs per second from creating hot spots" (§4.4) (sie aber verhindern, dass 500.000 interne RPCs pro Sekunde Hotspots erzeugen).
 
-### Die Lock-Tabelle fasst identische Anfragen zusammen
+### Die Sperrtabelle fasst identische Anfragen zusammen
 
 Ein Cache hilft erst, wenn er die Antwort enthält. Kommen viele identische Anfragen an, bevor die erste fertig ist, würden alle den Cache verfehlen und alle zu Spanner gehen: ein [Cache Stampede](https://en.wikipedia.org/wiki/Cache_stampede) (Referenz [3] des Papers). Wie vermeidet C das?
 
@@ -159,8 +159,8 @@ Ein Cache hilft erst, wenn er die Antwort enthält. Kommen viele identische Anfr
   laneWidth={140}
   rowHeight={58}
   timeLabel="Zeit"
-  title="Eine Lock-Tabelle lässt eine von mehreren identischen Anfragen durch"
-  desc="Anfrage 1 fragt C nach dem Cache-Schlüssel K; C verfehlt den Cache und trägt K in seine Lock-Tabelle ein. Anfrage 2 fragt nach demselben Schlüssel und muss warten. C liest die Zeilen einmal aus Spanner, füllt den Cache und gibt den Eintrag frei. Beide Anfragen erhalten die Antwort."
+  title="Eine Sperrtabelle lässt eine von mehreren identischen Anfragen durch"
+  desc="Anfrage 1 fragt C nach dem Cache-Schlüssel K; C verfehlt den Cache und trägt K in seine Sperrtabelle ein. Anfrage 2 fragt nach demselben Schlüssel und muss warten. C liest die Zeilen einmal aus Spanner, füllt den Cache und gibt den Eintrag frei. Beide Anfragen erhalten die Antwort."
   events={[
     { lane: 0, t: 0, label: "Schlüssel K anfragen", kind: "read" },
     { lane: 1, t: 0, label: "Fehltreffer: K sperren", kind: "write" },
@@ -182,19 +182,19 @@ Ein Cache hilft erst, wenn er die Antwort enthält. Kommen viele identische Anfr
   caption="Anfrage 2 blockiert, statt zu Spanner zu gehen. Für Schlüssel K wird nur ein Lesevorgang abgesetzt."
 />
 
-Das Paper: "we maintain a *lock table* on each server to track outstanding reads and checks. Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated." (§3.2.5) (Wir führen auf jedem Server eine *Lock-Tabelle*, um ausstehende Lesevorgänge und Prüfungen zu verfolgen. Von den Anfragen, die denselben Cache-Schlüssel teilen, beginnt nur eine mit der Verarbeitung; die übrigen blockieren, bis der Cache gefüllt ist.) Bei Prüfungen sparte die Lock-Tabelle "an additional 12%" (weitere 12 %) auf der Seite des Delegierten und "an additional 3%" (weitere 3 %) auf der Seite des Delegierenden (§4.4).
+Das Paper: "we maintain a *lock table* on each server to track outstanding reads and checks. Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated." (§3.2.5) (Wir führen auf jedem Server eine *Sperrtabelle*, um ausstehende Lesevorgänge und Prüfungen zu verfolgen. Von den Anfragen, die denselben Cache-Schlüssel teilen, beginnt nur eine mit der Verarbeitung; die übrigen blockieren, bis der Cache gefüllt ist.) Bei Prüfungen sparte die Sperrtabelle "an additional 12%" (weitere 12 %) auf der Seite des Delegierten und "an additional 3%" (weitere 3 %) auf der Seite des Delegierenden (§4.4).
 
-Zwei Verfeinerungen kamen später hinzu (§3.2.5). Für ein sehr beliebtes Objekt liest und cacht Zanzibar *alle* Tupel von ⟨*object#relation*⟩ auf einmal, "trading read bandwidth for cacheability" (es tauscht Lesebandbreite gegen Cachebarkeit). Und weil eine abgebrochene Teilprüfung ihren Cache-Schlüssel leer lässt, verzögert es "eager cancellation when there are waiters on the corresponding lock table entry" (den frühzeitigen Abbruch, wenn auf den entsprechenden Eintrag der Lock-Tabelle gewartet wird).
+Zwei Verfeinerungen kamen später hinzu (§3.2.5). Für ein sehr beliebtes Objekt liest und cacht Zanzibar *alle* Tupel von ⟨*object#relation*⟩ auf einmal, "trading read bandwidth for cacheability" (es tauscht Lesebandbreite gegen Cachebarkeit). Und weil eine abgebrochene Teilprüfung ihren Cache-Schlüssel leer lässt, verzögert es "eager cancellation when there are waiters on the corresponding lock table entry" (den frühzeitigen Abbruch, wenn auf den entsprechenden Eintrag der Sperrtabelle gewartet wird).
 
 ### Lesevorgänge an Spanner werden gebündelt
 
-Nehmen Sie nun eine Prüfung, die mehrere Relationen eines Objekts berührt: Ist Chen ein Betrachter des Readme? Mit der Konfiguration aus Abbildung 1 des Papers enthält `viewer` `editor`, `editor` enthält `owner`, und Betrachter des Ordners `parent` sind Betrachter des Dokuments. Server B muss also vier Tupelmengen des Readme lesen.
+Nehmen Sie nun eine Prüfung, die mehrere Relationen eines Objekts berührt: Ist Chen ein Betrachter des Readmes? Mit der Konfiguration aus Abbildung 1 des Papers enthält `viewer` `editor`, `editor` enthält `owner`, und Betrachter des Ordners `parent` sind Betrachter des Dokuments. Server B muss also vier Tupelmengen des Readmes lesen.
 
 <Graph
   width={640}
   height={300}
   title="Blatt-Lesevorgänge einer Prüfung teilen einen Pool"
-  desc="Um auszuwerten, ob Chen ein Betrachter von doc:readme ist, werden die viewer-, editor-, owner- und parent-Tupel des Readme benötigt. Die vier Blätter werden gleichzeitig auf aclserver B ausgewertet, der ihre Lesevorgänge bündelt, bevor er sie an die doc-Datenbank in Spanner sendet."
+  desc="Um auszuwerten, ob Chen ein Betrachter von doc:readme ist, werden die viewer-, editor-, owner- und parent-Tupel des Readmes benötigt. Die vier Blätter werden gleichzeitig auf aclserver B ausgewertet, der ihre Lesevorgänge bündelt, bevor er sie an die doc-Datenbank in Spanner sendet."
   nodes={[
     { id: "v", x: 110, y: 50, label: "doc:readme#viewer", kind: "object", mono: true },
     { id: "e", x: 110, y: 117, label: "doc:readme#editor", kind: "object", mono: true },
@@ -259,7 +259,7 @@ Ein gemeinsam genutzter Dienst muss verhindern, dass ein Client die anderen ausb
 - CPU: Jeder RPC wird in "generic *cpu-seconds*" (generischen *CPU-Sekunden*) bemessen; jeder Client hat ein globales CPU-Limit, und "its RPCs will be throttled if it exceeds the limit *and* there is no spare capacity in the overall system." (seine RPCs werden gedrosselt, wenn er das Limit überschreitet *und* im Gesamtsystem keine freie Kapazität vorhanden ist.)
 - Ausstehende RPCs: Jeder Server begrenzt die Gesamtzahl und die Zahl pro Client.
 - Spanner: "the maximum number of concurrent reads per *(object, client)* and per client on each Spanner server." (die maximale Zahl gleichzeitiger Lesevorgänge pro *(Objekt, Client)* und pro Client auf jedem Spanner-Server.)
-- Lock-Tabellen: "different lock table keys for requests from different clients" (unterschiedliche Lock-Tabellen-Schlüssel für Anfragen verschiedener Clients), damit eine Drosselung eines Clients durch Spanner keinen anderen blockiert.
+- Sperrtabellen: "different lock table keys for requests from different clients" (unterschiedliche Sperrtabellenschlüssel für Anfragen verschiedener Clients), damit eine Drosselung eines Clients durch Spanner keinen anderen blockiert.
 
 ## Der Watch-Pfad
 
@@ -269,12 +269,12 @@ Schreibvorgänge speisen auch einen Stream. Wohin geht eine Änderung, nachdem A
   width={640}
   height={330}
   title="Von einem Schreibvorgang zum Watch-Stream"
-  desc="Ein Client sendet ein Write an einen aclserver. In einer einzigen Spanner-Transaktion schreibt der aclserver das Tupel in die Datenbank des Namespace doc und einen Eintrag in einen changelog-Shard. Der watchserver liest das changelog fortlaufend und streamt die Änderung an Watch-Clients und an den inkrementellen Indexer von Leopard."
+  desc="Ein Client sendet ein Write an einen aclserver. In einer einzigen Spanner-Transaktion schreibt der aclserver das Tupel in die Datenbank des Namespace doc und einen Eintrag in einen Changelog-Shard. Der watchserver liest das Changelog fortlaufend und streamt die Änderung an Watch-Clients und an den inkrementellen Indexer von Leopard."
   nodes={[
     { id: "w", x: 60, y: 70, label: "Client\nWrite", kind: "client" },
     { id: "acl", x: 230, y: 70, label: "aclserver", kind: "server" },
     { id: "tup", x: 470, y: 40, label: "doc-Tupel", kind: "store" },
-    { id: "log", x: 470, y: 140, label: "changelog-Shard", kind: "store", on: true },
+    { id: "log", x: 470, y: 140, label: "Changelog-Shard", kind: "store", on: true },
     { id: "watch", x: 470, y: 240, label: "watchserver", kind: "server", on: true },
     { id: "cl", x: 300, y: 300, label: "Watch-Clients", kind: "client" },
     { id: "leo", x: 580, y: 300, label: "Leopard-\nIndexer", kind: "server" },
@@ -287,10 +287,10 @@ Schreibvorgänge speisen auch einen Stream. Wohin geht eine Änderung, nachdem A
     { from: "watch", to: "cl", label: "Änderungen" },
     { from: "watch", to: "leo" },
   ]}
-  caption="Das Tupel und sein changelog-Eintrag werden in einer Transaktion committet, sodass der Stream keinen Schreibvorgang verpassen und keinen zeigen kann, der nicht committet wurde."
+  caption="Das Tupel und sein Changelog-Eintrag werden in einer Transaktion committet, sodass der Stream keinen Schreibvorgang verpassen und keinen zeigen kann, der nicht committet wurde."
 />
 
-"Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction." (Jeder Zanzibar-Schreibvorgang wird in einer einzigen Transaktion sowohl in den Tupelspeicher als auch in den changelog-Shard committet.) Der Spanner-Server, der den changelog-Shard hostet, fungiert als Transaktionskoordinator, "to minimize blocking of changelog reads on pending transactions" (§3.1.2) (um das Blockieren von changelog-Lesevorgängen durch ausstehende Transaktionen zu minimieren). Leopard ist ein Konsument dieses Streams: Sein inkrementeller Indexer "calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications" (§3.2.4) (ruft die Watch-API von Zanzibar auf, um einen zeitlich geordneten Stream von Zanzibar-Tupeländerungen zu empfangen).
+"Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction." (Jeder Zanzibar-Schreibvorgang wird in einer einzigen Transaktion sowohl in den Tupelspeicher als auch in den Changelog-Shard committet.) Der Spanner-Server, der den Changelog-Shard hostet, fungiert als Transaktionskoordinator, "to minimize blocking of changelog reads on pending transactions" (§3.1.2) (um das Blockieren von Changelog-Lesevorgängen durch ausstehende Transaktionen zu minimieren). Leopard ist ein Konsument dieses Streams: Sein inkrementeller Indexer "calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications" (§3.2.4) (ruft die Watch-API von Zanzibar auf, um einen zeitlich geordneten Stream von Zanzibar-Tupeländerungen zu empfangen).
 
 ## Speicherung
 
@@ -300,14 +300,14 @@ Welche Datenbanken gibt es, und wie sieht eine Zeile aus? Es gibt drei Arten (§
   width={640}
   height={300}
   title="Die Spanner-Datenbanken von Zanzibar"
-  desc="Eine Datenbank pro Namespace enthält Relationstupel: hier doc, group und folder. Eine einzige Datenbank für Namespace-Konfigurationen enthält die Konfigurationen und ein changelog der Konfigurationsänderungen. Eine einzige changelog-Datenbank, die alle Namespaces teilen, zeichnet Tupelaktualisierungen auf. Die aclserver lesen und schreiben die Tupeldatenbanken, laden und überwachen die Konfigurationsdatenbank und hängen an das changelog an."
+  desc="Eine Datenbank pro Namespace enthält Relationstupel: hier doc, group und folder. Eine einzige Datenbank für Namespace-Konfigurationen enthält die Konfigurationen und ein Changelog der Konfigurationsänderungen. Eine einzige Changelog-Datenbank, die alle Namespaces teilen, zeichnet Tupelaktualisierungen auf. Die aclserver lesen und schreiben die Tupeldatenbanken, laden und überwachen die Konfigurationsdatenbank und hängen an das Changelog an."
   nodes={[
     { id: "doc", x: 90, y: 60, label: "doc-Tupel", kind: "store" },
     { id: "grp", x: 90, y: 150, label: "group-Tupel", kind: "store" },
     { id: "fol", x: 90, y: 240, label: "folder-Tupel", kind: "store" },
     { id: "acl", x: 320, y: 150, label: "aclserver", kind: "server" },
-    { id: "cfg", x: 520, y: 60, label: "Namespace-Konfigurationen\n(+ deren changelog)", kind: "store" },
-    { id: "log", x: 520, y: 240, label: "changelog\n(alle Namespaces)", kind: "store" },
+    { id: "cfg", x: 520, y: 60, label: "Namespace-Konfigurationen\n(+ deren Changelog)", kind: "store" },
+    { id: "log", x: 520, y: 240, label: "Changelog\n(alle Namespaces)", kind: "store" },
   ]}
   edges={[
     { from: "acl", to: "doc", dir: "both" },
@@ -316,7 +316,7 @@ Welche Datenbanken gibt es, und wie sieht eine Zeile aus? Es gibt drei Arten (§
     { from: "cfg", to: "acl", label: "laden, überwachen" },
     { from: "acl", to: "log", label: "anhängen" },
   ]}
-  caption="Eine Tupeldatenbank pro Namespace (links), eine Konfigurationsdatenbank und ein changelog, die alle Namespaces teilen (rechts)."
+  caption="Eine Tupeldatenbank pro Namespace (links), eine Konfigurationsdatenbank und ein Changelog, die alle Namespaces teilen (rechts)."
 />
 
 **Tupeldatenbanken.** "We store relation tuples of each namespace in a separate database, where each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*." (§3.1.1) (Wir speichern die Relationstupel jedes Namespace in einer separaten Datenbank, in der jede Zeile durch den Primärschlüssel *(Shard-ID, Objekt-ID, Relation, Benutzer, Commit-Zeitstempel)* identifiziert wird.) Weil der Commit-Zeitstempel Teil des Schlüssels ist, bleiben alte Versionen in eigenen Zeilen, "so that we can evaluate checks and reads at any timestamp within the garbage collection window" (damit wir Prüfungen und Lesevorgänge zu jedem Zeitstempel innerhalb des Garbage-Collection-Fensters auswerten können). Die Tupel des durchgehenden Beispiels lägen so in den Datenbanken `doc` und `group`:
@@ -330,9 +330,9 @@ Welche Datenbanken gibt es, und wie sieht eine Zeile aus? Es gibt drei Arten (§
 
 Die Zeilen eines Objekts liegen in der Sortierung beieinander; das Paper sagt, diese Schlüsselreihenfolge "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair" (erlaubt es uns, alle Relationstupel für eine gegebene Objekt-ID oder ein Paar *(Objekt-ID, Relation)* nachzuschlagen). "Usually the shard ID is determined solely by the object ID" (Meist wird die Shard-ID allein durch die Objekt-ID bestimmt); bei Gruppen mit sehr vielen Mitgliedern kann sie "computed from both object ID and user" (§3.1.1) (aus Objekt-ID und Benutzer berechnet) werden. Das Paper gibt die Shard-Funktion nicht an, *s*(…) oben ist also ein Platzhalter, und auch die genaue Kodierung der Benutzerspalte ist nicht beschrieben.
 
-**changelog.** Eine Datenbank für alle Namespaces, verschlüsselt nach *(changelog-Shard-ID, Zeitstempel, eindeutige Update-ID)*, "where a changelog shard is randomly selected for each write" (§3.1.2) (wobei für jeden Schreibvorgang ein changelog-Shard zufällig ausgewählt wird).
+**Changelog.** Eine Datenbank für alle Namespaces mit dem Schlüssel *(Changelog-Shard-ID, Zeitstempel, eindeutige Update-ID)*, "where a changelog shard is randomly selected for each write" (§3.1.2) (wobei für jeden Schreibvorgang ein Changelog-Shard zufällig ausgewählt wird).
 
-**Namespace-Konfigurationen.** Eine Datenbank mit zwei Tabellen: die Konfigurationen, "keyed by namespace IDs" (verschlüsselt nach Namespace-IDs), und "a changelog of config updates" (ein changelog der Konfigurationsänderungen), "keyed by commit timestamps" (verschlüsselt nach Commit-Zeitstempeln). Ein Server lädt beim Start jede Konfiguration und folgt dann diesem changelog (§3.1.3).
+**Namespace-Konfigurationen.** Eine Datenbank mit zwei Tabellen: die Konfigurationen, "keyed by namespace IDs" (mit Namespace-IDs als Schlüssel), und "a changelog of config updates" (ein Changelog der Konfigurationsänderungen), "keyed by commit timestamps" (mit Commit-Zeitstempeln als Schlüssel). Ein Server lädt beim Start jede Konfiguration und folgt dann diesem Changelog (§3.1.3).
 
 **Replikation.** "Replicas exist in dozens of locations around the world, with multiple replicas per region. The 5 voting replicas are in eastern and central United States, in 3 different metropolitan areas to isolate failures but within 25 milliseconds of each other so that Paxos transactions commit quickly." (§3.1.4) (Replikate existieren an Dutzenden von Standorten weltweit, mit mehreren Replikaten pro Region. Die 5 stimmberechtigten Replikate befinden sich im Osten und in der Mitte der Vereinigten Staaten, in 3 verschiedenen Ballungsräumen, um Ausfälle zu isolieren, aber innerhalb von 25 Millisekunden voneinander, damit Paxos-Transaktionen schnell committen.) Spanner selbst ist beschrieben in [Corbett et al. (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), Referenz [15] des Papers.
 

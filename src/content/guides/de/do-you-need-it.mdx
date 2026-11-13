@@ -37,7 +37,7 @@ Wo liegen die Daten, die eine Entscheidung braucht, und wer hält sie aktuell?
   desc="Die Anwendung liest und schreibt eine Datenbank, die sowohl ihre eigenen Daten als auch die Rollentabelle enthält. Es gibt einen einzigen Schreibpfad."
   nodes={[
     { id: "app", x: 140, y: 40, label: "Anwendung", kind: "client" },
-    { id: "db", x: 140, y: 175, label: "App-Datenbank:\nDoks + Rollentabelle", kind: "store", on: true },
+    { id: "db", x: 140, y: 175, label: "App-Datenbank:\nDokumente + Rollentabelle", kind: "store", on: true },
   ]}
   edges={[
     { from: "app", to: "db", label: "eine Transaktion", dir: "both", on: true },
@@ -68,7 +68,7 @@ Wo liegen die Daten, die eine Entscheidung braucht, und wer hält sie aktuell?
   width={280}
   height={240}
   title="Dienst im Zanzibar-Stil"
-  desc="Die Anwendung schreibt ihre Daten in ihre eigene Datenbank und schreibt Beziehungstupel in den Autorisierungsdienst, der einen eigenen Datenspeicher hat. Prüfungen gehen an den Dienst. Die beiden Schreibvorgänge sind getrennt."
+  desc="Die Anwendung schreibt ihre Daten in ihre eigene Datenbank und schreibt Relationstupel in den Autorisierungsdienst, der einen eigenen Datenspeicher hat. Prüfungen gehen an den Dienst. Die beiden Schreibvorgänge sind getrennt."
   nodes={[
     { id: "app", x: 140, y: 40, label: "Anwendung", kind: "client" },
     { id: "db", x: 60, y: 185, label: "App-Datenbank", kind: "store" },
@@ -85,7 +85,7 @@ Wo liegen die Daten, die eine Entscheidung braucht, und wer hält sie aktuell?
 
 </Frames>
 
-Beachten Sie die hervorgehobenen Pfeile. Mit einer Rollentabelle ändern sich Berechtigung und Daten in einer Transaktion. Eine Policy-Engine verlagert die Arbeit auf den Zeitpunkt der Anfrage: Wer sie aufruft, muss die Tatsachen zusammentragen. Ein separater Dienst im Zanzibar-Stil verlagert sie auf den Zeitpunkt des Schreibens: Jede Änderung, die den Zugriff betrifft, wird zweimal geschrieben, einmal in die Anwendung und einmal in den Dienst. AuthZed nennt das "the dual-write problem" (das Dual-Write-Problem) und listet Umgangsweisen damit auf, von einer Konsistenzprüfung außerhalb des Hauptpfads bis zu einem Transactional Outbox oder Durable Execution ([AuthZed-Blog, 2025-01-02](https://authzed.com/blog/the-dual-write-problem)). Das Paper behandelt diese Kosten nicht. Es sagt "Zanzibar stores ACLs and their metadata in Spanner databases" (§3) (Zanzibar speichert ACLs und ihre Metadaten in Spanner-Datenbanken) und dass Clients zookies "in an atomic write to the client storage" (§2.2) (in einem atomaren Schreibvorgang in den Client-Speicher) speichern, aber nicht, wie Clients ihre eigenen Daten und ihre Tupel im Gleichschritt halten.
+Beachten Sie die hervorgehobenen Pfeile. Mit einer Rollentabelle ändern sich Berechtigung und Daten in einer Transaktion. Eine Policy-Engine verlagert die Arbeit auf den Zeitpunkt der Anfrage: Wer sie aufruft, muss die Tatsachen zusammentragen. Ein separater Dienst im Zanzibar-Stil verlagert sie auf den Zeitpunkt des Schreibens: Jede Änderung, die den Zugriff betrifft, wird zweimal geschrieben, einmal in die Anwendung und einmal in den Dienst. AuthZed nennt das "the dual-write problem" (das Dual-Write-Problem) und listet Umgangsweisen damit auf, von einer Konsistenzprüfung außerhalb des Hauptpfads bis zu einer Transactional Outbox oder Durable Execution ([AuthZed-Blog, 2025-01-02](https://authzed.com/blog/the-dual-write-problem)). Das Paper behandelt diese Kosten nicht. Es sagt "Zanzibar stores ACLs and their metadata in Spanner databases" (§3) (Zanzibar speichert ACLs und ihre Metadaten in Spanner-Datenbanken) und dass Clients zookies "in an atomic write to the client storage" (§2.2) (in einem atomaren Schreibvorgang in den Client-Speicher) speichern, aber nicht, wie Clients ihre eigenen Daten und ihre Tupel im Gleichschritt halten.
 
 ## Anforderungen gegen Optionen
 
@@ -102,7 +102,7 @@ Jede Zelle ist eine kurze Zusammenfassung der Absätze und Quellen auf dieser Se
 | Betriebskosten | Keine über die Datenbank hinaus | Richtlinien und Daten an jede Engine verteilen | Ein weiterer zustandsbehafteter Dienst samt Datenspeicher | Beides |
 | Datensynchronisation | Keine | Daten replizieren oder bei jeder Anfrage übergeben | Doppelte Schreibvorgänge aus der Anwendung | Doppelte Schreibvorgänge nur für Beziehungen |
 
-Die Latenzzeile wird am häufigsten überinterpretiert. Die Zahlen des Papers (Tabelle 2, §4.2) stammen aus Googles Installation und Caching; sie sagen nichts über eine Installation auf einem einzelnen Knoten, und die Auswertungszeit einer Policy-Engine lässt die Zeit weg, die der Aufrufer mit dem Holen der Daten verbringt. AuthZed bringt den zweiten Punkt zu seinen eigenen Gunsten vor ([AuthZed-Blog](https://authzed.com/blog/policy-based-access-control)); es ist ein Herstellerargument und wurde hier nicht gemessen.
+Die Latenzzeile wird am häufigsten überinterpretiert. Die Zahlen des Papers (Tabelle 2, §4.2) stammen aus Googles Produktivbetrieb und Caching; sie sagen nichts über eine Installation auf einem einzelnen Knoten, und die Auswertungszeit einer Policy-Engine lässt die Zeit weg, die der Aufrufer mit dem Holen der Daten verbringt. AuthZed bringt den zweiten Punkt zu seinen eigenen Gunsten vor ([AuthZed-Blog](https://authzed.com/blog/policy-based-access-control)); es ist ein Herstellerargument und wurde hier nicht gemessen.
 
 ## Eine grobe Reihenfolge von Fragen
 
@@ -147,11 +147,11 @@ Die Debatte ist öffentlich und teils kommerziell. Hier sind ihre wichtigsten ve
 
 **Policy und ReBAC als Ergänzung** (AuthZed, Hersteller von SpiceDB). Die Lernseiten von AuthZed sagen "Policy engines like Cerbos and OPA primarily focus on ABAC but can be used alongside ReBAC systems" (Policy-Engines wie Cerbos und OPA konzentrieren sich vor allem auf ABAC, können aber neben ReBAC-Systemen eingesetzt werden) für Fälle, die sich nicht auf gespeicherte Beziehungen abbilden lassen ([AuthZed learn](https://authzed.com/learn/rebac-key-components)). Sein Vergleichsbeitrag sagt, die Wahl "depends on the authorization problems you have" (hänge von den Autorisierungsproblemen ab, die Sie haben), und dass SpiceDB-Caveats "offer some of the benefits of policy engines without sacrificing the benefits of Google Zanzibar" (einige Vorteile von Policy-Engines bieten, ohne die Vorteile von Google Zanzibar zu opfern) ([AuthZed-Blog, 2023-11-29](https://authzed.com/blog/policy-based-access-control)). Die SpiceDB-FAQ sagt "SpiceDB is not a policy engine" (SpiceDB ist keine Policy-Engine) ([FAQ](https://authzed.com/docs/spicedb/getting-started/faq)). Im HN-Thread von 2021 bestritt ein Gründer von AuthZed die Behauptung, ABAC lasse sich mit ReBAC-Systemen nicht umsetzen, und der Autor des Oso-Artikels stimmte zu, dass sich ein System im Zanzibar-Stil mit einer Policy-Engine kombinieren lässt ([HN 28543457](https://news.ycombinator.com/item?id=28543457)).
 
-**Aus der Praxis.** In einem HN-Thread von 2023 nannte ein Kommentator Zanzibar "overkill for the majority of needs" (für die meisten Bedürfnisse übertrieben), und ein anderer antwortete, dass gehostete Dienste diese Komplexität verbergen ([HN 36470943](https://news.ycombinator.com/item?id=36470943)). In einem Thread von 2025 über das Neuschreiben von OpenFGA in Postgres war der genannte Schmerzpunkt "keeping everything in sync all the time" (alles ständig synchron zu halten) ([HN 45661547](https://news.ycombinator.com/item?id=45661547)).
+**Aus der Praxis.** In einem HN-Thread von 2023 nannte ein Kommentator Zanzibar "overkill for the majority of needs" (für die meisten Bedürfnisse übertrieben), und ein anderer antwortete, dass gehostete Dienste diese Komplexität verbergen ([HN 36470943](https://news.ycombinator.com/item?id=36470943)). In einem Thread von 2025 über das Neuschreiben von OpenFGA in Postgres war das genannte Hauptproblem "keeping everything in sync all the time" (alles ständig synchron zu halten) ([HN 45661547](https://news.ycombinator.com/item?id=45661547)).
 
 Die Positionen überschneiden sich mehr, als die Titel vermuten lassen: Alle sind sich einig, dass Beziehungsdaten und Anfragekontext verschiedene Arten von Eingaben sind, und unterscheiden sich darin, welche im Zentrum stehen sollte.
 
-## Eine hybride Installation
+## Ein hybrider Aufbau
 
 Wie sieht eine Kombination in der Praxis aus? Diese hier ist eine Veranschaulichung, zusammengesetzt aus den obigen Mustern, keine dokumentierte Referenzarchitektur.
 
@@ -159,7 +159,7 @@ Wie sieht eine Kombination in der Praxis aus? Diese hier ist eine Veranschaulich
   width={630}
   height={360}
   minWidth={540}
-  title="Eine hybride Installation"
+  title="Ein hybrider Aufbau"
   desc="Ein Client ruft ein API-Gateway auf, an dem eine Policy-Engine grobe Entscheidungen auf Anfrageebene trifft, etwa zu Token-Scope und IP-Bereich. Das Gateway leitet an einen Anwendungsdienst weiter. Der Dienst prüft Freigabe- und Gruppenberechtigungen bei einem Dienst im Zanzibar-Stil, der Beziehungen in seinem eigenen Datenspeicher hält. Der Dienst schreibt seine eigenen Daten in die Anwendungsdatenbank, und eine Outbox-Tabelle in derselben Transaktion wird als Tupel-Schreibvorgänge an den Autorisierungsdienst weitergereicht. Der Watch-Stream des Autorisierungsdienstes speist einen Suchindex, der nach Berechtigung filtert."
   nodes={[
     { id: "c", x: 60, y: 60, label: "Client", kind: "client" },
@@ -185,10 +185,10 @@ Wie sieht eine Kombination in der Praxis aus? Diese hier ist eine Veranschaulich
     { x: 140, y: 15, w: 160, h: 95, label: "Anfragekontext" },
     { x: 510, y: 140, w: 120, h: 200, label: "Beziehungen" },
   ]}
-  caption="Richtlinien am Rand für den Kontext, Beziehungen in einem Dienst und ein Outbox, damit die beiden Schreibvorgänge nicht unbemerkt auseinanderlaufen."
+  caption="Richtlinien am Rand für den Kontext, Beziehungen in einem Dienst und eine Outbox, damit die beiden Schreibvorgänge nicht unbemerkt auseinanderlaufen."
 />
 
-Jedes System beantwortet die Frage, für die es Daten hält. Das Gateway entscheidet allein anhand der Anfrage; der Beziehungsdienst entscheidet, wer welches Dokument sehen darf; das Outbox macht aus dem doppelten Schreibvorgang eine lokale Transaktion mit anschließender, wiederholter Zustellung, eine der Optionen im [Dual-Write-Beitrag](https://authzed.com/blog/the-dual-write-problem) von AuthZed. Der Watch-Pfeil folgt der eigenen Verwendung des Papers: "Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API" (§2.4.3) (Einige Clients pflegen sekundäre Indizes von Relationstupeln in Zanzibar. Das können sie mit unserer Watch-API tun), und Expand hilft, "build efficient search indices for access-controlled content" (§2.4.5) (effiziente Suchindizes für zugriffskontrollierte Inhalte aufzubauen).
+Jedes System beantwortet die Frage, für die es Daten hält. Das Gateway entscheidet allein anhand der Anfrage; der Beziehungsdienst entscheidet, wer welches Dokument sehen darf; die Outbox macht aus dem doppelten Schreibvorgang eine lokale Transaktion mit anschließender, wiederholter Zustellung, eine der Optionen im [Dual-Write-Beitrag](https://authzed.com/blog/the-dual-write-problem) von AuthZed. Der Watch-Pfeil folgt der eigenen Verwendung des Papers: "Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API" (§2.4.3) (Einige Clients pflegen sekundäre Indizes von Relationstupeln in Zanzibar. Das können sie mit unserer Watch-API tun), und Expand hilft, "build efficient search indices for access-controlled content" (§2.4.5) (effiziente Suchindizes für zugriffskontrollierte Inhalte aufzubauen).
 
 <Callout kind="note" title="Was diese Seite nicht entscheidet">
 
@@ -198,19 +198,18 @@ Keine Quelle hier hat die Optionen auf einer gemeinsamen Arbeitslast gegeneinand
 
 ## Quellen
 
-
-- Zanzibar paper, §1, §2.1, §2.2, §2.3.1, §2.4.3, §2.4.5, §3, §4.2 (this site's transcription)
-- PostgreSQL documentation, WITH Queries: [postgresql.org/docs/current/queries-with.html](https://www.postgresql.org/docs/current/queries-with.html)
-- Cedar documentation: [docs.cedarpolicy.com](https://docs.cedarpolicy.com/)
+- Zanzibar-Paper, §1, §2.1, §2.2, §2.3.1, §2.4.3, §2.4.5, §3, §4.2 (Transkription auf dieser Website)
+- PostgreSQL-Dokumentation, WITH Queries: [postgresql.org/docs/current/queries-with.html](https://www.postgresql.org/docs/current/queries-with.html)
+- Cedar-Dokumentation: [docs.cedarpolicy.com](https://docs.cedarpolicy.com/)
 - Open Policy Agent, External Data: [openpolicyagent.org/docs/external-data](https://www.openpolicyagent.org/docs/external-data)
 - D. R. Kuhn, E. J. Coyne, T. R. Weil, Adding Attributes to Role-Based Access Control, IEEE Computer, 2010: [csrc.nist.gov](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)
-- Evan Cordell, Policy-Based Access Control (PBAC) vs Google Zanzibar, AuthZed blog (2023-11-29): [authzed.com/blog/policy-based-access-control](https://authzed.com/blog/policy-based-access-control)
+- Evan Cordell, Policy-Based Access Control (PBAC) vs Google Zanzibar, AuthZed-Blog (2023-11-29): [authzed.com/blog/policy-based-access-control](https://authzed.com/blog/policy-based-access-control)
 - AuthZed, The Dual-Write Problem (2025-01-02): [authzed.com/blog/the-dual-write-problem](https://authzed.com/blog/the-dual-write-problem)
 - AuthZed, What are the key components of ReBAC?: [authzed.com/learn/rebac-key-components](https://authzed.com/learn/rebac-key-components)
 - AuthZed, SpiceDB FAQ: [authzed.com/docs/spicedb/getting-started/faq](https://authzed.com/docs/spicedb/getting-started/faq)
 - AuthZed, Protecting a List Endpoint: [authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)
-- Greg Sarjeant, Google Zanzibar Isn't Flexible, Oso blog (2024-11-01): [osohq.com/post/google-zanzibar-isnt-flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible)
-- Greg Sarjeant, Launching Local Authorization, Oso blog (2024-04-16): [osohq.com/post/local-authorization](https://www.osohq.com/post/local-authorization)
+- Greg Sarjeant, Google Zanzibar Isn't Flexible, Oso-Blog (2024-11-01): [osohq.com/post/google-zanzibar-isnt-flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible)
+- Greg Sarjeant, Launching Local Authorization, Oso-Blog (2024-04-16): [osohq.com/post/local-authorization](https://www.osohq.com/post/local-authorization)
 - Oso Academy, Authorization in Microservices: [osohq.com/academy/microservices-authorization](https://www.osohq.com/academy/microservices-authorization)
 - Tom MacWright, Reading Zanzibar (2025-05-02): [macwright.com/2025/05/02/reading-zanzibar.html](https://macwright.com/2025/05/02/reading-zanzibar.html)
 - Hacker News, "Why Authorization Is Hard" (2021-09-15): [news.ycombinator.com/item?id=28543457](https://news.ycombinator.com/item?id=28543457)

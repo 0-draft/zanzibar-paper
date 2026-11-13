@@ -51,7 +51,7 @@ group:product#member@group:eng#member
 group:eng#member@user:beto
 ```
 
-Schritt *n* kann erst beginnen, wenn Schritt *n* − 1 zurückgekehrt ist. Das Paper nennt das Zeigerverfolgung (pointer chasing) und sagt, sie "can be expensive when indirect ACLs or groups are deep or wide" (§3.2.3) (kann teuer werden, wenn indirekte ACLs oder Gruppen tief oder breit sind). Breite schadet ebenfalls: Enthielte `group:all` hundert Untergruppen, würde sich Schritt 2 hundertfach verzweigen. Daher: "Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation." (§3.2.4) (Rekursive Zeigerverfolgung während der Check-Auswertung hat Mühe, bei tief verschachtelten Gruppen oder Gruppen mit sehr vielen Untergruppen eine niedrige Latenz zu halten. Für ausgewählte Namespaces, die eine solche Struktur aufweisen, behandelt Zanzibar Prüfungen mit Leopard, einem spezialisierten Index, der effiziente Mengenberechnungen unterstützt.)
+Schritt *n* kann erst beginnen, wenn Schritt *n* − 1 ein Ergebnis geliefert hat. Das Paper nennt das Zeigerverfolgung (pointer chasing) und sagt, sie "can be expensive when indirect ACLs or groups are deep or wide" (§3.2.3) (kann teuer werden, wenn indirekte ACLs oder Gruppen tief oder breit sind). Breite schadet ebenfalls: Enthielte `group:all` hundert Untergruppen, würde sich Schritt 2 hundertfach verzweigen. Daher: "Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation." (§3.2.4) (Rekursive Zeigerverfolgung während der Check-Auswertung hat Mühe, bei tief verschachtelten Gruppen oder Gruppen mit sehr vielen Untergruppen eine niedrige Latenz zu halten. Für ausgewählte Namespaces, die eine solche Struktur aufweisen, behandelt Zanzibar Prüfungen mit Leopard, einem spezialisierten Index, der effiziente Mengenberechnungen unterstützt.)
 
 ## Zwei Arten von Mengen
 
@@ -89,7 +89,7 @@ Was enthalten die Mengen im Beispiel?
   caption="GROUP2GROUP ist abgeflacht: group:all listet group:eng auf, obwohl eng zwei Ebenen tiefer liegt. MEMBER2GROUP ist es nicht: Es listet nur direkte Mitgliedschaften auf. Jede Gruppe ist in ihrer eigenen GROUP2GROUP-Menge gezeichnet; das Paper sagt das nicht, siehe den Hinweis unten."
 />
 
-Beachten Sie die Asymmetrie. Die gesamte Verschachtelung ist in `GROUP2GROUP` gefaltet, sodass die Seite eines Benutzers nur festhalten muss, wo der Benutzer direkt hinzugefügt wurde. In den Worten des Papers: "Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard" (§3.2.4) (Das Abflachen von Gruppe-zu-Gruppe-Pfaden erlaubt es Leopard, die Erreichbarkeit effizient auszuwerten).
+Beachten Sie die Asymmetrie. Die gesamte Verschachtelung steckt in `GROUP2GROUP`, sodass die Seite eines Benutzers nur festhalten muss, wo der Benutzer direkt hinzugefügt wurde. In den Worten des Papers: "Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard" (§3.2.4) (Das Abflachen von Gruppe-zu-Gruppe-Pfaden erlaubt es Leopard, die Erreichbarkeit effizient auszuwerten).
 
 <Callout kind="warn" title="Enthält eine Gruppe sich selbst?">
 Das Paper definiert `GROUP2GROUP(s)` als die Gruppen, die Untergruppen von *s* sind, und sagt nicht, ob *s* selbst in der Menge ist. Damit ein direktes Mitglied von *G* den folgenden Test besteht, muss *G* in `GROUP2GROUP(G)` enthalten sein oder gesondert behandelt werden. Die Abbildungen nehmen Ersteres an; das ist eine Schlussfolgerung, keine Aussage des Papers.
@@ -127,7 +127,7 @@ Das heißt: Liegt irgendeine Gruppe, zu der der Benutzer direkt hinzugefügt wur
   caption="Zwei Nachschlagevorgänge und eine Schnittmenge, unabhängig von der Tiefe der Verschachtelung. Beto ist drin; Anne nicht."
 />
 
-Aus den vier aufeinanderfolgenden Lesevorgängen der ersten Abbildung wurden zwei Mengen-Lookups und eine Schnittmenge. Um die ursprüngliche Frage zu beantworten, liest Zanzibar weiterhin das Tupel des Readme, das `group:all#member` nennt; die Tiefe darunter ist das, was Leopard beseitigt. Das Paper schlüsselt nicht auf, wie ein Check zwischen gewöhnlicher Auswertung und Leopard-Abfragen aufgeteilt wird; diese Aufteilung ist also eine Lesart von §3.2.4, kein Zitat.
+Aus den vier aufeinanderfolgenden Lesevorgängen der ersten Abbildung wurden zwei Mengen-Lookups und eine Schnittmenge. Um die ursprüngliche Frage zu beantworten, liest Zanzibar weiterhin das Tupel des Readmes, das `group:all#member` nennt; die Tiefe darunter ist das, was Leopard beseitigt. Das Paper schlüsselt nicht auf, wie ein Check zwischen gewöhnlicher Auswertung und Leopard-Abfragen aufgeteilt wird; diese Aufteilung ist also eine Lesart von §3.2.4, kein Zitat.
 
 ## Schnittmenge auf sortierten Listen
 
@@ -176,14 +176,14 @@ Die Arbeit richtet sich nach der kürzeren Liste. Ist ein Benutzer direktes Mitg
   width={640}
   height={350}
   title="Die drei Teile von Leopard"
-  desc="Ein Offline-Index-Builder liest einen Snapshot der Tupel und Konfigurationen von Zanzibar und erzeugt Index-Shards, die repliziert und im Leopard-Serving-System eingewechselt werden. Parallel liest ein inkrementeller Indexer den Watch-Stream von Zanzibar und schreibt zeitgestempelte Aktualisierungen in die inkrementelle Schicht des Serving-Systems. aclserver fragen das Serving-System ab, das die inkrementelle Schicht zum Abfragezeitstempel über den Offline-Index legt."
+  desc="Ein Offline-Index-Builder liest einen Snapshot der Tupel und Konfigurationen von Zanzibar und erzeugt Index-Shards, die repliziert und im Leopard-Serving-System eingewechselt werden. Parallel liest ein inkrementeller Indexer den Watch-Stream von Zanzibar und schreibt zeitgestempelte Aktualisierungen in die inkrementelle Schicht des Serving-Systems. aclservers fragen das Serving-System ab, das die inkrementelle Schicht zum Abfragezeitstempel über den Offline-Index legt."
   nodes={[
     { id: "snap", x: 85, y: 60, label: "Tupel- und Konfig-\nSnapshot", kind: "store" },
     { id: "build", x: 310, y: 60, label: "Offline-Index-Builder\n(periodisch)", kind: "server" },
     { id: "serve", x: 480, y: 185, label: "Leopard-Serving\nOffline-Index\n+ inkrementelle Schicht", kind: "server", on: true },
     { id: "watch", x: 85, y: 300, label: "Watch-API", kind: "server" },
     { id: "inc", x: 290, y: 300, label: "inkrementeller\nIndexer", kind: "server" },
-    { id: "acl", x: 560, y: 315, label: "aclserver", kind: "server" },
+    { id: "acl", x: 560, y: 315, label: "aclservers", kind: "server" },
   ]}
   edges={[
     { from: "snap", to: "build" },
@@ -197,9 +197,9 @@ Die Arbeit richtet sich nach der kürzeren Liste. Ist ein Benutzer direktes Mitg
 
 - **Offline-Index-Builder.** Er "generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples." (erzeugt Index-Shards aus einem Snapshot von Zanzibar-Relationstupeln und -Konfigurationen und repliziert die Shards global. Er respektiert Userset-Umschreibregeln und expandiert Kanten in einem ACL-Graphen rekursiv, um Leopard-Indextupel zu bilden.) Server "swap old shards with new ones when they become available" (tauschen alte Shards gegen neue aus, sobald diese verfügbar werden).
 - **Inkrementelle Schicht.** Der Offline-Index allein "cannot do so at a fresh and consistent snapshot" (kann das nicht auf einem aktuellen und konsistenten Snapshot leisten), daher halten Server "an incremental layer that indexes all updates since the offline snapshot" (eine inkrementelle Schicht, die alle Aktualisierungen seit dem Offline-Snapshot indexiert), jede Aktualisierung ein Tupel `(T, s, e, t, d)`, "where *t* is the timestamp of the update and *d* is a deletion marker" (wobei *t* der Zeitstempel der Aktualisierung und *d* eine Löschmarkierung ist). "Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing." (Aktualisierungen mit Zeitstempeln kleiner oder gleich dem Abfragezeitstempel werden während der Abfrageverarbeitung über den Offline-Index gelegt.)
-- **Zufuhr.** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions." (der inkrementelle Indexer von Leopard ruft die Watch-API von Zanzibar auf, um einen zeitlich geordneten Stream von Zanzibar-Tupeländerungen zu empfangen, und wandelt die Aktualisierungen in einen zeitlich geordneten Stream von Hinzufügungen, Aktualisierungen und Löschungen von Leopard-Tupeln um.)
+- **Einspeisung.** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions." (der inkrementelle Indexer von Leopard ruft die Watch-API von Zanzibar auf, um einen zeitlich geordneten Stream von Zanzibar-Tupeländerungen zu empfangen, und wandelt die Aktualisierungen in einen zeitlich geordneten Stream von Hinzufügungen, Aktualisierungen und Löschungen von Leopard-Tupeln um.)
 
-Alle Zitate in dieser Liste stammen aus §3.2.4. Weil Aktualisierungen Zeitstempel tragen und bis zum Abfragezeitstempel zusammengeführt werden, kann eine Leopard-Antwort denselben Snapshot widerspiegeln wie der Rest des Check; der vom Paper genannte Zweck der inkrementellen Schicht ist "To support consistent ACL evaluation" (konsistente ACL-Auswertung zu unterstützen).
+Alle Zitate in dieser Liste stammen aus §3.2.4. Weil Aktualisierungen Zeitstempel tragen und bis zum Abfragezeitstempel zusammengeführt werden, kann eine Leopard-Antwort denselben Snapshot widerspiegeln wie der Rest des Checks; der vom Paper genannte Zweck der inkrementellen Schicht ist "To support consistent ACL evaluation" (konsistente ACL-Auswertung zu unterstützen).
 
 ## Der Preis: ein Schreibvorgang, viele Indexaktualisierungen
 
@@ -234,7 +234,7 @@ Das Abflachen wird beim Schreiben bezahlt. Gehen Sie zurück zu der Zeit, bevor 
 
 Die Anzahl ist die Zahl der Vorfahren auf der einen Seite mal die Zahl der Nachfahren auf der anderen, wächst also mit Tiefe und Breite. Um sie zu berechnen, gilt: "Generating updates for the GROUP2GROUP tuples requires the incremental indexer to maintain group-to-group membership for denormalizing the effects of a relation tuple update to potentially multiple index updates." (Das Erzeugen von Aktualisierungen für die GROUP2GROUP-Tupel erfordert, dass der inkrementelle Indexer Gruppe-zu-Gruppe-Mitgliedschaften pflegt, um die Auswirkungen einer Relationstupel-Aktualisierung auf potenziell mehrere Indexaktualisierungen zu denormalisieren.) Im Maßstab von Google: "In practice, a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events." (§3.2.4) (In der Praxis kann ein einziges Hinzufügen oder Löschen eines Zanzibar-Tupels potenziell Zehntausende einzelner Leopard-Tupelereignisse erzeugen.)
 
-Ein Löschen ist heikler als die Abbildung: Ein Indextupel darf nur entfernt werden, wenn kein anderer Pfad die beiden Gruppen noch verbindet. Das Paper beschreibt nicht, wie der Indexer das entscheidet.
+Das Löschen ist heikler, als die Abbildung zeigt: Ein Indextupel darf nur entfernt werden, wenn kein anderer Pfad die beiden Gruppen noch verbindet. Das Paper beschreibt nicht, wie der Indexer das entscheidet.
 
 Deshalb ist Leopard auch die Ausnahme. Anderswo "Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)" (§3.2.5) (vermeidet Zanzibar Denormalisierung im Speicher und stützt sich nur auf normalisierte Daten (mit Ausnahme der in §3.2.4 beschriebenen Fälle)), und Leopard wird nur für ausgewählte Namespaces verwendet, "that exhibit such structure" (§3.2.4) (die eine solche Struktur aufweisen).
 

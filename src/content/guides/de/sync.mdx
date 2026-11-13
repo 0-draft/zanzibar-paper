@@ -19,11 +19,11 @@ Ein Autorisierungsdienst weiß nur, was man ihm mitgeteilt hat. Wenn Anne `doc:r
 
 Das Paper beschreibt Zanzibar als "a system for storing permissions and performing authorization checks based on the stored permissions" (§1) (ein System zum Speichern von Berechtigungen und zum Durchführen von Autorisierungsprüfungen auf Grundlage der gespeicherten Berechtigungen) und führt "unified ACL storage and an RPC-based API" (einheitliche ACL-Speicherung und eine RPC-basierte API) als "a philosophy also core to Zanzibar’s design" (§5) (eine Philosophie, die auch für das Design von Zanzibar zentral ist) an. ACLs und Gruppen liegen in Zanzibar. Die Client-Anwendung hält ihre *Inhalte* in ihrem eigenen Speicher, und das Einzige, was sie zur Autorisierung speichert, ist der zookie.
 
-Das Protokoll des Papers ist so geformt, dass der einzige Schreibvorgang, der beide Seiten umspannt, auf der Client-Seite atomar ist: "The client stores the zookie with the content change in an atomic write to the client storage" (§2.2) (Der Client speichert den zookie zusammen mit der Inhaltsänderung in einem atomaren Schreibvorgang in den Client-Speicher). Die Prüfung, die den zookie erzeugt hat, ist ein Lesevorgang; "the content-change check does not need to be evaluated in the same transaction as the application content modification" (§2.2) (die Content-Change-Prüfung muss nicht in derselben Transaktion wie die Änderung des Anwendungsinhalts ausgewertet werden). Innerhalb von Zanzibar sind das Tupel und sein changelog-Eintrag eine Transaktion: "Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction" (§3.1.2) (Jeder Zanzibar-Schreibvorgang wird in einer einzigen Transaktion sowohl in den Tupelspeicher als auch in den changelog-Shard committet), sodass Watch keinen committeten Schreibvorgang verpassen kann.
+Das Protokoll des Papers ist so geformt, dass der einzige Schreibvorgang, der beide Seiten umspannt, auf der Client-Seite atomar ist: "The client stores the zookie with the content change in an atomic write to the client storage" (§2.2) (Der Client speichert den zookie zusammen mit der Inhaltsänderung in einem atomaren Schreibvorgang in den Client-Speicher). Die Prüfung, die den zookie erzeugt hat, ist ein Lesevorgang; "the content-change check does not need to be evaluated in the same transaction as the application content modification" (§2.2) (die Content-Change-Prüfung muss nicht in derselben Transaktion wie die Änderung des Anwendungsinhalts ausgewertet werden). Innerhalb von Zanzibar sind das Tupel und sein Changelog-Eintrag eine Transaktion: "Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction" (§3.1.2) (Jeder Zanzibar-Schreibvorgang wird in einer einzigen Transaktion sowohl in den Tupelspeicher als auch in den Changelog-Shard committet), sodass Watch keinen committeten Schreibvorgang verpassen kann.
 
 Das Paper sagt nicht, ob die Anwendungen von Google zusätzlich eine eigene Kopie von Tatsachen wie „wem gehört dieses Dokument“ halten oder wie sie eine solche abgleichen würden. Es behandelt den Fall nicht.
 
-Die meisten Anwender beginnen anderswo. Der Eigentümer ist eine Spalte in der Tabelle `documents`; Teammitgliedschaft ist eine Verknüpfungstabelle; abgerechnete Plätze liegen in einem anderen Dienst. Dieselbe Tatsache existiert dann zweimal, und jede Änderung daran ist ein *doppelter Schreibvorgang* (Dual Write).
+Die meisten Anwender beginnen anderswo. Der Eigentümer ist eine Spalte in der Tabelle `documents`; Teammitgliedschaft ist eine Verknüpfungstabelle; bezahlte Nutzerplätze (Seats) liegen in einem anderen Dienst. Dieselbe Tatsache existiert dann zweimal, und jede Änderung daran ist ein *doppelter Schreibvorgang* (Dual Write).
 
 ## Wie doppelte Schreibvorgänge scheitern
 
@@ -49,7 +49,7 @@ Der Beitrag von AuthZed zum Thema sagt es deutlich: "The dual-write problem pres
     { from: [0, 0], to: [1, 1] },
     { from: [0, 2], to: [2, 3], label: "nie gesendet", dashed: true },
   ]}
-  caption="Ein verlorener Entzug schlägt offen fehl, und nichts in der App zeigt es."
+  caption="Ein verlorener Entzug lässt den Zugriff offen (fail open), und nichts in der App zeigt es."
 />
 
 <Swimlane
@@ -58,7 +58,7 @@ Der Beitrag von AuthZed zum Thema sagt es deutlich: "The dual-write problem pres
   rowHeight={64}
   timeLabel="Zeit"
   title="Erst Tupel, Datenbank zurückgerollt"
-  desc="Anne macht Beto zum Bearbeiter des Readme. Die App öffnet eine Datenbanktransaktion und fügt eine Freigabezeile ein, schreibt dann das editor-Tupel in den Autorisierungsdienst und stürzt vor dem Commit ab. Die Datenbank rollt zurück, also zeigt die App keine Freigabe, aber der Autorisierungsdienst lässt Beto bearbeiten."
+  desc="Anne macht Beto zum Bearbeiter des Readmes. Die App öffnet eine Datenbanktransaktion und fügt eine Freigabezeile ein, schreibt dann das editor-Tupel in den Autorisierungsdienst und stürzt vor dem Commit ab. Die Datenbank rollt zurück, also zeigt die App keine Freigabe, aber der Autorisierungsdienst lässt Beto bearbeiten."
   events={[
     { lane: 0, t: 0, label: "Anne macht Beto\nzum Bearbeiter", kind: "note" },
     { lane: 1, t: 1, label: "BEGIN, Freigabe-\nzeile einfügen", kind: "write" },
@@ -80,7 +80,7 @@ Das linke Bild ist das gefährliche für die Sicherheit, das rechte für das Ver
 
 ## Die Optionen
 
-Der Beitrag von AuthZed listet die Möglichkeiten auf: nichts tun, Konsistenzprüfung außerhalb des Hauptpfads, den Autorisierungsdienst zur maßgeblichen Quelle machen, Event Sourcing/CQRS, Umgebungen für dauerhafte Ausführung (Durable Execution) und das Transactional Outbox ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). Nichts zu tun "*is* an option that may be viable in the right context" (*ist* eine Option, die im richtigen Kontext gangbar sein kann); Prüfung außerhalb des Hauptpfads bedeutet "you can check that the two systems agree on a periodic basis" (Sie können periodisch prüfen, ob die beiden Systeme übereinstimmen), was Abweichungen findet, aber nicht verhindert. Die drei folgenden sind diejenigen, die das Zeitfenster strukturell beseitigen oder zuverlässig schließen.
+Der Beitrag von AuthZed listet die Möglichkeiten auf: nichts tun, Konsistenzprüfung außerhalb des Hauptpfads, den Autorisierungsdienst zur maßgeblichen Quelle machen, Event Sourcing/CQRS, Umgebungen für dauerhafte Ausführung (Durable Execution) und die Transactional Outbox ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). Nichts zu tun "*is* an option that may be viable in the right context" (*ist* eine Option, die im richtigen Kontext gangbar sein kann); Prüfung außerhalb des Hauptpfads bedeutet "you can check that the two systems agree on a periodic basis" (Sie können periodisch prüfen, ob die beiden Systeme übereinstimmen), was Abweichungen findet, aber nicht verhindert. Die drei folgenden sind diejenigen, die das Zeitfenster strukturell beseitigen oder zuverlässig schließen.
 
 ### Der Autorisierungsdienst als maßgebliche Quelle
 
@@ -108,7 +108,7 @@ Was tut das Relay, wenn der Autorisierungsdienst kurz nicht verfügbar ist?
     { lane: 3, t: 2, label: "Beto noch\nerlaubt", kind: "bad" },
     { lane: 2, t: 3, label: "Löschen scheitert:\nwiederholen", kind: "bad" },
     { lane: 3, t: 4, label: "Tupel gelöscht", kind: "good" },
-    { lane: 1, t: 5, label: "Outbox-Zeile\nals erledigt", kind: "write" },
+    { lane: 1, t: 5, label: "Outbox-Zeile\nerledigt markiert", kind: "write" },
   ]}
   arrows={[
     { from: [0, 0], to: [1, 1], label: "atomar" },
@@ -119,7 +119,7 @@ Was tut das Relay, wenn der Autorisierungsdienst kurz nicht verfügbar ist?
   caption="Nichts geht verloren, aber die Änderung erreicht den Autorisierungsdienst später als die Datenbank."
 />
 
-Beachten Sie den roten Kasten rechts: Die Outbox garantiert, dass die Änderung *ankommt*, nicht, dass sie *sofort* ankommt. Zwischen dem Commit und dem Erfolg des Relays gilt der alte Zugriff weiter. Das Relay muss außerdem Wiederholungen vertragen, denn in den Worten des Musters selbst: "The Message relay might publish a message more than once" (Das Nachrichten-Relay kann eine Nachricht mehr als einmal veröffentlichen) ([Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)); AuthZed verweist auf "SpiceDB allowing for idempotent writes with its TOUCH operation" (dass SpiceDB mit seiner TOUCH-Operation idempotente Schreibvorgänge erlaubt) und auf die Reihenfolge: "As long as this process is effectively single-threaded and retries operations until they succeed" (Solange dieser Prozess effektiv single-threaded ist und Operationen wiederholt, bis sie gelingen) ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). Ein Löschen vor dem früheren Anlegen anzuwenden würde den falschen Zustand hinterlassen.
+Beachten Sie den roten Kasten rechts: Die Outbox garantiert, dass die Änderung *ankommt*, nicht, dass sie *sofort* ankommt. Zwischen dem Commit und dem Erfolg des Relays gilt der alte Zugriff weiter. Das Relay muss außerdem Wiederholungen vertragen, denn in den Worten des Musters selbst: "The Message relay might publish a message more than once" (Das Nachrichten-Relay kann eine Nachricht mehr als einmal veröffentlichen) ([Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)); AuthZed verweist auf "SpiceDB allowing for idempotent writes with its TOUCH operation" (dass SpiceDB mit seiner TOUCH-Operation idempotente Schreibvorgänge erlaubt) und auf die Reihenfolge: "As long as this process is effectively single-threaded and retries operations until they succeed" (Solange dieser Prozess effektiv single-threaded ist und Operationen wiederholt, bis sie gelingen) ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)). Ein Löschen vor dem früheren Anlegen anzuwenden, würde den falschen Zustand hinterlassen.
 
 ### Change Data Capture
 
@@ -155,7 +155,7 @@ Beachten Sie den ersten Schritt: Weil Debezium *committete* Änderungen liest, k
 
 ## Watch speist Indizes, ist aber keine Queue
 
-Die obigen Muster bringen Änderungen *in* den Autorisierungsdienst. Watch (§2.4.3) bringt sie *heraus*: "Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API." (Einige Clients pflegen sekundäre Indizes der Relationstupel in Zanzibar. Das können sie mit unserer Watch-API tun.) Eine Antwort enthält Änderungen "in ascending timestamp order" (in aufsteigender Zeitstempelreihenfolge) bis zu einem *Heartbeat-zookie*, den "the client can use … to resume watching where the previous watch response left off" (§2.4.3) (der Client verwenden kann, … um das Beobachten dort fortzusetzen, wo die vorherige Watch-Antwort aufgehört hat). Der inkrementelle Indexer von Leopard ist der eigene Konsument des Papers (§3.2.4).
+Die obigen Muster bringen Änderungen *in* den Autorisierungsdienst. Watch (§2.4.3) bringt sie *heraus*: "Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API." (Einige Clients pflegen sekundäre Indizes der Relationstupel in Zanzibar. Das können sie mit unserer Watch-API tun.) Eine Antwort enthält Änderungen "in ascending timestamp order" (in aufsteigender Zeitstempelreihenfolge) bis zu einem *Heartbeat-zookie*, den "the client can use … to resume watching where the previous watch response left off" (§2.4.3) (der Client verwenden kann, … um das Beobachten dort fortzusetzen, wo die vorherige Watch-Antwort aufgehört hat). Der inkrementelle Indexer von Leopard ist der Konsument, den das Paper selbst beschreibt (§3.2.4).
 
 Der Client besitzt die Fortsetzungsposition, und der Server hält die Historie nur eine Weile. Die SpiceDB-Dokumentation: "Historical changes can only be requested until the configured garbage collection window on the underlying datastore. This is typically 24 hours, but may differ based on the datastore used" (Historische Änderungen können nur bis zum konfigurierten Garbage-Collection-Fenster des zugrunde liegenden Datenspeichers angefordert werden. Das sind typischerweise 24 Stunden, kann aber je nach verwendetem Datenspeicher abweichen) ([SpiceDB, Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)). Ein SpiceDB-Issue nennt die Folge: "the Watch API is non-durable; if you want to write to a durable queue, you have to take the messages coming from the Watch API and put them somewhere" (die Watch-API ist nicht dauerhaft; wenn Sie in eine dauerhafte Queue schreiben wollen, müssen Sie die Nachrichten aus der Watch-API nehmen und irgendwo ablegen) ([spicedb#2015](https://github.com/authzed/spicedb/issues/2015), am 2026-10-29 als nicht geplant geschlossen). Das offene Issue [spicedb#2285](https://github.com/authzed/spicedb/issues/2285) ergänzt, dass das Standardverhalten "starts watching from the HEAD revision which leaves gaps of updates that may have not been seen" (ab der HEAD-Revision beobachtet, was Lücken mit Aktualisierungen hinterlässt, die möglicherweise nicht gesehen wurden).
 
@@ -209,7 +209,7 @@ Die Opazitätsregel des Papers ist Absicht: zookies sind opak, "to discourage ou
 
 ## Die Tupel eines Objekts sicher neu schreiben: das Lock-Tupel
 
-Ein Synchronisationsjob will oft alle Tupel eines Objekts ersetzen, damit sie der Datenbank entsprechen, zum Beispiel um die Betrachter des Readme genau auf das zu setzen, was die Freigabetabelle sagt. Zwei solche Jobs, oder ein Job und die Bearbeitung eines Benutzers, können um die Wette laufen. Die Antwort des Papers ist optimistische Nebenläufigkeitskontrolle mit einem *Lock-Tupel* (§2.4.2):
+Ein Synchronisationsjob will oft alle Tupel eines Objekts ersetzen, damit sie der Datenbank entsprechen, zum Beispiel um die Betrachter des Readmes genau auf das zu setzen, was die Freigabetabelle sagt. Zwei solche Jobs, oder ein Job und die Bearbeitung eines Benutzers, können sich dabei in die Quere kommen. Die Antwort des Papers ist optimistische Nebenläufigkeitskontrolle mit einem *Lock-Tupel* (§2.4.2):
 
 <Callout kind="paper" title="§2.4.2, Read-Modify-Write">
 
@@ -217,11 +217,11 @@ Ein Synchronisationsjob will oft alle Tupel eines Objekts ersetzen, damit sie de
 2. Generate the tuples to write or delete. Send the writes, along with a touch on the lock tuple, to Zanzibar, with the condition that the writes will be committed only if the lock tuple has not been modified since the read.
 3. If the write condition is not met, go back to step 1.
 
-(1. Alle Relationstupel eines Objekts lesen, einschließlich eines „Lock“-Tupels pro Objekt. 2. Die zu schreibenden oder zu löschenden Tupel erzeugen. Die Schreibvorgänge zusammen mit einer Berührung des Lock-Tupels an Zanzibar senden, mit der Bedingung, dass die Schreibvorgänge nur committet werden, wenn das Lock-Tupel seit dem Lesen nicht geändert wurde. 3. Ist die Schreibbedingung nicht erfüllt, zurück zu Schritt 1.)
+(1. Alle Relationstupel eines Objekts lesen, einschließlich eines „Lock“-Tupels pro Objekt. 2. Die zu schreibenden oder zu löschenden Tupel erzeugen. Die Schreibvorgänge zusammen mit einem Touch auf das Lock-Tupel an Zanzibar senden, mit der Bedingung, dass die Schreibvorgänge nur committet werden, wenn das Lock-Tupel seit dem Lesen nicht geändert wurde. 3. Ist die Schreibbedingung nicht erfüllt, zurück zu Schritt 1.)
 
 </Callout>
 
-"The lock tuple is just a regular relation tuple used by clients to detect write races" (§2.4.2) (Das Lock-Tupel ist einfach ein gewöhnliches Relationstupel, das Clients verwenden, um konkurrierende Schreibvorgänge zu erkennen). Was passiert, wenn zwei Synchronisationsjobs gleichzeitig die Tupel des Readme neu schreiben?
+"The lock tuple is just a regular relation tuple used by clients to detect write races" (§2.4.2) (Das Lock-Tupel ist einfach ein gewöhnliches Relationstupel, das Clients verwenden, um Schreib-Races zu erkennen). Was passiert, wenn zwei Synchronisationsjobs gleichzeitig die Tupel des Readmes neu schreiben?
 
 <Swimlane
   lanes={["Sync-Job 1", "Sync-Job 2", "Zanzibar"]}
@@ -229,7 +229,7 @@ Ein Synchronisationsjob will oft alle Tupel eines Objekts ersetzen, damit sie de
   rowHeight={64}
   timeLabel="Zeit"
   title="Optimistische Nebenläufigkeit mit einem Lock-Tupel"
-  desc="Beide Sync-Jobs lesen alle Tupel von doc:readme, einschließlich des Lock-Tupels, in derselben Version. Job 1 sendet seine Schreibvorgänge mit einer Berührung des Lock-Tupels, unter der Bedingung, dass das Lock unverändert ist; Zanzibar committet, und das Lock ändert sich. Job 2 sendet seine Schreibvorgänge mit derselben Bedingung; das Lock hat sich geändert, also weist Zanzibar sie ab, und Job 2 geht zurück zu Schritt 1 und liest erneut."
+  desc="Beide Sync-Jobs lesen alle Tupel von doc:readme, einschließlich des Lock-Tupels, in derselben Version. Job 1 sendet seine Schreibvorgänge mit einem Touch auf das Lock-Tupel, unter der Bedingung, dass das Lock unverändert ist; Zanzibar committet, und das Lock ändert sich. Job 2 sendet seine Schreibvorgänge mit derselben Bedingung; das Lock hat sich geändert, also weist Zanzibar sie ab, und Job 2 geht zurück zu Schritt 1 und liest erneut."
   events={[
     { lane: 0, t: 0, label: "readme-Tupel\n+ Lock lesen", kind: "read" },
     { lane: 2, t: 0, label: "Lock in\nVersion 7", kind: "note" },
@@ -258,7 +258,7 @@ Job 2 wird nicht blockiert, während Job 1 arbeitet; er erfährt vom Konflikt er
 
 <Callout kind="paper" title="Im Paper">
 
-Zanzibar als Speicher für Berechtigungen: §1, §5. Das zookie-Protokoll und der atomare Client-Schreibvorgang: §2.2. Write und das Lock-Tupel: §2.4.2. Watch und Heartbeat-zookies: §2.4.3. Content-Change-Prüfung: §2.4.4. Tupel und changelog in einer Transaktion: §3.1.2. Begriffe: [Lock-Tupel](../glossary/#lock-tuple), [Watch](../glossary/#watch), [Heartbeat-zookie](../glossary/#heartbeat-zookie), [Content-Change-Prüfung](../glossary/#content-change-check), [zookie](../glossary/#zookie).
+Zanzibar als Speicher für Berechtigungen: §1, §5. Das zookie-Protokoll und der atomare Client-Schreibvorgang: §2.2. Write und das Lock-Tupel: §2.4.2. Watch und Heartbeat-zookies: §2.4.3. Content-Change-Prüfung: §2.4.4. Tupel und Changelog in einer Transaktion: §3.1.2. Begriffe: [Lock-Tupel](../glossary/#lock-tuple), [Watch](../glossary/#watch), [Heartbeat-zookie](../glossary/#heartbeat-zookie), [Content-Change-Prüfung](../glossary/#content-change-check), [zookie](../glossary/#zookie).
 
 </Callout>
 

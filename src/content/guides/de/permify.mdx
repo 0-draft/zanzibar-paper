@@ -125,7 +125,7 @@ Wie teilen sich Permify-Server die Arbeit, und wo liegen die Tupel?
 <Graph
   width={620}
   height={290}
-  title="Permify-Installation, wie in der Dokumentation beschrieben"
+  title="Permify-Bereitstellung, wie in der Dokumentation beschrieben"
   desc="Ein Dienst ruft Permify-Pods über gRPC auf Port 3478 oder HTTP auf Port 3476 auf. Im verteilten Modus bilden die Pods einen Ring mit konsistentem Hashing, sodass eine Anfrage, die auf Pod 2 gehasht wird, aus dem lokalen Ristretto-Cache von Pod 2 beantwortet wird. Beide Pods lesen und schreiben PostgreSQL, das mit getrennten Writer- und Reader-Verbindungen konfiguriert sein kann. Ein Watch-Konsument hält einen Stream zu einem Pod."
   nodes={[
     { id: "app", x: 95, y: 60, label: "Ihr Dienst", kind: "client" },
@@ -161,7 +161,7 @@ Wie sieht eine Prüfung nach einer Freigabeänderung diese Änderung?
 <Swimlane
   lanes={["Ihr Dienst", "Permify", "PostgreSQL"]}
   timeLabel="Zeit"
-  title="Rundweg eines Snap Tokens"
+  title="Der Weg eines Snap Tokens"
   desc="Der Dienst schreibt das Tupel doc:readme#viewer@group:eng#member. Permify hält es in einer neuen Transaktion in PostgreSQL fest und gibt ein Snap Token zurück. Der Dienst speichert das Token mit dem Readme. Eine spätere Prüfung für Beto auf dem Readme sendet das Token mit, und Permify wertet die Prüfung auf einem Snapshot aus, der nicht älter ist als das Token, sodass das neue viewer-Tupel sichtbar ist."
   events={[
     { lane: 0, t: 0, label: "Write: eng#member\nsieht Readme", kind: "write" },
@@ -201,19 +201,18 @@ Beachten Sie das Verhalten ohne Token. Das Paper lässt Zanzibar "choose a reaso
 
 ## Quellen
 
-
-- Permify repository: [https://github.com/Permify/permify](https://github.com/Permify/permify)
-- Permify docs (FusionAuth): [https://fusionauth.io/permify-docs](https://fusionauth.io/permify-docs)
-- Modeling: [https://fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)
-- Storing data: [https://fusionauth.io/permify-docs/getting-started/sync-data](https://fusionauth.io/permify-docs/getting-started/sync-data)
+- Permify-Repository: [https://github.com/Permify/permify](https://github.com/Permify/permify)
+- Permify-Dokumentation (FusionAuth): [https://fusionauth.io/permify-docs](https://fusionauth.io/permify-docs)
+- Modellierung: [https://fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)
+- Daten speichern: [https://fusionauth.io/permify-docs/getting-started/sync-data](https://fusionauth.io/permify-docs/getting-started/sync-data)
 - Snap tokens: [https://fusionauth.io/permify-docs/operations/snap-tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)
-- Cache mechanisms: [https://fusionauth.io/permify-docs/operations/cache](https://fusionauth.io/permify-docs/operations/cache)
-- Watch operations: [https://fusionauth.io/permify-docs/operations/watch](https://fusionauth.io/permify-docs/operations/watch)
-- Contextual tuples: [https://fusionauth.io/permify-docs/operations/contextual-tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples)
-- Configuration: [https://fusionauth.io/permify-docs/setting-up/configuration](https://fusionauth.io/permify-docs/setting-up/configuration)
-- gRPC services: [https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)
-- Sample schema: [https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml)
-- License history: [https://github.com/Permify/permify/commits/master/LICENSE](https://github.com/Permify/permify/commits/master/LICENSE)
-- License commits: [https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7](https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7), [https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5](https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5)
-- Acquisition: [https://permify.co/post/fusionauth-acquires-permify/](https://permify.co/post/fusionauth-acquires-permify/), [https://fusionauth.io/blog/fusionauth-acquires-permify](https://fusionauth.io/blog/fusionauth-acquires-permify)
-- Product name: [https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify](https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify)
+- Cache-Mechanismen: [https://fusionauth.io/permify-docs/operations/cache](https://fusionauth.io/permify-docs/operations/cache)
+- Watch-Operationen: [https://fusionauth.io/permify-docs/operations/watch](https://fusionauth.io/permify-docs/operations/watch)
+- Kontextuelle Tupel: [https://fusionauth.io/permify-docs/operations/contextual-tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples)
+- Konfiguration: [https://fusionauth.io/permify-docs/setting-up/configuration](https://fusionauth.io/permify-docs/setting-up/configuration)
+- gRPC-Dienste: [https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)
+- Beispielschema: [https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml)
+- Lizenzhistorie: [https://github.com/Permify/permify/commits/master/LICENSE](https://github.com/Permify/permify/commits/master/LICENSE)
+- Lizenz-Commits: [https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7](https://github.com/Permify/permify/commit/97285f94d5e40d3f29f22fd01dc972655af122d7), [https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5](https://github.com/Permify/permify/commit/26912d91f5a8c2ed3298bd29fdefd00f55da17b5)
+- Übernahme: [https://permify.co/post/fusionauth-acquires-permify/](https://permify.co/post/fusionauth-acquires-permify/), [https://fusionauth.io/blog/fusionauth-acquires-permify](https://fusionauth.io/blog/fusionauth-acquires-permify)
+- Produktname: [https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify](https://fusionauth.io/blog/how-to-get-support-for-fusionauth-fga-permify)
