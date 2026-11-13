@@ -11,27 +11,27 @@ paper: ["3.2.4", "4.4"]
 import Graph from "../../../components/diagram/Graph.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 
-Zanzibar répond normalement à un Check en suivant les tuples de l’objet jusqu’à l’utilisateur, une recherche à la fois. Pour la plupart des données, c’est rapide. Pour des groupes imbriqués sur de nombreux niveaux, ça ne l’est pas, et Zanzibar confie ces vérifications à Leopard, un index qui précalcule l’imbrication.
+Zanzibar répond normalement à un Check en suivant les tuples de l’objet jusqu’à l’utilisateur, une recherche à la fois. Pour la plupart des données, c’est rapide. Pour des groupes imbriqués sur de nombreux niveaux, ce n’est pas le cas, et Zanzibar confie ces vérifications à Leopard, un index qui précalcule l’imbrication.
 
 ## Pourquoi l’imbrication est lente
 
-Étendons l’exemple récurrent. `group:eng` se trouve désormais dans `group:product`, lui-même dans `group:all`, et le readme est partagé avec tout `group:all`. Combien de recherches faut-il pour apprendre que Beto peut consulter le readme ?
+Étendons l’exemple suivi. `group:eng` se trouve désormais dans `group:product`, lui-même dans `group:all`, et le readme est partagé avec tout `group:all`. Combien de recherches faut-il pour établir que Beto peut consulter le readme ?
 
 <Graph
   width={640}
   height={380}
   title="Une chaîne de groupes imbriqués"
-  desc="user:beto est membre de group:eng, les membres de group:eng sont membres de group:product, les membres de group:product sont membres de group:all, et les membres de group:all sont lecteurs de doc:readme. La vérification de l’accès de Beto part de doc:readme et lit un objet par étape : doc:readme, group:all, group:product et group:eng, soit quatre lectures successives."
+  desc="user:beto est membre de group:eng, les membres de group:eng sont membres de group:product, les membres de group:product sont membres de group:all, et les membres de group:all sont lecteurs de doc:readme. La vérification de l’accès de Beto part de doc:readme et lit un objet par étape : doc:readme, group:all, group:product et group:eng, soit quatre lectures successives."
   nodes={[
     { id: "doc", x: 200, y: 30, label: "doc:readme", kind: "object", mono: true },
     { id: "all", x: 200, y: 110, label: "group:all", kind: "group", mono: true },
     { id: "prod", x: 200, y: 190, label: "group:product", kind: "group", mono: true },
     { id: "eng", x: 200, y: 270, label: "group:eng", kind: "group", mono: true, on: true },
     { id: "beto", x: 200, y: 350, label: "user:beto", kind: "subject", mono: true, on: true },
-    { id: "n1", x: 470, y: 30, label: "1. lire doc:readme : lecteurs = group:all", kind: "note" },
-    { id: "n2", x: 470, y: 110, label: "2. lire group:all : inclut group:product", kind: "note" },
-    { id: "n3", x: 470, y: 190, label: "3. lire group:product : inclut group:eng", kind: "note" },
-    { id: "n4", x: 470, y: 270, label: "4. lire group:eng : Beto est membre", kind: "note" },
+    { id: "n1", x: 470, y: 30, label: "1. lire doc:readme : lecteurs = group:all", kind: "note" },
+    { id: "n2", x: 470, y: 110, label: "2. lire group:all : inclut group:product", kind: "note" },
+    { id: "n3", x: 470, y: 190, label: "3. lire group:product : inclut group:eng", kind: "note" },
+    { id: "n4", x: 470, y: 270, label: "4. lire group:eng : Beto est membre", kind: "note" },
   ]}
   edges={[
     { from: "all", to: "doc", label: "viewer" },
@@ -39,10 +39,10 @@ Zanzibar répond normalement à un Check en suivant les tuples de l’objet jusq
     { from: "eng", to: "prod", label: "member" },
     { from: "beto", to: "eng", label: "member", on: true },
   ]}
-  caption="Chaque étape désigne l’objet de la suivante ; les quatre lectures ne peuvent donc pas commencer ensemble. Chaque objet peut en outre résider sur un serveur différent (voir la page sur l’architecture)."
+  caption="Chaque étape désigne l’objet de la suivante ; les quatre lectures ne peuvent donc pas commencer ensemble. Chaque objet peut en outre résider sur un serveur différent (voir la page sur l’architecture)."
 />
 
-Les tuples qui sous-tendent la figure sont :
+Les tuples qui sous-tendent la figure sont :
 
 ```text
 doc:readme#viewer@group:all#member
@@ -51,16 +51,16 @@ group:product#member@group:eng#member
 group:eng#member@user:beto
 ```
 
-Remarquez que l’étape *n* ne peut pas commencer avant que l’étape *n* − 1 ait répondu. L’article appelle cela la poursuite de pointeurs et indique qu’elle "can be expensive when indirect ACLs or groups are deep or wide" (« peut être coûteuse lorsque les ACL indirectes ou les groupes sont profonds ou larges ») (§3.2.3). La largeur pénalise aussi : si `group:all` contenait une centaine de groupes enfants, l’étape 2 se ramifierait cent fois. D’où : "Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation." (« La poursuite récursive de pointeurs lors de l’évaluation des vérifications peine à maintenir une faible latence avec des groupes profondément imbriqués ou comportant un grand nombre de groupes enfants. Pour certains espaces de noms présentant une telle structure, Zanzibar traite les vérifications à l’aide de Leopard, un index spécialisé qui prend en charge un calcul ensembliste efficace. ») (§3.2.4)
+Remarquez que l’étape *n* ne peut pas commencer avant que l’étape *n* − 1 ait répondu. L’article appelle cela la poursuite de pointeurs et indique qu’elle « can be expensive when indirect ACLs or groups are deep or wide » (peut être coûteuse lorsque les ACL indirectes ou les groupes sont profonds ou larges) (§3.2.3). La largeur pénalise aussi : si `group:all` contenait une centaine de groupes enfants, l’étape 2 se ramifierait cent fois. D’où : « Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation. » (La poursuite récursive de pointeurs lors de l’évaluation des vérifications peine à maintenir une faible latence avec des groupes profondément imbriqués ou comportant un grand nombre de groupes enfants. Pour certains espaces de noms présentant une telle structure, Zanzibar traite les vérifications à l’aide de Leopard, un index spécialisé qui prend en charge un calcul ensembliste efficace.) (§3.2.4)
 
 ## Deux types d’ensembles
 
-Leopard stocke "a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID" (« une collection d’ensembles nommés à l’aide de tuples `(T, s, e)`, où *T* est une énumération représentant le type d’ensemble, et *s* et *e* sont des entiers de 64 bits représentant respectivement l’identifiant de l’ensemble et l’identifiant de l’élément ») (§3.2.4). L’appartenance aux groupes utilise deux types d’ensembles :
+Leopard stocke « a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID » (une collection d’ensembles nommés à l’aide de tuples `(T, s, e)`, où *T* est une énumération représentant le type d’ensemble, et *s* et *e* sont des entiers de 64 bits représentant respectivement l’identifiant de l’ensemble et l’identifiant de l’élément) (§3.2.4). L’appartenance aux groupes utilise deux types d’ensembles :
 
-- `GROUP2GROUP(s)` : les groupes qui sont "*directly or indirectly*" (« *directement ou indirectement* ») des sous-groupes du groupe ancêtre *s*.
-- `MEMBER2GROUP(s)` : les groupes dont l’utilisateur *s* est membre "*direct*" (« *direct* »).
+- `GROUP2GROUP(s)` : les groupes qui sont « *directly or indirectly* » (*directement ou indirectement*) des sous-groupes du groupe ancêtre *s*.
+- `MEMBER2GROUP(s)` : les groupes dont l’utilisateur *s* est membre « *direct* » (*direct*).
 
-Que contiennent ces ensembles pour l’exemple ?
+Que contiennent ces ensembles pour l’exemple ?
 
 <Graph
   width={640}
@@ -86,37 +86,37 @@ Que contiennent ces ensembles pour l’exemple ?
     { from: "m1", to: "s4", on: true },
     { from: "m2", to: "s5" },
   ]}
-  caption="GROUP2GROUP est aplati : group:all liste group:eng bien que eng se trouve deux niveaux plus bas. MEMBER2GROUP ne l’est pas : il ne liste que les appartenances directes. Chaque groupe est dessiné dans son propre ensemble GROUP2GROUP ; l’article ne le dit pas, voir la note ci-dessous."
+  caption="GROUP2GROUP est aplati : group:all liste group:eng bien que eng se trouve deux niveaux plus bas. MEMBER2GROUP ne l’est pas : il ne liste que les appartenances directes. Chaque groupe est dessiné dans son propre ensemble GROUP2GROUP ; l’article ne le dit pas, voir la note ci-dessous."
 />
 
-Remarquez l’asymétrie. Toute l’imbrication est repliée dans `GROUP2GROUP` ; le côté utilisateur n’a donc qu’à enregistrer où l’utilisateur a été ajouté directement. Selon les termes de l’article, "Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard" (« L’aplatissement des chemins de groupe à groupe permet à Leopard d’évaluer efficacement l’accessibilité ») (§3.2.4).
+Remarquez l’asymétrie. Toute l’imbrication est repliée dans `GROUP2GROUP` ; le côté utilisateur n’a donc qu’à enregistrer où l’utilisateur a été ajouté directement. Selon les termes de l’article, « Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard » (L’aplatissement des chemins de groupe à groupe permet à Leopard d’évaluer efficacement l’accessibilité) (§3.2.4).
 
-<Callout kind="warn" title="Un groupe se contient-il lui-même ?">
-L’article définit `GROUP2GROUP(s)` comme les groupes qui sont des sous-groupes de *s*, et ne dit pas si *s* lui-même appartient à l’ensemble. Pour qu’un membre direct de *G* passe le test ci-dessous, *G* doit figurer dans `GROUP2GROUP(G)` ou être traité séparément. Les figures supposent la première option ; c’est une déduction, et non une affirmation de l’article.
+<Callout kind="warn" title="Un groupe se contient-il lui-même ?">
+L’article définit `GROUP2GROUP(s)` comme les groupes qui sont des sous-groupes de *s*, et ne dit pas si *s* lui-même appartient à l’ensemble. Pour qu’un membre direct de *G* passe le test ci-dessous, *G* doit figurer dans `GROUP2GROUP(G)` ou être traité séparément. Les figures supposent la première option ; c’est une déduction, et non une affirmation de l’article.
 </Callout>
 
 ## L’appartenance est une intersection non vide
 
-"To evaluate whether user *U* is a member of group *G*, we check whether" (« Pour évaluer si l’utilisateur *U* est membre du groupe *G*, nous vérifions si ») (§3.2.4)
+« To evaluate whether user *U* is a member of group *G*, we check whether » (Pour évaluer si l’utilisateur *U* est membre du groupe *G*, nous vérifions si) (§3.2.4)
 
 ```text
 (MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
 ```
 
-Autrement dit : l’un des groupes auxquels l’utilisateur a été ajouté directement se trouve-t-il aussi quelque part sous *G* ? Qu’est-ce que cela donne pour Beto et Anne par rapport à `group:all` ?
+Autrement dit : l’un des groupes auxquels l’utilisateur a été ajouté directement se trouve-t-il aussi quelque part sous *G* ? Qu’est-ce que cela donne pour Beto et Anne par rapport à `group:all` ?
 
 <Graph
   width={640}
   height={330}
   title="L’appartenance comme intersection"
-  desc="MEMBER2GROUP(user:beto), qui vaut group:eng, intersecté avec GROUP2GROUP(group:all), qui vaut group:all, group:product et group:eng, donne group:eng : non vide, Beto est donc membre de group:all. MEMBER2GROUP(user:anne), qui est vide, intersecté avec le même ensemble donne l’ensemble vide : Anne n’est donc pas membre."
+  desc="MEMBER2GROUP(user:beto), qui vaut group:eng, intersecté avec GROUP2GROUP(group:all), qui vaut group:all, group:product et group:eng, donne group:eng : non vide, Beto est donc membre de group:all. MEMBER2GROUP(user:anne), qui est vide, intersecté avec le même ensemble donne l’ensemble vide : Anne n’est donc pas membre."
   nodes={[
     { id: "mb", x: 190, y: 50, label: "MEMBER2GROUP(user:beto)\n{ group:eng }", kind: "group", mono: true },
     { id: "ga", x: 190, y: 130, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
-    { id: "rb", x: 530, y: 90, label: "∩ = { group:eng }\nnon vide : membre", kind: "object", on: true },
+    { id: "rb", x: 530, y: 90, label: "∩ = { group:eng }\nnon vide : membre", kind: "object", on: true },
     { id: "ma", x: 190, y: 220, label: "MEMBER2GROUP(user:anne)\n{ }", kind: "group", mono: true },
     { id: "gb", x: 190, y: 295, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
-    { id: "ra", x: 530, y: 257, label: "∩ = { }\nvide : non membre", kind: "object" },
+    { id: "ra", x: 530, y: 257, label: "∩ = { }\nvide : non membre", kind: "object" },
   ]}
   edges={[
     { from: "mb", to: "rb", on: true },
@@ -124,21 +124,21 @@ Autrement dit : l’un des groupes auxquels l’utilisateur a été ajouté dire
     { from: "ma", to: "ra" },
     { from: "gb", to: "ra" },
   ]}
-  caption="Deux recherches et une intersection, quelle que soit la profondeur de l’imbrication. Beto en fait partie ; Anne non."
+  caption="Deux recherches et une intersection, quelle que soit la profondeur de l’imbrication. Beto en fait partie ; Anne non."
 />
 
-Les quatre lectures successives de la première figure sont devenues deux recherches d’ensembles et une intersection. Pour répondre entièrement à la question initiale, Zanzibar lit encore le tuple du readme qui désigne `group:all#member` ; c’est la profondeur située en dessous que Leopard supprime. L’article ne précise pas comment un Check se répartit entre évaluation ordinaire et requêtes Leopard ; cette répartition est donc une lecture du §3.2.4, et non une citation.
+Les quatre lectures successives de la première figure sont devenues deux recherches d’ensembles et une intersection. Pour répondre entièrement à la question initiale, Zanzibar lit encore le tuple du readme qui désigne `group:all#member` ; c’est la profondeur située en dessous que Leopard supprime. L’article ne précise pas comment un Check se répartit entre évaluation ordinaire et requêtes Leopard ; cette répartition est donc une lecture du §3.2.4, et non une citation.
 
 ## Intersection sur des listes triées
 
-Que coûte l’intersection ? "Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets. For example, evaluating the intersection between two sets, *A* and *B*, requires only O(min(|A|, |B|)) skip-list seeks." (« Les tuples d’index sont stockés sous forme de listes ordonnées d’entiers dans une structure telle qu’une skip list, ce qui permet des unions et des intersections efficaces entre ensembles. Par exemple, évaluer l’intersection de deux ensembles *A* et *B* ne nécessite que O(min(|A|, |B|)) positionnements dans la skip list. ») (§3.2.4)
+Que coûte l’intersection ? « Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets. For example, evaluating the intersection between two sets, *A* and *B*, requires only O(min(|A|, |B|)) skip-list seeks. » (Les tuples d’index sont stockés sous forme de listes ordonnées d’entiers dans une structure telle qu’une skip list, ce qui permet des unions et des intersections efficaces entre ensembles. Par exemple, évaluer l’intersection de deux ensembles *A* et *B* ne nécessite que O(min(|A|, |B|)) positionnements dans la skip list.) (§3.2.4)
 
 <Graph
   width={640}
   height={250}
   minWidth={520}
   title="Intersection d’une liste triée courte avec une longue"
-  desc="La liste A contient 17, 42 et 90. La liste B contient 3, 8, 17, 21, 30, 42, 55, 61, 77, 84, 93 et 99. Pour chaque élément de A, un positionnement dans B trouve le premier élément qui n’est pas plus petit : 17 trouve 17, 42 trouve 42, 90 tombe sur 93, qui ne correspond pas. L’intersection vaut 17 et 42, trouvés en trois positionnements."
+  desc="La liste A contient 17, 42 et 90. La liste B contient 3, 8, 17, 21, 30, 42, 55, 61, 77, 84, 93 et 99. Pour chaque élément de A, un positionnement dans B trouve le premier élément qui n’est pas plus petit : 17 trouve 17, 42 trouve 42, 90 tombe sur 93, qui ne correspond pas. L’intersection vaut 17 et 42, trouvés en trois positionnements."
   nodes={[
     { id: "la", x: 30, y: 50, label: "A", kind: "note" },
     { id: "lb", x: 30, y: 200, label: "B", kind: "note" },
@@ -159,18 +159,18 @@ Que coûte l’intersection ? "Index tuples are stored as ordered lists of integ
     { id: "b11", x: 596, y: 200, label: "99", mono: true, w: 38 },
   ]}
   edges={[
-    { from: "a1", to: "b2", label: "posit. 1 : trouvé", on: true },
-    { from: "a2", to: "b5", label: "posit. 2 : trouvé", on: true },
-    { from: "a3", to: "b10", label: "posit. 3 : absent", dashed: true },
+    { from: "a1", to: "b2", label: "posit. 1 : trouvé", on: true },
+    { from: "a2", to: "b5", label: "posit. 2 : trouvé", on: true },
+    { from: "a3", to: "b10", label: "posit. 3 : absent", dashed: true },
   ]}
   caption="Trois éléments dans A, trois positionnements dans B. Les douze éléments de B ne sont jamais parcourus un à un. Les niveaux supérieurs de la skip list, qui rendent chaque positionnement rapide, ne sont pas dessinés."
 />
 
-Remarquez que le travail suit la liste la plus courte. Lorsqu’un utilisateur n’est membre direct que de quelques groupes, `MEMBER2GROUP(U)` est court et le test reste peu coûteux même lorsque `GROUP2GROUP(G)` est énorme. L’article ne donne aucune taille d’ensemble ; ce cas est une hypothèse. L’index "is sharded by element IDs" (« est fragmenté par identifiant d’élément »), et les fragments "are usually served entirely from memory" (« sont généralement servis entièrement depuis la mémoire ») (§3.2.4).
+Remarquez que le travail suit la liste la plus courte. Lorsqu’un utilisateur n’est membre direct que de quelques groupes, `MEMBER2GROUP(U)` est court et le test reste peu coûteux même lorsque `GROUP2GROUP(G)` est énorme. L’article ne donne aucune taille d’ensemble ; ce cas est une hypothèse. L’index « is sharded by element IDs » (est fragmenté par identifiant d’élément), et les fragments « are usually served entirely from memory » (sont généralement servis entièrement depuis la mémoire) (§3.2.4).
 
 ## Trois parties
 
-"The Leopard system consists of three discrete parts: a serving system capable of consistent and low-latency operations across sets; an offline, periodic index building system; and an online real-time layer capable of continuously updating the serving system as tuple changes occur." (« Le système Leopard se compose de trois parties distinctes : un système de service capable d’effectuer des opérations cohérentes et à faible latence sur des ensembles ; un système de construction d’index périodique et hors ligne ; et une couche en ligne en temps réel capable de mettre à jour en continu le système de service au fur et à mesure que des modifications de tuples se produisent. ») (§3.2.4) Comment s’articulent-elles ?
+« The Leopard system consists of three discrete parts: a serving system capable of consistent and low-latency operations across sets; an offline, periodic index building system; and an online real-time layer capable of continuously updating the serving system as tuple changes occur. » (Le système Leopard se compose de trois parties distinctes : un système de service capable d’effectuer des opérations cohérentes et à faible latence sur des ensembles ; un système de construction d’index périodique et hors ligne ; et une couche en ligne en temps réel capable de mettre à jour en continu le système de service au fur et à mesure que des modifications de tuples se produisent.) (§3.2.4) Comment s’articulent-elles ?
 
 <Graph
   width={640}
@@ -192,24 +192,24 @@ Remarquez que le travail suit la liste la plus courte. Lorsqu’un utilisateur n
     { from: "inc", to: "serve", label: "(T, s, e, t, d)", labelOffset: -22 },
     { from: "acl", to: "serve", label: "requête", dir: "both" },
   ]}
-  caption="Le chemin hors ligne est complet mais obsolète ; le chemin incrémental est frais mais ne couvre que les modifications depuis le dernier instantané. Le service fusionne les deux."
+  caption="Le chemin hors ligne est complet mais obsolète ; le chemin incrémental est frais mais ne couvre que les modifications depuis le dernier instantané. Le service fusionne les deux."
 />
 
-- **Constructeur d’index hors ligne.** Il "generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples." (« génère des fragments d’index à partir d’un instantané des tuples de relation et des configurations de Zanzibar, et réplique ces fragments à l’échelle mondiale. Il respecte les règles de réécriture de userset et développe récursivement les arêtes d’un graphe d’ACL pour former les tuples d’index Leopard. ») Les serveurs "swap old shards with new ones when they become available" (« remplacent les anciens fragments par les nouveaux lorsqu’ils deviennent disponibles »).
-- **Couche incrémentale.** L’index hors ligne seul "cannot do so at a fresh and consistent snapshot" (« ne peut pas le faire sur un instantané frais et cohérent ») ; les serveurs maintiennent donc "an incremental layer that indexes all updates since the offline snapshot" (« une couche incrémentale qui indexe toutes les mises à jour depuis l’instantané hors ligne »), chaque mise à jour étant un tuple `(T, s, e, t, d)` "where *t* is the timestamp of the update and *d* is a deletion marker" (« où *t* est l’horodatage de la mise à jour et *d* un marqueur de suppression »). "Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing." (« Les mises à jour dont l’horodatage est inférieur ou égal à l’horodatage de la requête sont fusionnées par-dessus l’index hors ligne lors du traitement de la requête. »)
-- **Alimentation.** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions." (« l’indexeur incrémental de Leopard appelle l’API Watch de Zanzibar pour recevoir un flux temporellement ordonné de modifications de tuples Zanzibar, et transforme ces mises à jour en un flux temporellement ordonné d’ajouts, de mises à jour et de suppressions de tuples Leopard. »)
+- **Constructeur d’index hors ligne.** Il « generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples. » (génère des fragments d’index à partir d’un instantané des tuples de relation et des configurations de Zanzibar, et réplique ces fragments à l’échelle mondiale. Il respecte les règles de réécriture de userset et développe récursivement les arêtes d’un graphe d’ACL pour former les tuples d’index Leopard.) Les serveurs « swap old shards with new ones when they become available » (remplacent les anciens fragments par les nouveaux lorsqu’ils deviennent disponibles).
+- **Couche incrémentale.** L’index hors ligne seul « cannot do so at a fresh and consistent snapshot » (ne peut pas le faire sur un instantané frais et cohérent) ; les serveurs maintiennent donc « an incremental layer that indexes all updates since the offline snapshot » (une couche incrémentale qui indexe toutes les mises à jour depuis l’instantané hors ligne), chaque mise à jour étant un tuple `(T, s, e, t, d)` « where *t* is the timestamp of the update and *d* is a deletion marker » (où *t* est l’horodatage de la mise à jour et *d* un marqueur de suppression). « Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing. » (Les mises à jour dont l’horodatage est inférieur ou égal à l’horodatage de la requête sont fusionnées par-dessus l’index hors ligne lors du traitement de la requête.)
+- **Alimentation.** « the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions. » (l’indexeur incrémental de Leopard appelle l’API Watch de Zanzibar pour recevoir un flux temporellement ordonné de modifications de tuples Zanzibar, et transforme ces mises à jour en un flux temporellement ordonné d’ajouts, de mises à jour et de suppressions de tuples Leopard.)
 
-Toutes les citations de cette liste proviennent du §3.2.4. Comme les mises à jour portent des horodatages et sont fusionnées jusqu’à l’horodatage de la requête, une réponse de Leopard peut refléter le même instantané que le reste du Check ; l’objectif déclaré par l’article pour la couche incrémentale est "To support consistent ACL evaluation" (« Pour permettre une évaluation cohérente des ACL »).
+Toutes les citations de cette liste proviennent du §3.2.4. Comme les mises à jour portent des horodatages et sont fusionnées jusqu’à l’horodatage de la requête, une réponse de Leopard peut refléter le même instantané que le reste du Check ; l’objectif déclaré par l’article pour la couche incrémentale est « To support consistent ACL evaluation » (Pour permettre une évaluation cohérente des ACL).
 
-## Le coût : une écriture, de nombreuses mises à jour d’index
+## Le coût : une écriture, de nombreuses mises à jour d’index
 
-L’aplatissement se paie au moment de l’écriture. Revenons à l’état antérieur à l’ajout de eng dans product, et supposons que `group:eng` possède deux sous-groupes, `group:infra` et `group:web`. Quelqu’un ajoute maintenant eng à product. Combien de tuples d’index changent ?
+L’aplatissement se paie au moment de l’écriture. Revenons à l’état antérieur à l’ajout de eng dans product, et supposons que `group:eng` possède deux sous-groupes, `group:infra` et `group:web`. Quelqu’un ajoute maintenant eng à product. Combien de tuples d’index changent ?
 
 <Graph
   width={640}
   height={380}
   title="Une écriture de tuple se démultiplie en de nombreuses mises à jour d’index"
-  desc="L’ajout du tuple group:product#member@group:eng#member fait de group:eng, group:infra et group:web de nouveaux descendants à la fois de group:product et de group:all. L’indexeur incrémental transforme ce tuple unique en six ajouts GROUP2GROUP : product gagne eng, infra et web, et all gagne eng, infra et web."
+  desc="L’ajout du tuple group:product#member@group:eng#member fait de group:eng, group:infra et group:web de nouveaux descendants à la fois de group:product et de group:all. L’indexeur incrémental transforme ce tuple unique en six ajouts GROUP2GROUP : product gagne eng, infra et web, et all gagne eng, infra et web."
   nodes={[
     { id: "t", x: 110, y: 40, label: "group:product#member\n@group:eng#member", kind: "store", mono: true },
     { id: "inc", x: 110, y: 190, label: "indexeur\nincrémental", kind: "server" },
@@ -229,19 +229,19 @@ L’aplatissement se paie au moment de l’écriture. Revenons à l’état ant�
     { from: "inc", to: "e5" },
     { from: "inc", to: "e6" },
   ]}
-  caption="1 tuple Zanzibar, 6 tuples Leopard (le préfixe group: est omis) : chaque ancêtre de product (product, all) multiplié par chaque descendant de eng (eng, infra, web). MEMBER2GROUP ne change pas."
+  caption="1 tuple Zanzibar, 6 tuples Leopard (le préfixe group: est omis) : chaque ancêtre de product (product, all) multiplié par chaque descendant de eng (eng, infra, web). MEMBER2GROUP ne change pas."
 />
 
-Le nombre est le produit du nombre d’ancêtres d’un côté par le nombre de descendants de l’autre ; il croît donc avec la profondeur comme avec la largeur. Pour le calculer, "Generating updates for the GROUP2GROUP tuples requires the incremental indexer to maintain group-to-group membership for denormalizing the effects of a relation tuple update to potentially multiple index updates." (« Générer les mises à jour des tuples GROUP2GROUP exige que l’indexeur incrémental maintienne les appartenances de groupe à groupe, afin de dénormaliser les effets d’une mise à jour de tuple de relation en potentiellement plusieurs mises à jour d’index. ») À l’échelle de Google : "In practice, a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events." (« En pratique, un seul ajout ou une seule suppression de tuple Zanzibar peut produire potentiellement des dizaines de milliers d’événements distincts sur des tuples Leopard. ») (§3.2.4)
+Le nombre est le produit du nombre d’ancêtres d’un côté par le nombre de descendants de l’autre ; il croît donc avec la profondeur comme avec la largeur. Pour le calculer, « Generating updates for the GROUP2GROUP tuples requires the incremental indexer to maintain group-to-group membership for denormalizing the effects of a relation tuple update to potentially multiple index updates. » (Générer les mises à jour des tuples GROUP2GROUP exige que l’indexeur incrémental maintienne les appartenances de groupe à groupe, afin de dénormaliser les effets d’une mise à jour de tuple de relation en potentiellement plusieurs mises à jour d’index.) À l’échelle de Google : « In practice, a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events. » (En pratique, un seul ajout ou une seule suppression de tuple Zanzibar peut produire potentiellement des dizaines de milliers d’événements distincts sur des tuples Leopard.) (§3.2.4)
 
-Une suppression est plus délicate que la figure : un tuple d’index ne peut être retiré que si aucun autre chemin ne relie encore les deux groupes. L’article ne décrit pas comment l’indexeur en décide.
+Une suppression est plus délicate que ne le montre la figure : un tuple d’index ne peut être retiré que si aucun autre chemin ne relie encore les deux groupes. L’article ne décrit pas comment l’indexeur en décide.
 
-C’est aussi pourquoi Leopard est l’exception. Ailleurs, "Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)" (« Zanzibar évite la dénormalisation du stockage et ne s’appuie que sur des données normalisées (à l’exception des cas décrits au §3.2.4) ») (§3.2.5), et Leopard n’est utilisé que pour certains espaces de noms "that exhibit such structure" (« présentant une telle structure ») (§3.2.4).
+C’est aussi pourquoi Leopard est l’exception. Ailleurs, « Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4) » (Zanzibar évite la dénormalisation du stockage et ne s’appuie que sur des données normalisées (à l’exception des cas décrits au §3.2.4)) (§3.2.5), et Leopard n’est utilisé que pour certains espaces de noms « that exhibit such structure » (présentant une telle structure) (§3.2.4).
 
 ## En production
 
-D’après le §4.4, sur 7 jours : "The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile" (« L’index Leopard traite 1.56M de requêtes par seconde à la médiane, ou 2.22M au 99e centile »), et "Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile." (« les serveurs Leopard répondent en moins de 150 μs à la médiane, ou en moins de 1 ms au 99e centile. ») La couche incrémentale "writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile." (« écrit environ 500 mises à jour d’index par seconde à la médiane, et environ 1.5K mises à jour par seconde au 99e centile. ») Les appels à Leopard font l’objet de requêtes de couverture (hedging), comme les appels à Spanner (§3.2.7).
+D’après le §4.4, sur 7 jours : « The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile » (L’index Leopard traite 1.56M de requêtes par seconde à la médiane, ou 2.22M au 99e centile), et « Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile. » (les serveurs Leopard répondent en moins de 150 μs à la médiane, ou en moins de 1 ms au 99e centile.) La couche incrémentale « writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile. » (écrit environ 500 mises à jour d’index par seconde à la médiane, et environ 1.5K mises à jour par seconde au 99e centile.) Les appels à Leopard font l’objet de requêtes de couverture (hedging), comme les appels à Spanner (§3.2.7).
 
 ## Sources
 
-- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3.2.3, §3.2.4, §3.2.5, §3.2.7, §4.4 : [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- Pang et al., « Zanzibar: Google's Consistent, Global Authorization System », USENIX ATC '19, §3.2.3, §3.2.4, §3.2.5, §3.2.7, §4.4 : [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

@@ -1,5 +1,5 @@
 ---
-title: "L’architecture, d’une vérification Check jusqu’à Spanner"
+title: "L’architecture, d’une requête Check jusqu’à Spanner"
 description: "Les serveurs et les bases de données de Zanzibar, suivis au fil d’une requête Check unique et du flux Watch."
 section: guide
 part: mechanisms
@@ -16,14 +16,14 @@ Zanzibar est un ensemble de serveurs placés devant un ensemble de bases de donn
 
 ## Les composants
 
-Quelles boîtes y a-t-il, et dans quel sens les données circulent-elles entre elles ? L’article répond par sa figure 2. La version ci-dessous en conserve les couleurs (clients en bleu, serveurs en jaune, bases de données Spanner en vert) et en retire le détail.
+Quelles boîtes y a-t-il, et dans quel sens les données circulent-elles entre elles ? L’article répond par sa figure 2. La version ci-dessous en conserve les couleurs (clients en bleu, serveurs en jaune, bases de données Spanner en vert) et en retire le détail.
 
 <Graph
   width={640}
   height={400}
   minWidth={560}
   title="Architecture de Zanzibar, simplifiée"
-  desc="Les clients envoient Check, Read, Expand et Write aux aclservers d’un cluster de service Zanzibar ; le watchserver est dessiné hors du cluster, comme dans l’article. Les aclservers chargent les configurations d’espaces de noms depuis Spanner, lisent et écrivent les tuples de relation dans une base de données Spanner par espace de noms, et ajoutent chaque écriture au journal des modifications, également dans Spanner. Un watchserver suit le journal des modifications et transmet les changements en flux aux clients (l’API Watch) et à Leopard (la figure 2 de l’article dessine Leopard comme un système d’indexation distinct). Un pipeline hors ligne périodique lit les bases de tuples, produit des vidages d’instantanés et supprime les anciennes versions ; Leopard construit son index à partir de ces instantanés et répond aux calculs ensemblistes des aclservers."
+  desc="Les clients envoient Check, Read, Expand et Write aux aclservers d’un cluster de service Zanzibar ; le watchserver est dessiné hors du cluster, comme dans l’article. Les aclservers chargent les configurations d’espaces de noms depuis Spanner, lisent et écrivent les tuples de relation dans une base de données Spanner par espace de noms, et ajoutent chaque écriture au journal des modifications, également dans Spanner. Un watchserver suit le journal des modifications et transmet les changements en flux aux clients (l’API Watch) et à Leopard (la figure 2 de l’article dessine Leopard comme un système d’indexation distinct). Un pipeline hors ligne périodique lit les bases de tuples, produit des vidages d’instantanés et supprime les anciennes versions ; Leopard construit son index à partir de ces instantanés et répond aux calculs ensemblistes des aclservers."
   groups={[
     { x: 178, y: 28, w: 184, h: 112, label: "Cluster de service Zanzibar" },
     { x: 425, y: 20, w: 210, h: 262, label: "Spanner" },
@@ -51,20 +51,20 @@ Quelles boîtes y a-t-il, et dans quel sens les données circulent-elles entre e
     { from: "pipe", to: "leo", label: "instantanés" },
     { from: "leo", to: "acl", label: "calcul\nensembliste", labelOffset: -34 },
   ]}
-  caption="Redessiné et simplifié d’après la figure 2 de l’article. Les flèches indiquent le sens de circulation des données. Les clients apparaissent deux fois uniquement pour séparer les lignes : ce sont les mêmes clients qui appellent les aclservers et s’abonnent à Watch."
+  caption="Redessiné et simplifié d’après la figure 2 de l’article. Les flèches indiquent le sens de circulation des données. Les clients apparaissent deux fois uniquement pour séparer les lignes : ce sont les mêmes clients qui appellent les aclservers et s’abonnent à Watch."
 />
 
-Les clients s’adressent à deux types de serveurs. Les `aclservers` répondent aux quatre types de requêtes ; les `watchservers` ne font que transmettre les changements en flux. Selon les termes de l’article, les `aclservers` « are organized in clusters and respond to Check, Read, Expand, and Write requests » (sont organisés en clusters et répondent aux requêtes Check, Read, Expand et Write), tandis que les `watchservers` « tail the changelog and serve a stream of namespace changes to clients in near real time » (suivent le journal des modifications et fournissent aux clients un flux des modifications des espaces de noms en quasi-temps réel) (§3). Leopard est un index destiné aux groupes volumineux et profondément imbriqués ; il dispose de [sa propre page](../leopard/).
+Les clients s’adressent à deux types de serveurs. Les `aclservers` répondent aux quatre types de requêtes ; les `watchservers` ne font que transmettre les changements en flux. Selon les termes de l’article, les `aclservers` « are organized in clusters and respond to Check, Read, Expand, and Write requests » (sont organisés en clusters et répondent aux requêtes Check, Read, Expand et Write), tandis que les `watchservers` « tail the changelog and serve a stream of namespace changes to clients in near real time » (suivent le journal des modifications et fournissent aux clients un flux des modifications des espaces de noms en quasi-temps réel) (§3). Leopard est un index destiné aux groupes volumineux et profondément imbriqués ; il dispose de [sa propre page](../leopard/).
 
-Le pipeline hors ligne produit des « dumps of the relation tuples in each namespace at a known snapshot timestamp » (vidages des tuples de relation de chaque espace de noms à un horodatage d’instantané connu) et supprime par ramasse-miettes les « tuple versions older than a threshold configured per namespace » (versions de tuples plus anciennes qu’un seuil configuré par espace de noms) (§3).
+Le pipeline hors ligne produit des « dumps of the relation tuples in each namespace at a known snapshot timestamp » (vidages des tuples de relation de chaque espace de noms à un horodatage d’instantané connu) et supprime par ramasse-miettes les « tuple versions older than a threshold configured per namespace » (versions de tuples plus anciennes qu’un seuil configuré par espace de noms) (§3).
 
 ## Une vérification, étape par étape
 
-La requête à suivre : Beto est-il lecteur du readme ? Dans l’exemple suivi, les lecteurs du readme incluent les membres de `group:eng`, et Beto en fait partie : la réponse est donc oui. Zanzibar doit le découvrir en lisant deux objets, `doc:readme` et `group:eng`.
+La requête à suivre : Beto est-il lecteur du readme ? Dans l’exemple suivi, les lecteurs du readme incluent les membres de `group:eng`, et Beto en fait partie : la réponse est donc oui. Zanzibar doit le découvrir en lisant deux objets, `doc:readme` et `group:eng`.
 
 ### Elle arrive sur n’importe quel serveur, qui répartit le travail
 
-Quel serveur fait le travail ? N’importe lequel peut recevoir la requête, et le travail est ensuite réparti par objet.
+Quel serveur fait le travail ? N’importe lequel peut recevoir la requête, et le travail est ensuite réparti par objet.
 
 <Graph
   width={640}
@@ -74,22 +74,22 @@ Quel serveur fait le travail ? N’importe lequel peut recevoir la requête, et 
   nodes={[
     { id: "cl", x: 60, y: 130, label: "client", kind: "client" },
     { id: "a", x: 240, y: 130, label: "aclserver A\nreçoit Check", kind: "server" },
-    { id: "b", x: 480, y: 60, label: "aclserver B\nclé : doc:readme", kind: "server", on: true },
-    { id: "c", x: 480, y: 210, label: "aclserver C\nclé : group:eng", kind: "server", on: true },
+    { id: "b", x: 480, y: 60, label: "aclserver B\nclé : doc:readme", kind: "server", on: true },
+    { id: "c", x: 480, y: 210, label: "aclserver C\nclé : group:eng", kind: "server", on: true },
   ]}
   edges={[
     { from: "cl", to: "a", label: "Check", dir: "both" },
-    { from: "a", to: "b", label: "lecteur du readme ?", dir: "both", labelOffset: -12 },
-    { from: "b", to: "c", label: "membre de eng ?", dir: "both" },
+    { from: "a", to: "b", label: "lecteur du readme ?", dir: "both", labelOffset: -12 },
+    { from: "b", to: "c", label: "membre dâeng ?", dir: "both" },
   ]}
-  caption="Check(user:beto, viewer, doc:readme). Les réponses reviennent le long des mêmes flèches ; A répond au client."
+  caption="Check(user:beto, viewer, doc:readme). Les réponses reviennent le long des mêmes flèches ; A répond au client."
 />
 
-Le serveur A n’avait besoin de détenir aucun des deux objets. L’article décrit exactement cette forme : « Requests arrive at any server in a cluster and that server fans out the work to other servers in the cluster as necessary. Those servers may in turn contact other servers to compute intermediate results. The initial server gathers the final result and returns it to the client. » (Les requêtes arrivent sur n’importe quel serveur d’un cluster, et ce serveur répartit le travail sur d’autres serveurs du cluster si nécessaire. Ces serveurs peuvent à leur tour contacter d’autres serveurs pour calculer des résultats intermédiaires. Le serveur initial rassemble le résultat final et le renvoie au client.) (§3)
+Le serveur A n’avait besoin de détenir aucun des deux objets. L’article décrit exactement cette forme : « Requests arrive at any server in a cluster and that server fans out the work to other servers in the cluster as necessary. Those servers may in turn contact other servers to compute intermediate results. The initial server gathers the final result and returns it to the client. » (Les requêtes arrivent sur n’importe quel serveur d’un cluster, et ce serveur répartit le travail sur d’autres serveurs du cluster si nécessaire. Ces serveurs peuvent à leur tour contacter d’autres serveurs pour calculer des résultats intermédiaires. Le serveur initial rassemble le résultat final et le renvoie au client.) (§3)
 
 ### Le hachage cohérent choisit le pair
 
-Comment A savait-il qu’il fallait interroger B au sujet du readme ? Les serveurs d’un cluster forment un cache distribué unique : « Cache entries are distributed across Zanzibar servers with consistent hashing » (les entrées du cache sont réparties entre les serveurs Zanzibar par hachage cohérent) (§3.2.5). Le procédé provient de [Karger et al. (STOC '97)](https://people.csail.mit.edu/karger/Papers/web.pdf), que l’article cite sous la référence [20]. Pour la plupart des espaces de noms, la clé de transfert est calculée à partir de l’identifiant d’objet (§3.2.5).
+Comment A savait-il qu’il fallait interroger B au sujet du readme ? Les serveurs d’un cluster forment un cache distribué unique : « Cache entries are distributed across Zanzibar servers with consistent hashing » (les entrées du cache sont réparties entre les serveurs Zanzibar par hachage cohérent) (§3.2.5). Le procédé provient de [Karger et al. (STOC '97)](https://people.csail.mit.edu/karger/Papers/web.pdf), que l’article cite sous la référence [20]. Pour la plupart des espaces de noms, la clé de transfert est calculée à partir de l’identifiant d’objet (§3.2.5).
 
 <Graph
   width={640}
@@ -116,16 +116,16 @@ Comment A savait-il qu’il fallait interroger B au sujet du readme ? Les serveu
     { from: "kg", to: "C", label: "hash(group:eng)", dashed: true, labelOffset: 14 },
     { from: "kf", to: "D", label: "hash(folder:A)", dashed: true, labelOffset: -12 },
   ]}
-  caption="Les deux requêtes sur le readme vont à B, car la clé est l’objet et non la relation. L’anneau est la représentation classique du hachage cohérent ; l’article ne précise pas quelle variante Zanzibar utilise."
+  caption="Les deux requêtes sur le readme vont à B, car la clé est l’objet et non la relation. L’anneau est la représentation classique du hachage cohérent ; l’article ne précise pas quelle variante Zanzibar utilise."
 />
 
-`viewer` et `owner` sur le readme se retrouvent sur le même serveur. C’est tout l’intérêt d’une clé fondée sur l’objet : « processing a check on ⟨*object#relation*⟩ often involves indirect ACL checks on other relations of the same object and reading relation tuples of the object. These checks and reads can be processed by the same server since they share the same forwarding key with the parent check request. » (le traitement d’une vérification sur ⟨*object#relation*⟩ implique souvent des vérifications d’ACL indirectes sur d’autres relations du même objet et la lecture des tuples de relation de l’objet. Ces vérifications et lectures peuvent être traitées par le même serveur, puisqu’elles partagent la même clé de transfert que la requête de vérification parente.) (§3.2.5) Karger et al. conçoivent le hachage cohérent de sorte que, lorsqu’un cache est ajouté ou retiré, seule la fraction minimale d’objets nécessaire au maintien de l’équilibre de charge doive être déplacée, ce qui explique qu’il convienne à un cache.
+`viewer` et `owner` sur le readme se retrouvent sur le même serveur. C’est tout l’intérêt d’une clé fondée sur l’objet : « processing a check on ⟨*object#relation*⟩ often involves indirect ACL checks on other relations of the same object and reading relation tuples of the object. These checks and reads can be processed by the same server since they share the same forwarding key with the parent check request. » (le traitement d’une vérification sur ⟨*object#relation*⟩ implique souvent des vérifications d’ACL indirectes sur d’autres relations du même objet et la lecture des tuples de relation de l’objet. Ces vérifications et lectures peuvent être traitées par le même serveur, puisqu’elles partagent la même clé de transfert que la requête de vérification parente.) (§3.2.5) Karger et al. conçoivent le hachage cohérent de sorte que, lorsqu’un cache est ajouté ou retiré, seule la fraction minimale d’objets nécessaire au maintien de l’équilibre de charge doive être déplacée, ce qui explique qu’il convienne à un cache.
 
-Pour les clés chaudes, l’article ajoute qu’il utilise [Slicer](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya) « to help distribute hot keys to multiple servers » (pour aider à répartir les clés chaudes sur plusieurs serveurs) (§3.2.5).
+Pour les clés chaudes, l’article ajoute qu’il utilise [Slicer](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya) « to help distribute hot keys to multiple servers » (pour aider à répartir les clés chaudes sur plusieurs serveurs) (§3.2.5).
 
 ### Les deux extrémités d’un appel mettent la réponse en cache
 
-Que se passe-t-il lorsque de nombreux serveurs interrogent C au sujet de `group:eng` au même moment, par exemple parce qu’une page de résultats de recherche vérifie des dizaines de documents tous partagés avec eng ?
+Que se passe-t-il lorsque de nombreux serveurs interrogent C au sujet de `group:eng` au même moment, par exemple parce qu’une page de résultats de recherche vérifie des dizaines de documents tous partagés avec eng ?
 
 <Graph
   width={640}
@@ -140,19 +140,19 @@ Que se passe-t-il lorsque de nombreux serveurs interrogent C au sujet de `group:
     { id: "db", x: 570, y: 150, label: "tuples de groupe\n(Spanner)", kind: "store" },
   ]}
   edges={[
-    { from: "a", to: "c", label: "membre de eng ?" },
+    { from: "a", to: "c", label: "membre dâeng ?" },
     { from: "d", to: "c" },
     { from: "e", to: "c" },
     { from: "c", to: "db", label: "si absent du cache", on: true },
   ]}
-  caption="Une réussite du cache chez un appelant épargne un RPC vers C. Une réussite chez C épargne une lecture dans Spanner."
+  caption="Un succès de cache chez un appelant épargne un RPC vers C. Un succès chez C épargne une lecture dans Spanner."
 />
 
-Les caches des appelants et celui de l’appelé s’empilent en arbre : « To handle hot forwarding keys, we cache results at both the caller and the callee of internal RPCs, effectively forming cache trees. » (Pour gérer les clés de transfert chaudes, nous mettons les résultats en cache à la fois chez l’appelant et chez l’appelé des RPC internes, formant ainsi des arbres de caches.) (§3.2.5) Les clés de cache incluent l’horodatage de l’instantané, et les horodatages sont « rounded up to a coarse granularity, such as one or ten seconds » (arrondis par excès à une granularité grossière, par exemple une ou dix secondes), afin que la plupart des requêtes récentes partagent des entrées (§3.2.5). En production, la mise en cache des vérifications atteignait « a 10% hit rate on the delegate’s side » (un taux de réussite de 10% du côté du délégué) et « a 2% hit rate » (un taux de réussite de 2%) du côté du délégant ; l’article note que, si faibles que paraissent ces taux, « they prevent 500K internal RPCs per second from creating hot spots » (ils empêchent 500K RPC internes par seconde de créer des points chauds) (§4.4).
+Les caches des appelants et celui de l’appelé s’empilent en arbre : « To handle hot forwarding keys, we cache results at both the caller and the callee of internal RPCs, effectively forming cache trees. » (Pour gérer les clés de transfert chaudes, nous mettons les résultats en cache à la fois chez l’appelant et chez l’appelé des RPC internes, formant ainsi des arbres de caches.) (§3.2.5) Les clés de cache incluent l’horodatage de l’instantané, et les horodatages sont « rounded up to a coarse granularity, such as one or ten seconds » (arrondis par excès à une granularité grossière, par exemple une ou dix secondes), afin que la plupart des requêtes récentes partagent des entrées (§3.2.5). En production, la mise en cache des vérifications atteignait « a 10% hit rate on the delegate’s side » (un taux de succès de 10% du côté du délégué) et « a 2% hit rate » (un taux de succès de 2%) du côté du délégant ; l’article note que, si faibles que paraissent ces taux, « they prevent 500K internal RPCs per second from creating hot spots » (ils empêchent 500K RPC internes par seconde de créer des points chauds) (§4.4).
 
 ### La table de verrous regroupe les requêtes identiques
 
-Un cache n’aide qu’une fois qu’il contient la réponse. Si de nombreuses requêtes identiques arrivent avant que la première ne soit terminée, elles échoueraient toutes dans le cache et iraient toutes jusqu’à Spanner : c’est un [cache stampede](https://en.wikipedia.org/wiki/Cache_stampede) (la référence [3] de l’article). Comment C l’évite-t-il ?
+Un cache n’aide qu’une fois qu’il contient la réponse. Si de nombreuses requêtes identiques arrivent avant que la première ne soit terminée, aucune ne trouverait la réponse dans le cache et toutes iraient jusqu’à Spanner : c’est un [cache stampede](https://en.wikipedia.org/wiki/Cache_stampede) (la référence [3] de l’article). Comment C l’évite-t-il ?
 
 <Swimlane
   lanes={["requête 1", "aclserver C", "requête 2", "Spanner"]}
@@ -160,12 +160,12 @@ Un cache n’aide qu’une fois qu’il contient la réponse. Si de nombreuses r
   rowHeight={58}
   timeLabel="temps"
   title="Une table de verrous ne laisse passer qu’une requête parmi plusieurs requêtes identiques"
-  desc="La requête 1 demande à C la clé de cache K ; C ne la trouve pas dans le cache et inscrit K dans sa table de verrous. La requête 2 demande la même clé et doit attendre. C lit une seule fois les lignes dans Spanner, remplit le cache et libère l’entrée. Les deux requêtes obtiennent la réponse."
+  desc="La requête 1 demande à C la clé de cache K ; C ne la trouve pas dans le cache et inscrit K dans sa table de verrous. La requête 2 demande la même clé et doit attendre. C lit une seule fois les lignes dans Spanner, remplit le cache et libère l’entrée. Les deux requêtes obtiennent la réponse."
   events={[
     { lane: 0, t: 0, label: "demande la clé K", kind: "read" },
-    { lane: 1, t: 0, label: "absent : verrouille K", kind: "write" },
+    { lane: 1, t: 0, label: "absent : verrouille K", kind: "write" },
     { lane: 2, t: 1, label: "demande la clé K", kind: "read" },
-    { lane: 1, t: 1, label: "K verrouillée :\nattente", kind: "note" },
+    { lane: 1, t: 1, label: "K verrouillée :\nattente", kind: "note" },
     { lane: 1, t: 2, label: "lecture unique", kind: "read" },
     { lane: 3, t: 2, label: "lignes", kind: "read" },
     { lane: 1, t: 3, label: "remplit le cache", kind: "good" },
@@ -182,13 +182,13 @@ Un cache n’aide qu’une fois qu’il contient la réponse. Si de nombreuses r
   caption="La requête 2 est bloquée au lieu d’aller jusqu’à Spanner. Une seule lecture est émise pour la clé K."
 />
 
-L’article : « we maintain a *lock table* on each server to track outstanding reads and checks. Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated. » (nous maintenons une *table de verrous* sur chaque serveur pour suivre les lectures et vérifications en cours. Parmi les requêtes partageant la même clé de cache, une seule commence à être traitée ; les autres sont bloquées jusqu’à ce que le cache soit rempli.) (§3.2.5) Pour les vérifications, la table de verrous a permis d’économiser « an additional 12% » (12% supplémentaires) du côté du délégué et « an additional 3% » (3% supplémentaires) du côté du délégant (§4.4).
+L’article : « we maintain a *lock table* on each server to track outstanding reads and checks. Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated. » (nous maintenons une *table de verrous* sur chaque serveur pour suivre les lectures et vérifications en cours. Parmi les requêtes partageant la même clé de cache, une seule commence à être traitée ; les autres sont bloquées jusqu’à ce que le cache soit rempli.) (§3.2.5) Pour les vérifications, la table de verrous a permis d’économiser « an additional 12% » (12% supplémentaires) du côté du délégué et « an additional 3% » (3% supplémentaires) du côté du délégant (§4.4).
 
-Deux améliorations sont venues ensuite (§3.2.5). Pour un objet très populaire, Zanzibar lit et met en cache *tous* les tuples de ⟨*object#relation*⟩ en une fois, « trading read bandwidth for cacheability » (en échangeant de la bande passante de lecture contre de la capacité de mise en cache). Et comme une sous-vérification annulée laisse sa clé de cache vide, il retarde l’« eager cancellation when there are waiters on the corresponding lock table entry » (annulation anticipée lorsque des requêtes attendent sur l’entrée correspondante de la table de verrous).
+Deux améliorations sont venues ensuite (§3.2.5). Pour un objet très populaire, Zanzibar lit et met en cache *tous* les tuples de ⟨*object#relation*⟩ en une fois, « trading read bandwidth for cacheability » (en échangeant de la bande passante de lecture contre de la capacité de mise en cache). Et comme une sous-vérification annulée laisse sa clé de cache vide, il retarde l’« eager cancellation when there are waiters on the corresponding lock table entry » (annulation anticipée lorsque des requêtes attendent sur l’entrée correspondante de la table de verrous).
 
 ### Les lectures vers Spanner sont regroupées
 
-Prenons maintenant une vérification qui touche plusieurs relations d’un même objet : Chen est-il lecteur du readme ? Avec la configuration de la figure 1 de l’article, `viewer` inclut `editor`, `editor` inclut `owner`, et les lecteurs du dossier `parent` sont lecteurs du document. Le serveur B a donc quatre ensembles de tuples du readme à lire.
+Prenons maintenant une vérification qui touche plusieurs relations d’un même objet : Chen est-il lecteur du readme ? Avec la configuration de la figure 1 de l’article, `viewer` inclut `editor`, `editor` inclut `owner`, et les lecteurs du dossier `parent` sont lecteurs du document. Le serveur B a donc quatre ensembles de tuples du readme à lire.
 
 <Graph
   width={640}
@@ -210,16 +210,16 @@ Prenons maintenant une vérification qui touche plusieurs relations d’un même
     { from: "p", to: "b" },
     { from: "b", to: "db", label: "moins de RPC", on: true },
   ]}
-  caption="Check(user:chen, viewer, doc:readme). Les quatre feuilles démarrent en même temps ; leurs lectures partent ensemble."
+  caption="Check(user:chen, viewer, doc:readme). Les quatre feuilles démarrent en même temps ; leurs lectures partent ensemble."
 />
 
-Les feuilles s’exécutent simultanément : « we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled. » (nous évaluons simultanément tous les nœuds feuilles de l’arbre d’expression booléenne. Lorsque l’issue d’un nœud détermine le résultat d’un sous-arbre, l’évaluation des autres nœuds du sous-arbre est annulée.) (§3.2.3) Leurs lectures sont regroupées : « We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner. » (Nous appliquons un mécanisme de regroupement des lectures d’une même vérification d’ACL afin de minimiser le nombre de RPC de lecture vers Spanner.) (§3.2.3) Le tuple parent pointe ensuite vers `folder:A`, et `folder:A#viewer` est transmis au serveur responsable de `folder:A`, où Chen est trouvé. L’article ne précise pas en combien de RPC un regroupement se traduit ; il ne va pas au-delà de « fewer » (moins).
+Les feuilles s’exécutent simultanément : « we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled. » (nous évaluons simultanément tous les nœuds feuilles de l’arbre d’expression booléenne. Lorsque l’issue d’un nœud détermine le résultat d’un sous-arbre, l’évaluation des autres nœuds du sous-arbre est annulée.) (§3.2.3) Leurs lectures sont regroupées : « We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner. » (Nous appliquons un mécanisme de regroupement des lectures d’une même vérification d’ACL afin de minimiser le nombre de RPC de lecture vers Spanner.) (§3.2.3) Le tuple parent pointe ensuite vers `folder:A`, et `folder:A#viewer` est transmis au serveur responsable de `folder:A`, où Chen est trouvé. L’article ne précise pas en combien de RPC un regroupement se traduit ; il ne va pas au-delà de « fewer » (moins).
 
-La disposition des tuples rend cela peu coûteux : l’ordre de la clé primaire « allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair » (nous permet de rechercher tous les tuples de relation d’un identifiant d’objet ou d’une paire *(identifiant d’objet, relation)* donnés) (§3.1.1, voir [Stockage](#stockage) ci-dessous).
+La disposition des tuples rend cela peu coûteux : l’ordre de la clé primaire « allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair » (nous permet de rechercher tous les tuples de relation d’un identifiant d’objet ou d’une paire *(identifiant d’objet, relation)* donnés) (§3.1.1, voir [Stockage](#stockage) ci-dessous).
 
 ### Les lectures lentes vers Spanner font l’objet de requêtes de couverture
 
-Certaines lectures seront lentes pour des raisons sans rapport avec la requête. Pour les appels à Spanner et à Leopard, Zanzibar utilise des requêtes de couverture (hedging), d’après [Dean et Barroso, « The Tail at Scale » (CACM, 2013)](https://research.google/pubs/the-tail-at-scale/), la référence [16] de l’article. Quand la seconde requête part-elle ?
+Certaines lectures seront lentes pour des raisons sans rapport avec la requête. Pour les appels à Spanner et à Leopard, Zanzibar utilise des requêtes de couverture (hedging), d’après [Dean et Barroso, « The Tail at Scale » (CACM, 2013)](https://research.google/pubs/the-tail-at-scale/), la référence [16] de l’article. Quand la seconde requête part-elle ?
 
 <Swimlane
   lanes={["aclserver", "réplique Spanner 1", "réplique Spanner 2"]}
@@ -227,7 +227,7 @@ Certaines lectures seront lentes pour des raisons sans rapport avec la requête.
   rowHeight={58}
   timeLabel="temps"
   title="Une lecture de couverture différée"
-  desc="L’aclserver envoie une lecture à la réplique Spanner 1, qui est lente. Une fois le délai de couverture écoulé, l’aclserver envoie la même lecture à la réplique 2. La réplique 2 répond la première ; l’aclserver utilise cette réponse et annule la lecture sur la réplique 1."
+  desc="L’aclserver envoie une lecture à la réplique Spanner 1, qui est lente. Une fois le délai de couverture écoulé, l’aclserver envoie la même lecture à la réplique 2. La réplique 2 répond la première ; l’aclserver utilise cette réponse et annule la lecture sur la réplique 1."
   events={[
     { lane: 0, t: 0, label: "envoie la lecture", kind: "read" },
     { lane: 1, t: 0, label: "lente", kind: "bad" },
@@ -246,24 +246,24 @@ Certaines lectures seront lentes pour des raisons sans rapport avec la requête.
   caption="La requête de couverture n’est envoyée qu’une fois la première lecture reconnue comme lente."
 />
 
-Le hedging consiste en ceci : « we send the same request to multiple servers, use whichever response comes back first, and cancel the other requests » (nous envoyons la même requête à plusieurs serveurs, utilisons la première réponse reçue et annulons les autres requêtes) (§3.2.7). La seconde requête attend : « we first send one request and defer sending hedged requests until the initial request is known to be slow » (nous envoyons d’abord une requête et différons l’envoi des requêtes de couverture jusqu’à ce que la requête initiale soit reconnue comme lente), le délai étant fixé par un estimateur de la « *N*th percentile latency based on recent measurements » (latence au *N*-ième centile d’après les mesures récentes) (§3.2.7). En production, « 1% of Spanner reads, or 200K reads per second, benefit from hedging » (1% des lectures Spanner, soit 200K lectures par seconde, bénéficient des requêtes de couverture) (§4.4).
+Le hedging consiste en ceci : « we send the same request to multiple servers, use whichever response comes back first, and cancel the other requests » (nous envoyons la même requête à plusieurs serveurs, utilisons la première réponse reçue et annulons les autres requêtes) (§3.2.7). La seconde requête attend : « we first send one request and defer sending hedged requests until the initial request is known to be slow » (nous envoyons d’abord une requête et différons l’envoi des requêtes de couverture jusqu’à ce que la requête initiale soit reconnue comme lente), le délai étant fixé par un estimateur de la « *N*th percentile latency based on recent measurements » (latence au *N*-ième centile d’après les mesures récentes) (§3.2.7). En production, « 1% of Spanner reads, or 200K reads per second, benefit from hedging » (1% des lectures Spanner, soit 200K lectures par seconde, bénéficient des requêtes de couverture) (§4.4).
 
 <Callout kind="note" title="Pas entre aclservers">
-Zanzibar ne couvre pas ses propres appels internes. Les vérifications diffèrent en coût : « Hedging check requests would result in duplicating the most expensive workloads and, ironically, worsening latency. » (Couvrir les requêtes de vérification reviendrait à dupliquer les charges de travail les plus coûteuses et, ironiquement, à dégrader la latence.) (§3.2.7) Il s’appuie plutôt sur les répliques et la surveillance pour éviter les serveurs lents.
+Zanzibar ne couvre pas ses propres appels internes. Les vérifications diffèrent en coût : « Hedging check requests would result in duplicating the most expensive workloads and, ironically, worsening latency. » (Couvrir les requêtes de vérification reviendrait à dupliquer les charges de travail les plus coûteuses et, ironiquement, à dégrader la latence.) (§3.2.7) Il s’appuie plutôt sur les répliques et la surveillance pour éviter les serveurs lents.
 </Callout>
 
 ### Chaque client est cantonné
 
-Un service partagé doit empêcher un client de ralentir les autres. Le §3.2.6 énumère quatre limites :
+Un service partagé doit empêcher un client de ralentir les autres. Le §3.2.6 énumère quatre limites :
 
-- CPU : chaque RPC est évalué en « generic *cpu-seconds* » (*cpu-secondes* génériques) ; chaque client a une limite globale de CPU, et « its RPCs will be throttled if it exceeds the limit *and* there is no spare capacity in the overall system. » (ses RPC seront ralentis s’il dépasse la limite *et* qu’il n’y a pas de capacité disponible dans l’ensemble du système.)
-- RPC en cours : chaque serveur limite leur nombre total, ainsi que leur nombre par client.
-- Spanner : « the maximum number of concurrent reads per *(object, client)* and per client on each Spanner server. » (le nombre maximal de lectures simultanées par *(objet, client)* et par client sur chaque serveur Spanner.)
-- Tables de verrous : « different lock table keys for requests from different clients » (des clés de table de verrous différentes pour les requêtes de clients différents), afin que le ralentissement d’un client par Spanner ne bloque pas un autre client.
+- CPU : chaque RPC est évalué en « generic *cpu-seconds* » (*cpu-secondes* génériques) ; chaque client a une limite globale de CPU, et « its RPCs will be throttled if it exceeds the limit *and* there is no spare capacity in the overall system. » (ses RPC seront ralentis s’il dépasse la limite *et* qu’il n’y a pas de capacité disponible dans l’ensemble du système.)
+- RPC en cours : chaque serveur limite leur nombre total, ainsi que leur nombre par client.
+- Spanner : « the maximum number of concurrent reads per *(object, client)* and per client on each Spanner server. » (le nombre maximal de lectures simultanées par *(objet, client)* et par client sur chaque serveur Spanner.)
+- Tables de verrous : « different lock table keys for requests from different clients » (des clés de table de verrous différentes pour les requêtes de clients différents), afin que le ralentissement d’un client par Spanner ne bloque pas un autre client.
 
 ## Le chemin Watch
 
-Les écritures alimentent aussi un flux. Où va un changement après qu’Anne a écrit un tuple ?
+Les écritures alimentent aussi un flux. Où va un changement après qu’Anne a écrit un tuple ?
 
 <Graph
   width={640}
@@ -287,20 +287,20 @@ Les écritures alimentent aussi un flux. Où va un changement après qu’Anne a
     { from: "watch", to: "cl", label: "changements" },
     { from: "watch", to: "leo" },
   ]}
-  caption="Le tuple et son entrée de journal des modifications sont validés dans une seule transaction : le flux ne peut donc ni manquer une écriture, ni en montrer une qui n’a pas été validée."
+  caption="Le tuple et son entrée de journal des modifications sont validés dans une seule transaction : le flux ne peut donc ni manquer une écriture, ni en montrer une qui n’a pas été validée."
 />
 
-« Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction. » (Chaque écriture Zanzibar est validée à la fois dans le stockage des tuples et dans le fragment du journal des modifications, en une seule transaction.) Le serveur Spanner qui héberge le fragment du journal des modifications joue le rôle de coordinateur de transaction « to minimize blocking of changelog reads on pending transactions » (afin de minimiser le blocage des lectures du journal des modifications sur les transactions en attente) (§3.1.2). Leopard est l’un des consommateurs de ce flux : son indexeur incrémental « calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications » (appelle l’API Watch de Zanzibar pour recevoir un flux, ordonné dans le temps, des modifications de tuples de Zanzibar) (§3.2.4).
+« Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction. » (Chaque écriture Zanzibar est validée à la fois dans le stockage des tuples et dans le fragment du journal des modifications, en une seule transaction.) Le serveur Spanner qui héberge le fragment du journal des modifications joue le rôle de coordinateur de transaction « to minimize blocking of changelog reads on pending transactions » (afin de minimiser le blocage des lectures du journal des modifications sur les transactions en attente) (§3.1.2). Leopard est l’un des consommateurs de ce flux : son indexeur incrémental « calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications » (appelle l’API Watch de Zanzibar pour recevoir un flux, ordonné dans le temps, des modifications de tuples de Zanzibar) (§3.2.4).
 
 ## Stockage
 
-Quelles bases de données existe-t-il, et à quoi ressemble une ligne ? Il y en a de trois sortes (§3).
+Quelles bases de données y a-t-il, et à quoi ressemble une ligne ? Il y en a de trois sortes (§3).
 
 <Graph
   width={640}
   height={300}
   title="Les bases de données Spanner de Zanzibar"
-  desc="Une base de données par espace de noms contient les tuples de relation : ici doc, group et folder. Une base unique de configurations d’espaces de noms contient les configurations et un journal des modifications des configurations. Une base unique de journal des modifications, partagée par tous les espaces de noms, enregistre les mises à jour de tuples. Les aclservers lisent et écrivent les bases de tuples, chargent et surveillent la base des configurations, et ajoutent des entrées au journal des modifications."
+  desc="Une base de données par espace de noms contient les tuples de relation : ici doc, group et folder. Une base unique de configurations d’espaces de noms contient les configurations et un journal des modifications des configurations. Une base unique de journal des modifications, partagée par tous les espaces de noms, enregistre les mises à jour de tuples. Les aclservers lisent et écrivent les bases de tuples, chargent et surveillent la base des configurations, et ajoutent des entrées au journal des modifications."
   nodes={[
     { id: "doc", x: 90, y: 60, label: "tuples doc", kind: "store" },
     { id: "grp", x: 90, y: 150, label: "tuples group", kind: "store" },
@@ -319,7 +319,7 @@ Quelles bases de données existe-t-il, et à quoi ressemble une ligne ? Il y en 
   caption="Une base de tuples par espace de noms (à gauche), une base de configurations et un journal des modifications partagés par tous les espaces de noms (à droite)."
 />
 
-**Bases de tuples.** « We store relation tuples of each namespace in a separate database, where each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*. » (Nous stockons les tuples de relation de chaque espace de noms dans une base de données distincte, où chaque ligne est identifiée par la clé primaire *(identifiant de fragment, identifiant d’objet, relation, utilisateur, horodatage de validation)*.) (§3.1.1) Comme l’horodatage de validation fait partie de la clé, les anciennes versions restent sur leurs propres lignes, « so that we can evaluate checks and reads at any timestamp within the garbage collection window » (de sorte que nous puissions évaluer les vérifications et les lectures à n’importe quel horodatage compris dans la fenêtre de ramasse-miettes). Les tuples de l’exemple suivi se trouveraient ainsi dans les bases `doc` et `group` :
+**Bases de tuples.** « We store relation tuples of each namespace in a separate database, where each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*. » (Nous stockons les tuples de relation de chaque espace de noms dans une base de données distincte, où chaque ligne est identifiée par la clé primaire *(identifiant de fragment, identifiant d’objet, relation, utilisateur, horodatage de validation)*.) (§3.1.1) Comme l’horodatage de validation fait partie de la clé, les anciennes versions restent sur leurs propres lignes, « so that we can evaluate checks and reads at any timestamp within the garbage collection window » (de sorte que nous puissions évaluer les vérifications et les lectures à n’importe quel horodatage compris dans la fenêtre de ramasse-miettes). Les tuples de l’exemple suivi se trouveraient ainsi dans les bases `doc` et `group` :
 
 | Base de données | identifiant de fragment | identifiant d’objet | relation | utilisateur | horodatage de validation |
 | --- | --- | --- | --- | --- | --- |
@@ -328,43 +328,43 @@ Quelles bases de données existe-t-il, et à quoi ressemble une ligne ? Il y en 
 | `doc` | *s*(readme) | `readme` | `viewer` | `group:eng#member` | *t*₃ |
 | `group` | *s*(eng) | `eng` | `member` | `user:beto` | *t*₄ |
 
-Les lignes d’un même objet sont triées ensemble ; l’article indique que cet ordre de clé « allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair » (nous permet de rechercher tous les tuples de relation d’un identifiant d’objet ou d’une paire *(identifiant d’objet, relation)* donnés). « Usually the shard ID is determined solely by the object ID » (En général, l’identifiant de fragment est déterminé uniquement par l’identifiant d’objet) ; pour les groupes comptant de très nombreux membres, il peut être « computed from both object ID and user » (calculé à partir de l’identifiant d’objet et de l’utilisateur) (§3.1.1). L’article ne donne pas la fonction de fragmentation : *s*(…) ci-dessus est donc un substitut, et l’encodage exact de la colonne utilisateur n’est pas décrit non plus.
+Les lignes d’un même objet sont triées ensemble ; l’article indique que cet ordre de clé « allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair » (nous permet de rechercher tous les tuples de relation d’un identifiant d’objet ou d’une paire *(identifiant d’objet, relation)* donnés). « Usually the shard ID is determined solely by the object ID » (En général, l’identifiant de fragment est déterminé uniquement par l’identifiant d’objet) ; pour les groupes comptant de très nombreux membres, il peut être « computed from both object ID and user » (calculé à partir de l’identifiant d’objet et de l’utilisateur) (§3.1.1). L’article ne donne pas la fonction de fragmentation : *s*(…) ci-dessus est donc un substitut, et l’encodage exact de la colonne utilisateur n’est pas décrit non plus.
 
-**Journal des modifications.** Une base de données pour tous les espaces de noms, dont la clé est *(identifiant de fragment du journal des modifications, horodatage, identifiant unique de mise à jour)*, « where a changelog shard is randomly selected for each write » (où un fragment du journal des modifications est sélectionné aléatoirement pour chaque écriture) (§3.1.2).
+**Journal des modifications.** Une base de données pour tous les espaces de noms, dont la clé est *(identifiant de fragment du journal des modifications, horodatage, identifiant unique de mise à jour)*, « where a changelog shard is randomly selected for each write » (où un fragment du journal des modifications est sélectionné aléatoirement pour chaque écriture) (§3.1.2).
 
-**Configurations d’espaces de noms.** Une base de données comportant deux tables : les configurations, « keyed by namespace IDs » (ayant pour clé les identifiants d’espaces de noms), et « a changelog of config updates » (un journal des modifications des configurations), « keyed by commit timestamps » (ayant pour clé les horodatages de validation). Un serveur charge toutes les configurations au démarrage, puis suit ce journal des modifications (§3.1.3).
+**Configurations d’espaces de noms.** Une base de données comportant deux tables : les configurations, « keyed by namespace IDs » (ayant pour clé les identifiants d’espaces de noms), et « a changelog of config updates » (un journal des modifications des configurations), « keyed by commit timestamps » (ayant pour clé les horodatages de validation). Un serveur charge toutes les configurations au démarrage, puis suit ce journal des modifications (§3.1.3).
 
-**Réplication.** « Replicas exist in dozens of locations around the world, with multiple replicas per region. The 5 voting replicas are in eastern and central United States, in 3 different metropolitan areas to isolate failures but within 25 milliseconds of each other so that Paxos transactions commit quickly. » (Des répliques existent dans des dizaines de sites à travers le monde, avec plusieurs répliques par région. Les 5 répliques votantes se trouvent dans l’est et le centre des États-Unis, dans 3 zones métropolitaines différentes afin d’isoler les pannes, mais à moins de 25 millisecondes les unes des autres afin que les transactions Paxos soient validées rapidement.) (§3.1.4) Spanner lui-même est décrit dans [Corbett et al. (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), la référence [15] de l’article.
+**Réplication.** « Replicas exist in dozens of locations around the world, with multiple replicas per region. The 5 voting replicas are in eastern and central United States, in 3 different metropolitan areas to isolate failures but within 25 milliseconds of each other so that Paxos transactions commit quickly. » (Des répliques existent dans des dizaines de sites à travers le monde, avec plusieurs répliques par région. Les 5 répliques votantes se trouvent dans l’est et le centre des États-Unis, dans 3 zones métropolitaines différentes afin d’isoler les pannes, mais à moins de 25 millisecondes les unes des autres afin que les transactions Paxos soient validées rapidement.) (§3.1.4) Spanner lui-même est décrit dans [Corbett et al. (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), la référence [15] de l’article.
 
 ## Chiffres d’exploitation
 
-Le §4 de l’article rapporte les chiffres suivants. Les pics par API et les latences proviennent de périodes de 7 jours en décembre 2018 (§4, §4.2) ; l’article ne rattache les autres chiffres à aucune période précise. Chaque cellule est citée telle qu’elle est écrite, suivie de sa traduction.
+Le §4 de l’article rapporte les chiffres suivants. Les pics par API et les latences proviennent de périodes de 7 jours en décembre 2018 (§4, §4.2) ; l’article ne rattache les autres chiffres à aucune période précise. Chaque cellule est citée telle qu’elle est écrite, suivie de sa traduction.
 
 | Quoi | Les termes de l’article | § |
 | --- | --- | --- |
-| Durée en production | « more than 5 years » (plus de 5 ans) | 4 |
-| Espaces de noms | « more than 1,500 namespaces defined by hundreds of client applications » (plus de 1 500 espaces de noms définis par des centaines d’applications clientes) | 4 |
-| Tuples | « more than 2 trillion relation tuples that occupy close to 100 terabytes » (plus de 2 000 milliards de tuples de relation occupant près de 100 téraoctets) | 4 |
-| Réplication | « fully replicated in more than 30 locations around the world » (entièrement répliqués dans plus de 30 sites à travers le monde) | 4 |
-| Charge client | « more than 10 million client queries per second (QPS) » (plus de 10 millions de requêtes client par seconde (QPS)) | 4 |
-| Pic par API | « Check requests peak at roughly 4.2M QPS, Read at 8.2M, Expand at 760K, and Write at 25K » (les requêtes Check culminent à environ 4.2M QPS, Read à 8.2M, Expand à 760K et Write à 25K) | 4 |
-| Serveurs | « more than 10,000 servers organized in several dozen clusters around the world » (plus de 10 000 serveurs organisés en plusieurs dizaines de clusters à travers le monde) | 4 |
-| Serveurs par cluster | « from fewer than 100 to more than 1,000, with the median near 500 » (de moins de 100 à plus de 1 000, avec une médiane proche de 500) | 4 |
-| Latence de Check Safe | « At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively. » (Aux 50e, 95e, 99e et 99.9e centiles, elle culmine respectivement à environ 3, 11, 20 et 93 ms.) | 4.2 |
-| Disponibilité | « above 99.999% over the past 3 years of operation at Google » (supérieure à 99.999% au cours des 3 dernières années d’exploitation chez Google) | 4.3 |
-| RPC internes | « 22 million internal “delegated” RPCs per second, split about evenly between reads and checks » (22 millions de RPC internes « délégués » par seconde, répartis à peu près également entre lectures et vérifications) | 4.4 |
-| Consultations du cache | « approximately 200 million lookups per second at peak, 150 million from checks and 50 million from reads » (environ 200 millions de consultations par seconde au pic, 150 millions provenant des vérifications et 50 millions des lectures) | 4.4 |
-| Lectures vers Spanner | « only 20 million read RPCs per second to Spanner » (seulement 20 millions de RPC de lecture par seconde vers Spanner) | 4.4 |
-| Latence de lecture Spanner | « 0.5 msec at the median, and 2 msec at the 95th percentile » (0.5 ms à la médiane et 2 ms au 95e centile) | 4.4 |
-| Lectures couvertes | « 1% of Spanner reads, or 200K reads per second, benefit from hedging » (1% des lectures Spanner, soit 200K lectures par seconde, bénéficient des requêtes de couverture) | 4.4 |
+| Durée en production | « more than 5 years » (plus de 5 ans) | 4 |
+| Espaces de noms | « more than 1,500 namespaces defined by hundreds of client applications » (plus de 1,500 espaces de noms définis par des centaines d’applications clientes) | 4 |
+| Tuples | « more than 2 trillion relation tuples that occupy close to 100 terabytes » (plus de 2 mille milliards de tuples de relation occupant près de 100 téraoctets) | 4 |
+| Réplication | « fully replicated in more than 30 locations around the world » (entièrement répliqués dans plus de 30 sites à travers le monde) | 4 |
+| Charge client | « more than 10 million client queries per second (QPS) » (plus de 10 millions de requêtes client par seconde (QPS)) | 4 |
+| Pic par API | « Check requests peak at roughly 4.2M QPS, Read at 8.2M, Expand at 760K, and Write at 25K » (les requêtes Check culminent à environ 4.2M QPS, Read à 8.2M, Expand à 760K et Write à 25K) | 4 |
+| Serveurs | « more than 10,000 servers organized in several dozen clusters around the world » (plus de 10,000 serveurs organisés en plusieurs dizaines de clusters à travers le monde) | 4 |
+| Serveurs par cluster | « from fewer than 100 to more than 1,000, with the median near 500 » (de moins de 100 à plus de 1,000, avec une médiane proche de 500) | 4 |
+| Latence de Check Safe | « At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively. » (Aux 50e, 95e, 99e et 99.9e centiles, elle culmine respectivement à environ 3, 11, 20 et 93 ms.) | 4.2 |
+| Disponibilité | « above 99.999% over the past 3 years of operation at Google » (supérieure à 99.999% au cours des 3 dernières années d’exploitation chez Google) | 4.3 |
+| RPC internes | « 22 million internal “delegated” RPCs per second, split about evenly between reads and checks » (22 millions de RPC internes « délégués » par seconde, répartis à peu près également entre lectures et vérifications) | 4.4 |
+| Consultations du cache | « approximately 200 million lookups per second at peak, 150 million from checks and 50 million from reads » (environ 200 millions de consultations par seconde au pic, 150 millions provenant des vérifications et 50 millions des lectures) | 4.4 |
+| Lectures vers Spanner | « only 20 million read RPCs per second to Spanner » (seulement 20 millions de RPC de lecture par seconde vers Spanner) | 4.4 |
+| Latence de lecture Spanner | « 0.5 msec at the median, and 2 msec at the 95th percentile » (0.5 ms à la médiane et 2 ms au 95e centile) | 4.4 |
+| Lectures couvertes | « 1% of Spanner reads, or 200K reads per second, benefit from hedging » (1% des lectures Spanner, soit 200K lectures par seconde, bénéficient des requêtes de couverture) | 4.4 |
 
-Le rapport des dernières lignes est parlant : 200 millions de consultations du cache par seconde contre 20 millions de RPC de lecture vers Spanner, soit environ dix consultations en mémoire pour chaque lecture envoyée au stockage.
+Le rapport des dernières lignes est parlant : 200 millions de consultations du cache par seconde contre 20 millions de RPC de lecture vers Spanner, soit environ dix consultations en mémoire pour chaque lecture envoyée au stockage.
 
 ## Sources
 
-- Pang et al., « Zanzibar: Google's Consistent, Global Authorization System », USENIX ATC '19, §3, §3.1, §3.2.3, §3.2.5–§3.2.7, §4 : [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
-- Karger et al., « Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the World Wide Web », STOC '97 (réf. [20] de l’article) : [https://people.csail.mit.edu/karger/Papers/web.pdf](https://people.csail.mit.edu/karger/Papers/web.pdf)
-- Dean et Barroso, « The Tail at Scale », Communications of the ACM 56(2), 2013 (réf. [16] de l’article) : [https://research.google/pubs/the-tail-at-scale/](https://research.google/pubs/the-tail-at-scale/)
-- « Cache stampede », Wikipédia, tel que cité par l’article (réf. [3]) : [https://en.wikipedia.org/wiki/Cache_stampede](https://en.wikipedia.org/wiki/Cache_stampede)
-- Adya et al., « Slicer: Auto-sharding for datacenter applications », OSDI '16 (réf. [12] de l’article) : [https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya)
-- Corbett et al., « Spanner: Google's globally-distributed database », OSDI '12 (réf. [15] de l’article) : [https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
+- Pang et al., « Zanzibar: Google's Consistent, Global Authorization System », USENIX ATC '19, §3, §3.1, §3.2.3, §3.2.5–§3.2.7, §4 : [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- Karger et al., « Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the World Wide Web », STOC '97 (réf. [20] de l’article) : [https://people.csail.mit.edu/karger/Papers/web.pdf](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- Dean et Barroso, « The Tail at Scale », Communications of the ACM 56(2), 2013 (réf. [16] de l’article) : [https://research.google/pubs/the-tail-at-scale/](https://research.google/pubs/the-tail-at-scale/)
+- « Cache stampede », Wikipédia, tel que cité par l’article (réf. [3]) : [https://en.wikipedia.org/wiki/Cache_stampede](https://en.wikipedia.org/wiki/Cache_stampede)
+- Adya et al., « Slicer: Auto-sharding for datacenter applications », OSDI '16 (réf. [12] de l’article) : [https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya)
+- Corbett et al., « Spanner: Google's globally-distributed database », OSDI '12 (réf. [15] de l’article) : [https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
