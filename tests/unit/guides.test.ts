@@ -15,7 +15,7 @@ const slugs = (lang: string) =>
 const read = (lang: string, slug: string) => readFileSync(join(ROOT, lang, `${slug}.mdx`), "utf8");
 const frontmatter = (src: string) => src.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? "";
 const field = (fm: string, name: string) => fm.match(new RegExp(`^${name}:\\s*(.*)$`, "m"))?.[1]?.trim();
-const components = (src: string) => [...src.matchAll(/<(Graph|Swimlane|Timeline|Callout)\b/g)].map((m) => m[1]);
+const components = (src: string) => [...src.matchAll(/<(Graph|Swimlane|Timeline|Frames|Callout)\b/g)].map((m) => m[1]);
 const codeBlocks = (src: string) => [...src.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((m) => m[1]);
 const nodeIds = (src: string) => [...src.matchAll(/\bid: "([^"]+)"/g)].map((m) => m[1]).sort();
 
