@@ -23,7 +23,7 @@ Alan Yao 與 Dipak Pawar、Blair Wu、Abhishek Parmar 合著的 "Himeji: A Scala
 
 ### 模型
 
-- "Similar to Zanzibar, the basic unit of storage for Himeji is a tuple in the form entity # relation @ principal."（與 Zanzibar 類似，Himeji 的基本儲存單位是 entity # relation @ principal 形式的元組。）實體是三元組 "(entity type : entity id : entity part)"（（實體型別 : 實體 ID : 實體部分））。
+- "Similar to Zanzibar, the basic unit of storage for Himeji is a tuple in the form entity # relation @ principal."（與 Zanzibar 類似，Himeji 的基本儲存單位是 entity # relation @ principal 形式的元組。）實體是三元組 "(entity type : entity id : entity part)"（實體型別 : 實體 ID : 實體部分）。
 - 文章的範例元組："LISTING : 10 # OWNER @ User(123)"。以這種記法，Anne 擁有 readme 會寫成 `DOC : readme # OWNER @ User(anne)`；這一行是說明用，並非出自文章。
 - 規則以 "a YAML-based configuration language that allows for the resolution of permissions checks via set algebra"（一種以 YAML 為基礎、可透過集合代數解析權限檢查的設定語言）撰寫。文章的範例將 listing 的 `WRITE` 檢查解析為 `WRITE` 與 `OWNER` 的聯集，將 `READ` 解析為 `READ` 與 `WRITE` 的聯集：也就是論文的同心關係（§2.3.1，圖 1）。
 - *參照元組*連結兩個實體，但不指名關係；要依循的關係來自設定。"Where this approach differs from Zanzibar is that such a tuple does not contain a relation."（這種做法與 Zanzibar 不同之處在於，這樣的元組不包含關係。）由於兩種實體型別之間的關係很少變化，文章表示這樣只需儲存約 N 筆元組，而非 N×M 筆。
@@ -37,11 +37,11 @@ Alan Yao 與 Dipak Pawar、Blair Wu、Abhishek Parmar 合著的 "Himeji: A Scala
   width={620}
   height={280}
   title="Himeji 的三層架構，依 Airbnb 的文章"
-  desc="資料服務呼叫協調層的 check API。協調層依設定取得資料，並以一致性雜湊將每次查找路由到某個快取分片。每個快取分片都有複本，每個可用區域一個實例，未命中時從資料層載入。資料層是邏輯分片的 Amazon Aurora 資料庫；資料庫發布的變動會使快取分片失效。"
+  desc="資料服務呼叫協調層的 check API。協調層依設定取得資料，並以一致性雜湊將每次查找路由到某個快取分片。每個快取分片都有副本，每個可用區域一個實例，未命中時從資料層載入。資料層是邏輯分片的 Amazon Aurora 資料庫；資料庫發布的變動會使快取分片失效。"
   nodes={[
     { id: "svc", x: 90, y: 60, label: "資料服務", kind: "client" },
     { id: "orch", x: 310, y: 60, label: "協調層", kind: "server" },
-    { id: "cache", x: 310, y: 215, label: "快取分片\n每個 AZ 1 個複本", kind: "server" },
+    { id: "cache", x: 310, y: 215, label: "快取分片\n每個 AZ 1 個副本", kind: "server" },
     { id: "db", x: 535, y: 215, label: "Amazon Aurora\n分片", kind: "store" },
   ]}
   edges={[
@@ -77,7 +77,7 @@ Carta 的 Aaron Tainter 發表了兩篇文章：2021-06-11 的 "AuthZ: Carta's h
 
 ### 索引與 ticket
 
-AuthZ 以預先計算的索引回答檢查，而不是走訪圖："Traversing the graph is expensive, so AuthZ maintains a custom secondary index."（走訪圖的成本很高，因此 AuthZ 維護一個自訂的次要索引。）此索引保存兩種集合：Actor Index Set（"the direct connections from actor leaf nodes"，來自行為者葉節點的直接連結）與 Object Index Set（"the direct and indirect connections to each object node"，通往每個物件節點的直接與間接連結）。第二篇補充："(Google's Zanzibar paper calls them Group2Group and Member2Group)"（（Google 的 Zanzibar 論文稱之為 Group2Group 與 Member2Group）），也就是 Leopard 的兩種集合類型（§3.2.4）。
+AuthZ 以預先計算的索引回答檢查，而不是走訪圖："Traversing the graph is expensive, so AuthZ maintains a custom secondary index."（走訪圖的成本很高，因此 AuthZ 維護一個自訂的次要索引。）此索引保存兩種集合：Actor Index Set（"the direct connections from actor leaf nodes"，來自行為者葉節點的直接連結）與 Object Index Set（"the direct and indirect connections to each object node"，通往每個物件節點的直接與間接連結）。第二篇補充："(Google's Zanzibar paper calls them Group2Group and Member2Group)"（Google 的 Zanzibar 論文稱之為 Group2Group 與 Member2Group），也就是 Leopard 的兩種集合類型（§3.2.4）。
 
 索引是非同步建立的，因此消費者需要一種方式得知自己的變更已經生效。這就是 *ticket* 的工作："During an update, AuthZ issues a Ticket (synonymous with a Zookie in Zanzibar) to the consumer."（在更新期間，AuthZ 會發給消費者一張 Ticket（等同於 Zanzibar 中的 Zookie）。）"A Ticket is an opaque token which represents the time at which the change was committed to AuthZ."（Ticket 是一個不透明的權杖，代表變更提交到 AuthZ 的時間。）
 

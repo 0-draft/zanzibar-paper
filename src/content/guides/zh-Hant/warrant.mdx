@@ -169,7 +169,7 @@ Warrant 的程式碼將其權杖稱為 *wookie*（[wookie](https://github.com/wa
 
 README 本身指出，在高吞吐量下達到低延遲 "requires running Warrant as a distributed service with the use of Warrant-Tokens (also referred to as Zookies in Google Zanzibar)"（需要將 Warrant 作為分散式服務執行，並使用 Warrant-Token（在 Google Zanzibar 中也稱為 Zookie）），而 "this open source version of Warrant is only capable of handling low-to-moderate throughput"（這個開源版本的 Warrant 只能處理低到中等的吞吐量）（[README](https://github.com/warrant-dev/warrant)，廠商撰寫）。其 Warrant-Token 的連結現在導向 WorkOS FGA 的一般概覽頁面，該頁面並未描述它們。
 
-請注意與論文的差異。zookie 設定的是下限，這讓 Zanzibar 能 "to choose any timestamp fresher than the one encoded in a zookie"（選擇任何比 zookie 中所編碼者更新鮮的時間戳記），並以 "at a default staleness with already replicated data"（預設陳舊度、使用已複製的資料）處理大多數檢查（§2.2）。`latest` 中沒有任何時間點：它將讀取移到主資料庫，那是最新的副本，但也就放棄了唯讀副本。
+請注意與論文的差異。zookie 設定的是下限，這讓 Zanzibar 能 "to choose any timestamp fresher than the one encoded in a zookie"（選擇任何比 zookie 中所編碼者更新鮮的時間戳記），並以 "at a default staleness with already replicated data"（預設陳舊度、使用已複製的資料）處理大多數檢查（§2.2）。`latest` 中沒有任何時間點：它將讀取移到主資料庫，那裡的資料最新，但也就放棄了副本。
 
 ## 與論文的差異
 

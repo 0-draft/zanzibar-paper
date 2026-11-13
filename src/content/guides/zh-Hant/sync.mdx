@@ -21,13 +21,13 @@ import Frames from "../../../components/diagram/Frames.astro";
 
 論文的協定經過設計，使唯一橫跨兩側的寫入在客戶端是原子的："The client stores the zookie with the content change in an atomic write to the client storage"（客戶端以一次原子寫入，將 zookie 與內容變更一起儲存至客戶端儲存區）（§2.2）。產生 zookie 的檢查是一次讀取；"the content-change check does not need to be evaluated in the same transaction as the application content modification"（內容變更檢查不需要與應用程式內容修改在同一筆交易中評估）（§2.2）。在 Zanzibar 內部，元組及其變更日誌項目是同一筆交易："Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction"（每一次 Zanzibar 寫入都會在單一交易中同時提交至元組儲存區與變更日誌分片）（§3.1.2），因此 Watch 不會漏掉任何已提交的寫入。
 
-論文並未說明 Google 的應用程式是否也保有「誰擁有這份文件」之類事實的自有複本，也未說明它們會如何調和這樣的複本。論文沒有討論這種情況。
+論文並未說明 Google 的應用程式是否也保有「誰擁有這份文件」之類事實的自有副本，也未說明它們會如何調和這樣的副本。論文沒有討論這種情況。
 
 大多數採用者的起點都不同。擁有者是 `documents` 表上的一個欄位；團隊成員資格是一張關聯表；計費席次存放在另一個服務中。於是同一項事實存在兩份，對它的每一次變更都是*雙重寫入*。
 
 ## 雙重寫入如何失敗
 
-AuthZed 關於這個主題的文章說得很直白："The dual-write problem presents itself in all distributed systems"（雙重寫入問題存在於所有分散式系統中）（[AuthZed, The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。兩次寫入的任何一種順序本身都不安全，因為程序可能在兩者之間停止。每種順序各會發生什麼事？
+AuthZed 關於這個主題的文章說得很直白："The dual-write problem presents itself in all distributed systems"（雙重寫入問題存在於所有分散式系統中）（[AuthZed, The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。兩次寫入的任何一種順序本身都不安全，因為行程可能在兩者之間停止。每種順序各會發生什麼事？
 
 <Frames>
 
@@ -49,7 +49,7 @@ AuthZed 關於這個主題的文章說得很直白："The dual-write problem pre
     { from: [0, 0], to: [1, 1] },
     { from: [0, 2], to: [2, 3], label: "從未送出", dashed: true },
   ]}
-  caption="遺失的撤銷會以開放的方式失敗，而應用程式中沒有任何地方會顯示出來。"
+  caption="遺失的撤銷會導致失敗時放行（fail open），而應用程式中沒有任何地方會顯示出來。"
 />
 
 <Swimlane
@@ -57,14 +57,14 @@ AuthZed 關於這個主題的文章說得很直白："The dual-write problem pre
   laneWidth={132}
   rowHeight={64}
   timeLabel="時間"
-  title="先寫元組，資料庫被回滾"
-  desc="Anne 讓 Beto 成為 readme 的編輯者。應用程式開啟一筆資料庫交易並插入一列分享紀錄，接著將 editor 元組寫入授權服務，然後在提交前當機。資料庫回滾，因此應用程式顯示沒有分享，但授權服務讓 Beto 能編輯。"
+  title="先寫元組，資料庫被復原"
+  desc="Anne 讓 Beto 成為 readme 的編輯者。應用程式開啟一筆資料庫交易並插入一列分享紀錄，接著將 editor 元組寫入授權服務，然後在提交前當機。資料庫復原，因此應用程式顯示沒有分享，但授權服務讓 Beto 能編輯。"
   events={[
     { lane: 0, t: 0, label: "Anne 讓 Beto\n成為編輯者", kind: "note" },
     { lane: 1, t: 1, label: "BEGIN，插入\n分享列", kind: "write" },
     { lane: 2, t: 2, label: "寫入 readme\neditor beto", kind: "write" },
     { lane: 0, t: 3, label: "COMMIT 前\n當機", kind: "bad" },
-    { lane: 1, t: 4, label: "已回滾：\n沒有分享列", kind: "bad" },
+    { lane: 1, t: 4, label: "已復原：\n沒有分享列", kind: "bad" },
     { lane: 2, t: 4, label: "Beto 可以編輯", kind: "bad" },
   ]}
   arrows={[
@@ -76,7 +76,7 @@ AuthZed 關於這個主題的文章說得很直白："The dual-write problem pre
 
 </Frames>
 
-請注意，左格對安全性而言是危險的，右格則是對信任而言：Beto 保有他應該失去的存取權，或者持有沒有人看得到、因而無從撤銷的存取權。右格正是 AuthZed 逐步說明的情況："we've written to SpiceDB but we haven't committed the transaction to our database, and now SpiceDB and our database disagree about the state of the world"（我們已經寫入 SpiceDB，但尚未將交易提交到我們的資料庫，現在 SpiceDB 與我們的資料庫對世界的狀態看法不一致）（[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。在請求處理程序中重試無法消除任何一個缺口，因為當機可能發生在重試之前。
+請注意，左格對安全性而言是危險的，右格則是對信任而言：Beto 保有他應該失去的存取權，或者持有沒有人看得到、因而無從撤銷的存取權。右格正是 AuthZed 逐步說明的情況："we've written to SpiceDB but we haven't committed the transaction to our database, and now SpiceDB and our database disagree about the state of the world"（我們已經寫入 SpiceDB，但尚未將交易提交到我們的資料庫，現在 SpiceDB 與我們的資料庫對世界的狀態看法不一致）（[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。在請求處理常式中重試無法消除任何一個缺口，因為當機可能發生在重試之前。
 
 ## 可選的做法
 
@@ -119,7 +119,7 @@ AuthZed 的文章列出了各種選擇：什麼都不做、頻外一致性檢查
   caption="沒有任何東西遺失，但變更抵達授權服務的時間晚於資料庫。"
 />
 
-請注意右側的紅色方框：outbox 保證變更會*抵達*，而不是*立即*抵達。在提交與中繼成功之間，舊的存取權依然有效。中繼也必須能容忍重複，因為用此模式自己的話來說，"The Message relay might publish a message more than once"（訊息中繼可能會將一則訊息發布不只一次）（[Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)）；AuthZed 提到 "SpiceDB allowing for idempotent writes with its TOUCH operation"（SpiceDB 透過其 TOUCH 操作允許冪等寫入），以及順序的問題："As long as this process is effectively single-threaded and retries operations until they succeed"（只要這個程序實際上是單執行緒的，並持續重試操作直到成功為止）（[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。若在較早的建立之前就套用刪除，會留下錯誤的狀態。
+請注意右側的紅色方框：outbox 保證變更會*抵達*，而不是*立即*抵達。在提交與中繼成功之間，舊的存取權依然有效。中繼也必須能容忍重複，因為用此模式自己的話來說，"The Message relay might publish a message more than once"（訊息中繼可能會將一則訊息發布不只一次）（[Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)）；AuthZed 提到 "SpiceDB allowing for idempotent writes with its TOUCH operation"（SpiceDB 透過其 TOUCH 操作允許冪等寫入），以及順序的問題："As long as this process is effectively single-threaded and retries operations until they succeed"（只要這個行程實際上是單執行緒的，並持續重試操作直到成功為止）（[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。若在較早的建立之前就套用刪除，會留下錯誤的狀態。
 
 ### 變更資料擷取
 
@@ -148,10 +148,10 @@ AuthZed 的文章列出了各種選擇：什麼都不做、頻外一致性檢查
     { from: "cons", to: "authz", label: "TOUCH /\nDELETE" },
   ]}
   minWidth={520}
-  caption="每一段都增加延遲；只有已提交的變更才會進入管線，因此被回滾的交易永遠不會變成元組。"
+  caption="每一段都增加延遲；只有已提交的變更才會進入管線，因此被復原的交易永遠不會變成元組。"
 />
 
-請注意第一段：由於 Debezium 讀取的是*已提交*的變更，上方右格的失敗情形不會發生。但重複仍然可能發生。Debezium 的 PostgreSQL 文件指出，"while it is recovering from the fault, it's possible that the connector might emit some duplicate change events"（在從故障中復原時，connector 可能會發出一些重複的變更事件），且 "consumers should always anticipate some duplicate events"（消費者應始終預期會有一些重複事件）（[Debezium PostgreSQL connector](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)）。其 outbox event router 是 outbox 加 CDC 組合的套裝形式："An outbox pattern implementation avoids inconsistencies between a service's internal state (as typically persisted in its database) and state in events consumed by services that need the same data"（outbox 模式的實作，可避免服務的內部狀態（通常持久化在其資料庫中）與需要相同資料之服務所消費的事件狀態之間出現不一致）（[Debezium, Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html)）。
+請注意第一段：由於 Debezium 讀取的是*已提交*的變更，上方右格的失敗情形不會發生。但重複仍然可能發生。Debezium 的 PostgreSQL 文件指出，"while it is recovering from the fault, it's possible that the connector might emit some duplicate change events"（在從故障中復原時，connector 可能會發出一些重複的變更事件），且 "consumers should always anticipate some duplicate events"（消費者應始終預期會有一些重複事件）（[Debezium PostgreSQL connector](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)）。其 outbox event router 是 outbox 加 CDC 組合的套裝形式："An outbox pattern implementation avoids inconsistencies between a service's internal state (as typically persisted in its database) and state in events consumed by services that need the same data"（outbox 模式的實作，可避免服務的內部狀態（通常持久儲存在其資料庫中）與需要相同資料之服務所消費的事件狀態之間出現不一致）（[Debezium, Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html)）。
 
 ## Watch 能驅動索引，但它不是佇列
 
@@ -248,7 +248,7 @@ zookie 協定需要客戶端做兩件事：在儲存內容時請求一個 zookie
 
 請注意，工作 2 在工作 1 執行期間並未被阻塞；它直到嘗試提交時才得知衝突，然後以新的資料重新計算。這很適合同步工作，因為它們隨時都能從資料庫重新計算。
 
-<Callout kind="note" title="一種改寫，並未見於文件">
+<Callout kind="note" title="一種改編做法，文件中並無記載">
 
 SpiceDB 的 `WriteRelationships` 接受 `optional_preconditions`，且 "if any preconditions fail, the entire transaction will be reverted"（若任何前置條件失敗，整筆交易都會被還原）；前置條件是對某個關係篩選器的 `MUST_MATCH` 或 `MUST_NOT_MATCH`（[SpiceDB `permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)）。模仿論文鎖定元組的一種方式，是使用像 `doc:readme#lock@version:7` 這樣的關係，對它設定 `MUST_MATCH` 前置條件，並在同一次寫入中刪除版本 7、建立版本 8。這種構造是我們自己的，不在 SpiceDB 的文件中，也未實際執行。
 

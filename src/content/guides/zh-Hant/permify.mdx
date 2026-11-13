@@ -149,7 +149,7 @@ Permify 伺服器如何分擔工作，元組又存放在哪裡？
 - 伺服器預設監聽 HTTP 連接埠 3476 與 gRPC 連接埠 3478（[configuration](https://fusionauth.io/permify-docs/setting-up/configuration)）。資料庫區段接受分開的 `writer` 與 `reader` URI。
 - 每個 pod 都保有一個行程本地的 [Ristretto](https://github.com/dgraph-io/ristretto) 快取，存放檢查結果；"there is no shared cache layer"（沒有共用的快取層）（[cache](https://fusionauth.io/permify-docs/operations/cache)）。
 - 啟用 `distributed.enabled` 時，pod 會將每個請求雜湊到一致性雜湊環上，因此 "subsequent API calls with the same hash will retrieve the response from the instance 2, regardless of which instance that API called from"（具有相同雜湊值的後續 API 呼叫，無論從哪個實例呼叫，都會從實例 2 取得回應）。斷路器會在資料庫停機期間停止對它的呼叫。
-- PostgreSQL 以 MVCC 儲存元組：Permify 會 "a separate database snapshot for each write and delete operation"（為每次寫入與刪除操作建立一個獨立的資料庫快照），而選用的垃圾回收器會刪除舊版本。
+- PostgreSQL 以 MVCC 儲存元組：Permify 會建立 "a separate database snapshot for each write and delete operation"（為每次寫入與刪除操作各建立一個獨立的資料庫快照），而選用的垃圾回收器會刪除舊版本。
 - 每條 Watch 串流都會 "opens a long-lived connection with a continuous polling loop against the database"（開啟一條長期連線，並對資料庫進行持續的輪詢迴圈）（[Watch operations](https://fusionauth.io/permify-docs/operations/watch)）。
 
 ## 一致性

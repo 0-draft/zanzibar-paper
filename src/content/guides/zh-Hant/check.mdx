@@ -176,7 +176,7 @@ editor(readme, chen) =   this(readme#editor, chen)
 | 交集 `A ∩ B` | 任一子節點為假 → 假 | 真，才能回答真 |
 | 排除 `A − B` | 基底為假，或被排除方為真 → 假 | 基底為真且被排除方為假，才能回答真 |
 
-產品也遵循相同的邏輯。在 OpenFGA 的 [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go)（v1.22.1）中，聯集的 reducer 在第一個允許的結果時返回（"Short-circuit success"），交集的 reducer 在第一個不允許的結果時返回（"Short-circuit failure"），而排除的 reducer 同時執行基底與被減去的一方，並在 "base is false"（基底為假）或 "subtract is true"（被減去方為真）時返回不允許。AuthZed 關於交集與排除的文章（[2022-03-03](https://authzed.com/blog/check-it-out-2)）指出，對這些運算子 "SpiceDB can only partially short-circuit the subproblems"（SpiceDB 只能部分地短路子問題），而在其範例中，一旦交集的某個分支回答否，"SpiceDB was able to cancel the other `check` immediately"（SpiceDB 便能立即取消另一個 `check`）。對於聯集，其較早的文章（[2021-03-17](https://authzed.com/blog/check-it-out)）簡單地說："any path found suffices to grant permission!"（找到任何一條路徑就足以授予權限！）
+產品也遵循相同的邏輯。在 OpenFGA 的 [`check.go`](https://github.com/openfga/openfga/blob/v1.22.1/internal/graph/check.go)（v1.22.1）中，聯集的 reducer 在第一個允許的結果時傳回（"Short-circuit success"），交集的 reducer 在第一個不允許的結果時傳回（"Short-circuit failure"），而排除的 reducer 同時執行基底與被減去的一方，並在 "base is false"（基底為假）或 "subtract is true"（被減去方為真）時傳回不允許。AuthZed 關於交集與排除的文章（[2022-03-03](https://authzed.com/blog/check-it-out-2)）指出，對這些運算子 "SpiceDB can only partially short-circuit the subproblems"（SpiceDB 只能部分地短路子問題），而在其範例中，一旦交集的某個分支回答否，"SpiceDB was able to cancel the other `check` immediately"（SpiceDB 便能立即取消另一個 `check`）。對於聯集，其較早的文章（[2021-03-17](https://authzed.com/blog/check-it-out)）簡單地說："any path found suffices to grant permission!"（找到任何一條路徑就足以授予權限！）
 
 ## 在快照上快取子結果
 
