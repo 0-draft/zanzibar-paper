@@ -43,7 +43,7 @@ O Keto não começou como um sistema Zanzibar. O projeto do Zanzibar chegou na v
 | Leopard (§3.2.4) | Nenhum equivalente documentado |
 | Spanner (§3.1) | PostgreSQL, MySQL ou CockroachDB; SQLite apenas para desenvolvimento ([guia de produção](https://www.ory.com/docs/keto/guides/production)) |
 
-## O exemplo em curso em OPL
+## O exemplo recorrente em OPL
 
 A Figura 1 do artigo torna os donos editores, os editores visualizadores, e os visualizadores da pasta pai visualizadores do documento (§2.3.1). Em OPL, cada namespace é uma classe: `related` declara as relações e os tipos de sujeito que elas aceitam, e `permits` contém funções que retornam verdadeiro ou falso para `ctx.subject`.
 
@@ -95,7 +95,7 @@ class Doc implements Namespace {
 Esta configuração segue a sintaxe documentada em 2026-11-13: a [referência da OPL](https://www.ory.com/docs/keto/reference/ory-permission-language), a [especificação da OPL](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md) no repositório e o exemplo dos mantenedores [namespaces.keto.ts](https://github.com/ory/keto/blob/master/contrib/rewrites-example/namespaces.keto.ts). Ela não foi carregada no Keto.
 </Callout>
 
-As cinco tuplas do exemplo em curso, na forma textual do Keto. Um sujeito escrito como `User:anne` é um subject set com relação vazia; as tuplas de exemplo dos mantenedores escrevem os usuários dessa forma ([tuples.json](https://github.com/ory/keto/blob/master/contrib/rewrites-example/relation-tuples/tuples.json)).
+As cinco tuplas do exemplo recorrente, na forma textual do Keto. Um sujeito escrito como `User:anne` é um subject set com relação vazia; as tuplas de exemplo dos mantenedores escrevem os usuários dessa forma ([tuples.json](https://github.com/ory/keto/blob/master/contrib/rewrites-example/relation-tuples/tuples.json)).
 
 ```text
 Doc:readme#owners@User:anne
@@ -110,7 +110,7 @@ Qual tupla e qual expressão da OPL decidem o acesso de cada pessoa ao readme?
 <Graph
   width={600}
   height={260}
-  title="O exemplo em curso como tuplas de relação do Keto"
+  title="O exemplo recorrente como tuplas de relação do Keto"
   desc="Cinco tuplas de relação. User:anne está em owners de Doc:readme. User:beto está em members de Group:eng. Group:eng#members está em viewers de Doc:readme. Folder:A está em parents de Doc:readme. User:chen está em viewers de Folder:A. O caminho de Chen passando por Folder:A está destacado: ele é resolvido por traverse sobre parents."
   nodes={[
     { id: "anne", x: 80, y: 50, label: "User:anne", kind: "subject", mono: true },
@@ -130,7 +130,7 @@ Qual tupla e qual expressão da OPL decidem o acesso de cada pessoa ao readme?
   caption="Anne: owners → permits.edit → view. Beto: o subject set Group:eng#members. Chen: parents.traverse(p => p.permits.view). Tracejado: um subject set."
 />
 
-Observe que apenas as setas são armazenadas. Cada passo que transforma um dono em visualizador, ou um visualizador da pasta em visualizador do documento, vive nas funções `permits` e é executado no momento da verificação.
+Observe que apenas as setas são armazenadas. Cada passo que transforma um dono em visualizador, ou um visualizador da pasta em visualizador do documento, fica nas funções `permits` e é executado no momento da verificação.
 
 ## Arquitetura
 

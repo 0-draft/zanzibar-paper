@@ -44,7 +44,7 @@ Que caixas existem e em que direção os dados fluem entre elas? O artigo respon
     { from: "cfg", to: "acl", label: "carga" },
     { from: "acl", to: "tup", label: "leitura, escrita", dir: "both", labelOffset: 12 },
     { from: "acl", to: "log", label: "acréscimo", labelOffset: -12 },
-    { from: "log", to: "watch", label: "tail" },
+    { from: "log", to: "watch", label: "acompanha" },
     { from: "watch", to: "wcl", label: "Watch" },
     { from: "watch", to: "leo", label: "alterações" },
     { from: "tup", to: "pipe", label: "dump,\nGC", dir: "both", labelOffset: -24 },
@@ -213,7 +213,7 @@ Agora considere uma verificação que envolve várias relações de um mesmo obj
   caption="Check(user:chen, viewer, doc:readme). As quatro folhas começam ao mesmo tempo; suas leituras saem juntas."
 />
 
-As folhas são executadas concorrentemente: "we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled." (avaliamos todos os nós folha da árvore de expressão booleana concorrentemente. Quando o resultado de um nó determina o resultado de uma subárvore, a avaliação dos demais nós da subárvore é cancelada.) (§3.2.3) Suas leituras são agrupadas: "We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner." (Aplicamos um mecanismo de pooling para agrupar as leituras de uma mesma verificação de ACL, a fim de minimizar o número de RPCs de leitura ao Spanner.) (§3.2.3) A tupla parent então aponta para `folder:A`, e `folder:A#viewer` é encaminhada ao servidor responsável por `folder:A`, onde Chen é encontrado. O artigo não diz em quantas RPCs um pool se transforma; "menos" é tudo o que ele afirma.
+As folhas são executadas concorrentemente: "we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled." (avaliamos todos os nós folha da árvore de expressão booleana concorrentemente. Quando o resultado de um nó determina o resultado de uma subárvore, a avaliação dos demais nós da subárvore é cancelada.) (§3.2.3) Suas leituras são agrupadas: "We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner." (Aplicamos um mecanismo de pooling para agrupar as leituras de uma mesma verificação de ACL, a fim de minimizar o número de RPCs de leitura ao Spanner.) (§3.2.3) A tupla parent então aponta para `folder:A`, e `folder:A#viewer` é encaminhada ao servidor responsável por `folder:A`, onde Chen é encontrado. O artigo não diz em quantas RPCs um pool se transforma; “menos” é tudo o que ele afirma.
 
 A disposição das tuplas torna isso barato: a ordem da chave primária "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair" (permite-nos consultar todas as tuplas de relação de um dado ID de objeto ou par *(ID de objeto, relação)*) (§3.1.1, veja [Armazenamento](#armazenamento) abaixo).
 
@@ -283,7 +283,7 @@ As escritas também alimentam um fluxo. Para onde vai uma alteração depois que
     { from: "w", to: "acl", label: "tupla" },
     { from: "acl", to: "tup", label: "mesma txn", labelOffset: -10 },
     { from: "acl", to: "log", label: "mesma txn", labelOffset: 10 },
-    { from: "log", to: "watch", label: "tail", on: true },
+    { from: "log", to: "watch", label: "acompanha", on: true },
     { from: "watch", to: "cl", label: "alterações" },
     { from: "watch", to: "leo" },
   ]}
@@ -346,14 +346,14 @@ A §4 do artigo relata estes números. Os picos por API e as latências vêm de 
 | Namespaces | "more than 1,500 namespaces defined by hundreds of client applications" (mais de 1.500 namespaces definidos por centenas de aplicações clientes) | 4 |
 | Tuplas | "more than 2 trillion relation tuples that occupy close to 100 terabytes" (mais de 2 trilhões de tuplas de relação que ocupam cerca de 100 terabytes) | 4 |
 | Replicação | "fully replicated in more than 30 locations around the world" (totalmente replicados em mais de 30 locais ao redor do mundo) | 4 |
-| Carga dos clientes | "more than 10 million client queries per second (QPS)" (mais de 10 milhões de consultas de clientes por segundo (QPS)) | 4 |
+| Carga dos clientes | "more than 10 million client queries per second (QPS)" (mais de 10 milhões de consultas de clientes por segundo, QPS) | 4 |
 | Pico por API | "Check requests peak at roughly 4.2M QPS, Read at 8.2M, Expand at 760K, and Write at 25K" (as requisições Check atingem pico de aproximadamente 4,2 milhões de QPS, Read de 8,2 milhões, Expand de 760 mil e Write de 25 mil) | 4 |
 | Servidores | "more than 10,000 servers organized in several dozen clusters around the world" (mais de 10.000 servidores organizados em várias dezenas de clusters ao redor do mundo) | 4 |
 | Servidores por cluster | "from fewer than 100 to more than 1,000, with the median near 500" (de menos de 100 a mais de 1.000, com mediana próxima de 500) | 4 |
 | Latência de Check Safe | "At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively." (Nos percentis 50, 95, 99 e 99,9, ela atinge pico de aproximadamente 3, 11, 20 e 93 ms, respectivamente.) | 4.2 |
 | Disponibilidade | "above 99.999% over the past 3 years of operation at Google" (acima de 99,999% ao longo dos últimos 3 anos de operação no Google) | 4.3 |
 | RPCs internas | "22 million internal “delegated” RPCs per second, split about evenly between reads and checks" (22 milhões de RPCs internas “delegadas” por segundo, divididas de forma aproximadamente igual entre leituras e verificações) | 4.4 |
-| Consultas ao cache | "approximately 200 million lookups per second at peak, 150 million from checks and 50 million from reads" (aproximadamente 200 milhões de consultas por segundo no pico, 150 milhões de verificações e 50 milhões de leituras) | 4.4 |
+| Consultas ao cache | "approximately 200 million lookups per second at peak, 150 million from checks and 50 million from reads" (aproximadamente 200 milhões de consultas por segundo no pico, 150 milhões vindas de verificações e 50 milhões vindas de leituras) | 4.4 |
 | Leituras ao Spanner | "only 20 million read RPCs per second to Spanner" (apenas 20 milhões de RPCs de leitura por segundo ao Spanner) | 4.4 |
 | Latência de leitura do Spanner | "0.5 msec at the median, and 2 msec at the 95th percentile" (0,5 ms na mediana e 2 ms no 95º percentil) | 4.4 |
 | Leituras com hedging | "1% of Spanner reads, or 200K reads per second, benefit from hedging" (1% das leituras ao Spanner, ou 200 mil leituras por segundo, se beneficiam do hedging) | 4.4 |

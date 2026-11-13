@@ -47,9 +47,9 @@ Cada linha nomeia um conceito do artigo e o que o Permify documenta de mais pró
 
 O Permify também tem chamadas de consulta que o artigo não descreve: `LookupEntity`, `LookupSubject` e `SubjectPermission`.
 
-## O exemplo em curso no Permify Schema
+## O exemplo recorrente no Permify Schema
 
-A Figura 1 do artigo dá aos documentos três relações concêntricas: donos são editores, editores são visualizadores, e os visualizadores da pasta pai são visualizadores do documento (§2.3.1). Eis esse modelo com os tipos do exemplo em curso, no Permify Schema.
+A Figura 1 do artigo dá aos documentos três relações concêntricas: donos são editores, editores são visualizadores, e os visualizadores da pasta pai são visualizadores do documento (§2.3.1). Eis esse modelo com os tipos do exemplo recorrente, no Permify Schema.
 
 ```text
 entity user {}
@@ -81,7 +81,7 @@ entity doc {
 Este schema segue a sintaxe documentada em 2026-11-13: a [página de modelagem](https://fusionauth.io/permify-docs/getting-started/modeling) e o exemplo dos mantenedores [google-docs-simplified.yaml](https://github.com/Permify/permify/blob/master/assets/example-shapes/google-docs-simplified.yaml). Ele não foi passado pelo validador do Permify.
 </Callout>
 
-O exemplo em curso tem cinco tuplas:
+O exemplo recorrente tem cinco tuplas:
 
 ```text
 doc:readme#owner@user:anne
@@ -96,7 +96,7 @@ Quais tuplas armazenadas e quais regras dão a cada uma das três pessoas acesso
 <Graph
   width={600}
   height={260}
-  title="O exemplo em curso como relacionamentos do Permify"
+  title="O exemplo recorrente como relacionamentos do Permify"
   desc="Cinco relacionamentos. user:anne é owner de doc:readme. user:beto é member de group:eng. group:eng#member é viewer de doc:readme. folder:A é parent de doc:readme. user:chen é viewer de folder:A. O caminho de Chen pela pasta A até o readme está destacado: ele é resolvido pela regra parent.view."
   nodes={[
     { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
@@ -148,7 +148,7 @@ As peças, cada uma segundo a documentação:
 
 - Os servidores escutam, por padrão, na porta HTTP 3476 e na porta gRPC 3478 ([configuração](https://fusionauth.io/permify-docs/setting-up/configuration)). A seção do banco de dados aceita URIs separadas de `writer` e `reader`.
 - Cada pod mantém um cache [Ristretto](https://github.com/dgraph-io/ristretto) local ao processo com resultados de verificações; "there is no shared cache layer" (não há camada de cache compartilhada) ([cache](https://fusionauth.io/permify-docs/operations/cache)).
-- Com `distributed.enabled`, os pods distribuem cada requisição em um anel de hashing consistente, de modo que "subsequent API calls with the same hash will retrieve the response from the instance 2, regardless of which instance that API called from" (chamadas de API subsequentes com o mesmo hash obterão a resposta da instância 2, independentemente da instância em que a API foi chamada). Um circuit breaker interrompe as chamadas ao banco de dados enquanto ele está indisponível.
+- Com `distributed.enabled`, os pods mapeiam cada requisição, por hash, em um anel de hashing consistente, de modo que "subsequent API calls with the same hash will retrieve the response from the instance 2, regardless of which instance that API called from" (chamadas de API subsequentes com o mesmo hash obterão a resposta da instância 2, independentemente da instância em que a API foi chamada). Um circuit breaker interrompe as chamadas ao banco de dados enquanto ele está indisponível.
 - O PostgreSQL armazena as tuplas com MVCC: o Permify cria "a separate database snapshot for each write and delete operation" (um snapshot de banco de dados separado para cada operação de escrita e de exclusão), e um coletor de lixo opcional apaga as versões antigas.
 - Cada stream de Watch "opens a long-lived connection with a continuous polling loop against the database" (abre uma conexão de longa duração com um laço contínuo de consulta ao banco de dados) ([operações de Watch](https://fusionauth.io/permify-docs/operations/watch)).
 

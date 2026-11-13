@@ -24,9 +24,9 @@ As publicações estão no Medium, que retornou HTTP 403 ao verificador deste si
 ### Modelo
 
 - "Similar to Zanzibar, the basic unit of storage for Himeji is a tuple in the form entity # relation @ principal." (Assim como no Zanzibar, a unidade básica de armazenamento do Himeji é uma tupla na forma entity # relation @ principal.) Uma entidade é a tripla "(entity type : entity id : entity part)".
-- A tupla de exemplo da publicação: "LISTING : 10 # OWNER @ User(123)". Nessa notação, Anne ser dona do readme seria escrito `DOC : readme # OWNER @ User(anne)`; esta linha é uma ilustração, não vem da publicação.
+- A tupla de exemplo da publicação: "LISTING : 10 # OWNER @ User(123)". Nessa notação, o fato de Anne ser dona do readme seria escrito como `DOC : readme # OWNER @ User(anne)`; esta linha é uma ilustração, não vem da publicação.
 - As regras são escritas em "a YAML-based configuration language that allows for the resolution of permissions checks via set algebra" (uma linguagem de configuração baseada em YAML que permite resolver verificações de permissão por meio de álgebra de conjuntos). O exemplo da publicação resolve uma verificação `WRITE` sobre um anúncio como a união de `WRITE` e `OWNER`, e `READ` como a união de `READ` e `WRITE`: as relações concêntricas do artigo (§2.3.1, Figura 1).
-- Uma *tupla de referência* liga duas entidades sem nomear uma relação; a relação a seguir vem da configuração. "Where this approach differs from Zanzibar is that such a tuple does not contain a relation." (Este enfoque difere do Zanzibar porque tal tupla não contém uma relação.) Como as relações entre dois tipos de entidade raramente variam, a publicação afirma que isso armazena cerca de N tuplas em vez de N×M.
+- Uma *tupla de referência* liga duas entidades sem nomear uma relação; a relação a seguir vem da configuração. "Where this approach differs from Zanzibar is that such a tuple does not contain a relation." (Esta abordagem difere do Zanzibar porque tal tupla não contém uma relação.) Como as relações entre dois tipos de entidade raramente variam, a publicação afirma que isso armazena cerca de N tuplas em vez de N×M.
 - O Himeji faz o fan-out na escrita: "Instead of fanning out at read time, we write all permissions data when resources are mutated" (em vez de fazer o fan-out no momento da leitura, escrevemos todos os dados de permissão quando os recursos são alterados), "given our read-heavy workload" (dada a nossa carga de trabalho dominada por leituras).
 
 ### Arquitetura
@@ -37,7 +37,7 @@ Como uma verificação percorre o Himeji?
   width={620}
   height={280}
   title="As três camadas do Himeji, segundo a publicação do Airbnb"
-  desc="Os serviços de dados chamam a API de verificação da camada de orquestração. A camada de orquestração busca os dados de acordo com a configuração e encaminha cada consulta a um shard de cache por hashing consistente. Cada shard de cache é replicado, com uma instância por zona de disponibilidade, e carrega da camada de dados em caso de falha no cache. A camada de dados são bancos Amazon Aurora particionados logicamente; as alterações publicadas pelos bancos invalidam os shards de cache."
+  desc="Os serviços de dados chamam a API de verificação da camada de orquestração. A camada de orquestração busca os dados de acordo com a configuração e encaminha cada consulta a um shard de cache por hashing consistente. Cada shard de cache é replicado, com uma instância por zona de disponibilidade, e carrega da camada de dados em caso de falha no cache. A camada de dados consiste em bancos Amazon Aurora particionados logicamente; as alterações publicadas pelos bancos invalidam os shards de cache."
   nodes={[
     { id: "svc", x: 90, y: 60, label: "Serviços de dados", kind: "client" },
     { id: "orch", x: 310, y: 60, label: "Camada de\norquestração", kind: "server" },
@@ -61,7 +61,7 @@ Observe a separação que a publicação chama de sua mudança mais significativ
 - "We implement the same reliability (hedging, tiered caching) and load shedding features as Zanzibar for availability." (Implementamos os mesmos recursos de confiabilidade, como hedging e cache em camadas, e de descarte de carga do Zanzibar, em prol da disponibilidade.) O artigo os descreve nas §3.2.5 a §3.2.7.
 - Resultados relatados após cerca de um ano em produção: disponibilidade de cerca de 99,999%, P50 de 1,8 ms, P95 de 7 ms, P99 de 12 ms, e vazão de 0 em março de 2020 a 850 mil entidades por segundo em março de 2021. A InfoQ relata os mesmos números de disponibilidade, P99 e vazão.
 
-A publicação não descreve um token de consistência. Se o Himeji tem algo parecido com um zookie não é dito nas fontes lidas.
+A publicação não descreve um token de consistência. As fontes lidas não dizem se o Himeji tem algo parecido com um zookie.
 
 ## Carta AuthZ
 
@@ -69,8 +69,8 @@ Aaron Tainter, da Carta, publicou dois textos: "AuthZ: Carta's highly scalable p
 
 ### Modelo e API
 
-- "A RelationTuple is a tuple consisting of an actor, relation, and object." (Uma RelationTuple é uma tupla composta de um ator, uma relação e um objeto.) Anne ser dona do readme é uma RelationTuple. A parte dois escreve uma verificação como `AuthZ.Check("Employee:1", "View", "Grade:X")`.
-- "Consumers combine RelationTuples using a domain-specific language." (Os consumidores combinam RelationTuples usando uma linguagem de domínio específico.) As publicações não mostram a linguagem.
+- "A RelationTuple is a tuple consisting of an actor, relation, and object." (Uma RelationTuple é uma tupla composta de um ator, uma relação e um objeto.) O fato de Anne ser dona do readme é uma RelationTuple. A parte dois escreve uma verificação como `AuthZ.Check("Employee:1", "View", "Grade:X")`.
+- "Consumers combine RelationTuples using a domain-specific language." (Os consumidores combinam RelationTuples usando uma linguagem específica de domínio.) As publicações não mostram a linguagem.
 - "We introduced namespaces to separate domain-level permissions." (Introduzimos namespaces para separar permissões no nível de domínio.) Um serviço só pode escrever em namespaces aos quais tem acesso de escrita; caso contrário, "AuthZ rejects the update and throws an error" (o AuthZ rejeita a atualização e lança um erro). Esses namespaces são uma fronteira de acesso entre equipes, não as configurações por tipo de objeto do artigo (§2.3).
 - No início, "There were only three endpoints" (havia apenas três endpoints): Add, Remove e Check. APIs de consulta que listam os recursos de um ator vieram depois.
 - Alterações em massa são escritas como templates na linguagem Mustache, nos quais "AuthZ injects data into" (o AuthZ injeta dados) antes de executar "a bulk update event" (um evento de atualização em massa).
@@ -86,7 +86,7 @@ O que acontece quando um consumidor faz uma verificação com um ticket antes de
 <Swimlane
   lanes={["Consumidor", "AuthZ", "Workers do índice"]}
   timeLabel="tempo"
-  title="Tickets do Carta AuthZ"
+  title="Tickets do AuthZ da Carta"
   desc="O consumidor adiciona uma RelationTuple. O AuthZ a confirma e retorna um ticket. Os workers começam a construir a alteração do índice. O consumidor faz uma verificação com o ticket enquanto uma RelationTuple com timestamp de confirmação igual ou anterior ao ticket ainda não foi processada, então o AuthZ rejeita a requisição. Depois que os resultados dos workers são mesclados ao índice, o consumidor tenta de novo e obtém uma resposta a partir do índice atualizado."
   events={[
     { lane: 0, t: 0, label: "Add\nRelationTuple", kind: "write" },
@@ -116,12 +116,12 @@ Observe onde o ticket é verificado: "AuthZ rejects requests when there are Rela
 
 ## Lado a lado
 
-As células dizem "não informado" onde as publicações lidas aqui não dizem.
+As células dizem “não informado” onde as publicações lidas aqui não dizem.
 
 | No artigo | Airbnb Himeji (2021) | Carta AuthZ (2021) |
 | --- | --- | --- |
 | Tupla `object#relation@user` (§2.1) | `entity # relation @ principal`, além de tuplas de referência sem relação | RelationTuple: ator, relação, objeto |
-| Configuração de namespace com reescritas (§2.3.1) | Configuração em YAML, álgebra de conjuntos | Uma linguagem de domínio específico (não mostrada) |
+| Configuração de namespace com reescritas (§2.3.1) | Configuração em YAML, álgebra de conjuntos | Uma linguagem específica de domínio (não mostrada) |
 | Zookie (§2.2) | Não informado | Ticket, "synonymous with a Zookie" (sinônimo de um Zookie) |
 | Leopard (§3.2.4) | Não informado; em vez disso, fan-out na escrita | Actor Index Set e Object Index Set, construídos por workers |
 | Cache (§3.2.5) | Cache em memória particionado e replicado, taxa de acerto alvo de ~98% | Não informado |

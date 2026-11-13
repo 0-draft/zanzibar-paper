@@ -4,7 +4,7 @@ description: "O banco de dados de código aberto da AuthZed para relacionamentos
 section: ecosystem
 order: 1
 checked: "2026-11-13"
-paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4"]
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4", "3.2.5"]
 product:
   name: SpiceDB
   maintainer: AuthZed, Inc.
@@ -44,7 +44,7 @@ O SpiceDB é um banco de dados de código aberto que armazena relacionamentos e 
 
 Os nomes da API vêm dos arquivos de protocolo da AuthZed: [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto) e [`watch_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto).
 
-## O exemplo em curso como schema
+## O exemplo recorrente como schema
 
 A Figura 1 do artigo torna os donos editores, os editores visualizadores, e os visualizadores da pasta pai visualizadores do documento (§2.3.1). No SpiceDB, relações armazenadas e permissões calculadas são declaradas separadamente: as linhas `relation` dizem quem pode ser escrito em um relacionamento, e as linhas `permission` dizem como o acesso é calculado.
 
@@ -92,7 +92,7 @@ Quais relacionamentos armazenados levam cada pessoa a `view` sobre o readme?
 <Graph
   width={600}
   height={270}
-  title="O exemplo em curso como relacionamentos do SpiceDB"
+  title="O exemplo recorrente como relacionamentos do SpiceDB"
   desc="Cinco relacionamentos. user:anne é owner de doc:readme. user:beto é member de group:eng, e group:eng#member é viewer de doc:readme. user:chen é viewer de folder:A, e folder:A é parent de doc:readme. O caminho de Chen por folder:A até o readme está destacado: é a seta parent->view."
   nodes={[
     { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true },
@@ -171,7 +171,7 @@ Como um ZedToken impede que Chen, removido da pasta A antes da edição, veja o 
   laneWidth={190}
   timeLabel="tempo"
   title="Usando um ZedToken como um zookie"
-  desc="A aplicação remove o acesso de visualização de Chen à pasta A com WriteRelationships. O SpiceDB confirma a escrita e retorna um ZedToken Z1 como written_at. A aplicação salva o novo conteúdo do readme junto com Z1. Mais tarde, uma verificação de Chen sobre o readme é enviada com at_least_as_fresh Z1. O SpiceDB a avalia em um snapshot não mais antigo que Z1, de modo que a remoção é vista e Chen é negado."
+  desc="A aplicação remove o acesso de visualização de Chen à pasta A com WriteRelationships. O SpiceDB confirma a escrita e retorna um ZedToken Z1 como written_at. A aplicação salva o novo conteúdo do readme junto com Z1. Mais tarde, uma verificação de Chen sobre o readme é enviada com at_least_as_fresh Z1. O SpiceDB a avalia em um snapshot não mais antigo que Z1, de modo que a remoção é vista e o acesso de Chen é negado."
   events={[
     { lane: 0, t: 0, label: "remove Chen de A", kind: "write" },
     { lane: 1, t: 0, label: "confirma", kind: "write" },

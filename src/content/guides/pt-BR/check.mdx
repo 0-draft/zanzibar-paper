@@ -105,7 +105,7 @@ Como isso se desenrola no tempo para a verificação de Chen?
   caption="Um filho verdadeiro decide um OR. A resposta falsa de ② não muda nada; a resposta verdadeira de ⑦ encerra a árvore inteira."
 />
 
-Observe que a latência é determinada pelo caminho mais rápido até uma resposta decisiva, e não pela folha mais lenta. Se o ramo da pasta pai fosse lento e Chen não fosse visualizador, a raiz teria de esperar que todos os filhos respondessem falso.
+Observe que a latência é determinada pelo caminho mais rápido até uma resposta decisiva, e não pela folha mais lenta. Se o ramo da pasta pai tivesse sido lento e Chen não fosse visualizador, a raiz teria de esperar que todos os filhos respondessem falso.
 
 O cancelamento economiza trabalho, mas deixa uma lacuna. Uma subverificação cancelada nunca grava seu resultado no cache, e outras requisições podem estar aguardando esse resultado na [tabela de locks](../architecture/#a-tabela-de-locks-reúne-requisições-idênticas). O artigo se deparou exatamente com isso: "indirect ACL checks are frequently cancelled when the result of the parent ACL check is already determined. This leaves the cache key unpopulated." (“verificações de ACL indiretas são frequentemente canceladas quando o resultado da verificação de ACL pai já está determinado. Isso deixa a chave de cache sem preenchimento.”) A correção: "we delay eager cancellation when there are waiters on the corresponding lock table entry" (“adiamos o cancelamento antecipado quando há requisições aguardando na entrada correspondente da tabela de locks”, §3.2.5).
 
@@ -222,7 +222,7 @@ Nos produtos:
 
 As folhas ②, ④a, ④b e ⑥ leem, todas, linhas de `doc:readme`. Em vez de enviar cada leitura isoladamente, "We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner" (“Aplicamos um mecanismo de agrupamento para reunir as leituras de uma mesma verificação de ACL e minimizar o número de RPCs de leitura ao Spanner”, §3.2.3). O artigo não descreve o mecanismo além dessa frase. A [página de arquitetura](../architecture/#as-leituras-ao-spanner-são-agrupadas) desenha as quatro leituras chegando a um mesmo servidor; o layout de armazenamento, ordenado por objeto e relação (§3.1.1), é o que permite que elas se tornem leituras de intervalo sobre linhas adjacentes.
 
-## Até que profundidade ela pode ir
+## Até que profundidade um Check pode ir
 
 A recursão em `CHECK(U, U′)` não tem limite embutido: um grupo pode conter um grupo que contém um grupo, e nada no modelo de dados proíbe um ciclo. O que uma verificação faz quando encontra um?
 

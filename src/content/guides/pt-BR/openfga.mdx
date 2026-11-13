@@ -4,7 +4,7 @@ description: "O mecanismo de autorização da CNCF inspirado no Zanzibar, lido �
 section: ecosystem
 order: 2
 checked: "2026-11-13"
-paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.4"]
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.1.3", "3.2.2", "3.2.4"]
 product:
   name: OpenFGA
   maintainer: CNCF project (Okta core maintainer)
@@ -46,7 +46,7 @@ A própria documentação do OpenFGA inclui uma tabela de "Equivalent Zanzibar C
 
 Os nomes da API vêm de [`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto).
 
-## O exemplo em curso como modelo
+## O exemplo recorrente como modelo
 
 A Figura 1 do artigo torna os donos editores, os editores visualizadores, e os visualizadores da pasta pai visualizadores do documento (§2.3.1). Na DSL do OpenFGA, as mesmas regras ficam em uma linha por relação:
 
@@ -93,7 +93,7 @@ Por quais dessas tuplas uma verificação de `viewer` sobre o readme passa para 
 <Graph
   width={600}
   height={270}
-  title="O exemplo em curso como tuplas do OpenFGA"
+  title="O exemplo recorrente como tuplas do OpenFGA"
   desc="Cinco tuplas. user:anne é owner de doc:readme. user:beto é member de group:eng, e group:eng#member é viewer de doc:readme. user:chen é viewer de folder:A, e folder:A é parent de doc:readme. O caminho de Anne está destacado: owner leva a editor, que leva a viewer."
   nodes={[
     { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true, on: true },
@@ -183,7 +183,7 @@ Com o cache ativado, Chen ainda consegue ver o readme logo depois de ser removid
     { from: [0, 3], to: [2, 3], label: "HIGHER_CONSISTENCY" },
     { from: [2, 3], to: [1, 4], dashed: true },
   ]}
-  caption="A linha 2 é aquilo de que a documentação adverte: a alteração da tupla “might not be taken in consideration” (pode não ser levada em consideração) se o resultado vier do cache. Um zookie permitiria à aplicação pedir “pelo menos tão atual quanto a minha escrita” (§2.2); aqui a escolha é tudo ou nada."
+  caption="A linha 2 é o caso contra o qual a documentação adverte: a alteração da tupla “might not be taken in consideration” (pode não ser levada em consideração) se o resultado vier do cache. Um zookie permitiria à aplicação pedir “pelo menos tão atual quanto a minha escrita” (§2.2); aqui a escolha é tudo ou nada."
 />
 
 A documentação sugere decidir por requisição: se a aplicação armazena quando um recurso foi modificado pela última vez, ela pode comparar esse momento com o TTL do cache para escolher entre os dois modos ([consistência](https://openfga.dev/docs/interacting/consistency)). Esse timestamp desempenha parte do papel de um zookie, mantido pela aplicação. Também existem flags de invalidação de cache (`cache-controller-enabled`), que verificam se houve escritas recentes no store.
@@ -196,7 +196,7 @@ A documentação sugere decidir por requisição: se a aplicação armazena quan
 - **Condições.** Uma restrição de tipo como `[user with non_expired_grant]` faz uma tupla contar apenas quando uma condição CEL é satisfeita ([condições](https://openfga.dev/docs/modeling/conditions)). A tupla do artigo (§2.1) não tem condição.
 - **Tuplas contextuais.** Tuplas enviadas com uma única requisição Check, ListObjects, ListUsers ou Expand, "not persisted in the datastore" (não persistidas no repositório de dados) ([conceitos](https://openfga.dev/docs/concepts), [tuplas contextuais](https://openfga.dev/docs/interacting/contextual-tuples)).
 - **Curingas.** `[user, user:*]` permite uma concessão pública ([linguagem de configuração](https://openfga.dev/docs/configuration-language)); a gramática de tuplas do artigo não tem curinga (§2.1).
-- **Stores e versões de modelo.** Um store contém "one or more versions of an authorization model" (uma ou mais versões de um modelo de autorização) e suas tuplas; "Store data cannot be shared across stores" (os dados de um store não podem ser compartilhados entre stores) ([conceitos](https://openfga.dev/docs/concepts)). No artigo, as configurações são armazenadas em uma tabela indexada pelo ID do namespace, ao lado de um changelog de atualizações de configuração, e cada requisição é avaliada em um único timestamp de snapshot da configuração (§3.1.3, §3.2.2). Um check no OpenFGA pode nomear a versão do modelo que utiliza.
+- **Stores e versões de modelo.** Um store contém "one or more versions of an authorization model" (uma ou mais versões de um modelo de autorização) e suas tuplas; "Store data cannot be shared across stores" (os dados de um store não podem ser compartilhados entre stores) ([conceitos](https://openfga.dev/docs/concepts)). No artigo, as configurações são armazenadas em uma tabela indexada pelo ID do namespace, ao lado de um changelog de atualizações de configuração, e cada requisição é avaliada em um único timestamp de snapshot da configuração (§3.1.3, §3.2.2). Uma verificação no OpenFGA pode nomear a versão do modelo que utiliza.
 - **Sem Leopard.** A documentação citada aqui descreve caches de Check e caches de iteradores, não um índice de conjuntos pré-computado como o Leopard (§3.2.4).
 - **APIs de listagem.** `ListObjects`, `StreamedListObjects` e `ListUsers` estão fora da API do artigo (§2.4).
 
@@ -204,7 +204,7 @@ A documentação sugere decidir por requisição: se a aplicação armazena quan
 
 Em 2026-11-13: ativo. Versão mais recente v1.22.1 em 2026-10-28; primeira versão v0.1.0 em 2022-06-10; cerca de 6,1 mil estrelas no GitHub; Apache-2.0 ([repositório](https://github.com/openfga/openfga), [versões](https://github.com/openfga/openfga/releases)).
 
-- Junho de 2022: código aberto ([publicação do projeto, 2026-01-07](https://openfga.dev/blog/incubation-announcement)).
+- Junho de 2022: tornou-se código aberto ([publicação do projeto, 2026-01-07](https://openfga.dev/blog/incubation-announcement)).
 - 2022: aceito como projeto Sandbox da CNCF. As fontes divergem quanto à data: a página do projeto na CNCF diz que o OpenFGA "was accepted to CNCF on September 14, 2022" (foi aceito na CNCF em 14 de setembro de 2022) e seu anúncio diz setembro de 2022; a publicação do próprio projeto diz dezembro de 2022 ([página do projeto na CNCF](https://www.cncf.io/projects/openfga/), [CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/), [publicação do projeto](https://openfga.dev/blog/incubation-announcement)).
 - 2025-10-28: passou ao nível de maturidade Incubating, segundo a página do projeto na CNCF.
 - 2025-11-11: a CNCF anuncia que seu Technical Oversight Committee "has voted to accept OpenFGA as a CNCF incubating project" (votou por aceitar o OpenFGA como projeto em incubação da CNCF) ([CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)).

@@ -20,9 +20,9 @@ Os primeiros sistemas multiusuário precisavam decidir quem podia mexer em quê.
 
 Os sistemas operacionais então tornaram as listas mais baratas e mais grosseiras e, depois, novamente mais ricas. O próprio artigo traça esse percurso: na primeira edição do UNIX, flags de arquivo dizem "whether owner and non-owner can read or write the file" (se o dono e quem não é dono podem ler ou escrever o arquivo); na quarta edição, há bits de leitura, escrita e execução "for owner, group, and others" (para o dono, o grupo e os demais); as ACLs POSIX acrescentam "an arbitrary list of users and groups" (uma lista arbitrária de usuários e grupos); o VMS "supports ACL inheritance for files created within a directory tree" (oferece herança de ACL para arquivos criados dentro de uma árvore de diretórios) (§5). Essas quatro palavras, permissões, usuários, grupos e herança, são o que o modelo de dados do Zanzibar se propõe a suportar.
 
-A partir da década de 1970, os modelos se afastaram das listas por objeto. Bell–LaPadula e Biba deixam o sistema, e não o dono, decidir com base em rótulos; o Zanzibar é discricionário, então eles são contraste, e não ascendência. O controle de acesso baseado em papéis (1992) colocou os papéis entre usuários e permissões; o artigo diz que os papéis "are similar to Zanzibar relations" (são semelhantes às relações do Zanzibar) (§5). O controle baseado em atributos, definido no guia SP 800-162 do NIST, de 2014, calcula as decisões a partir de atributos no momento da requisição. O controle baseado em relacionamentos, nomeado por Gates em 2007 e formalizado por Fong em 2011, decide a partir de relacionamentos como “membro de” ou “pasta pai de”, que se compõem ([Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)). O artigo nunca usa a palavra ReBAC, mas suas tuplas de relação formam exatamente um grafo desse tipo.
+A partir da década de 1970, os modelos se afastaram das listas por objeto. Bell–LaPadula e Biba deixam o sistema, e não o dono, decidir com base em rótulos; o Zanzibar é discricionário, então eles são contraste, e não ascendência. O controle de acesso baseado em papéis (1992) colocou os papéis entre usuários e permissões; o artigo diz que os papéis "are similar to Zanzibar relations" (são semelhantes às relações do Zanzibar) (§5). O controle baseado em atributos, definido no guia SP 800-162 do NIST, de 2014, calcula as decisões a partir de atributos no momento da requisição. O controle baseado em relacionamentos, nomeado por Gates em 2007 e formalizado por Fong em 2011, decide a partir de relacionamentos como “membro de” ou “pasta pai de”, que se compõem ([Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)). O artigo nunca usa a palavra ReBAC, mas suas tuplas de relação formam um grafo desse tipo.
 
-O que era novo no Google era a escala e a consistência. O artigo diz que o Zanzibar "has been in production use for more than 5 years" (está em uso em produção há mais de 5 anos) (§4), na data do artigo, julho de 2019, de modo que ele já estava em funcionamento no máximo em 2014; nenhuma fonte pública informa o ano de início. Ele atende Calendar, Cloud, Drive, Maps, Photos e YouTube (§1). O TAO, com o qual o artigo o compara, oferece "eventual global consistency" (consistência global eventual), enquanto o Zanzibar fornece "external consistency and snapshot reads with bounded staleness" (consistência externa e leituras de snapshot com defasagem limitada), de modo a proteger contra o problema do “novo inimigo” (§5). Os relógios de Lamport foram descartados porque "require explicit participation of all “processes”" (exigem a participação explícita de todos os “processos”), e alguns dos processos do Zanzibar são "external clients or even human users" (clientes externos ou até usuários humanos). O Chubby não suporta "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness" (grandes volumes de dados, leituras eficientes de intervalos nem leituras em um snapshot especificado pelo cliente com defasagem limitada), e o ZooKeeper não oferece nem consistência externa entre nós nem leituras de snapshot com defasagem limitada (§5). O Spanner e seu relógio TrueTime forneceram a garantia ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)).
+O que era novo no Google era a escala e a consistência. O artigo diz que o Zanzibar "has been in production use for more than 5 years" (está em uso em produção há mais de 5 anos) (§4), na data do artigo, julho de 2019, de modo que ele já estava em funcionamento em 2014, no mais tardar; nenhuma fonte pública informa o ano de início. Ele atende Calendar, Cloud, Drive, Maps, Photos e YouTube (§1). O TAO, com o qual o artigo o compara, oferece "eventual global consistency" (consistência global eventual), enquanto o Zanzibar fornece "external consistency and snapshot reads with bounded staleness" (consistência externa e leituras de snapshot com defasagem limitada), de modo a proteger contra o problema do “novo inimigo” (§5). Os relógios de Lamport foram descartados porque "require explicit participation of all “processes”" (exigem a participação explícita de todos os “processos”), e alguns dos processos do Zanzibar são "external clients or even human users" (clientes externos ou até usuários humanos). O Chubby não suporta "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness" (grandes volumes de dados, leituras eficientes de intervalos nem leituras em um snapshot especificado pelo cliente com defasagem limitada), e o ZooKeeper não oferece nem consistência externa entre nós nem leituras de snapshot com defasagem limitada (§5). O Spanner e seu relógio TrueTime forneceram a garantia ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)).
 
 Depois do artigo, outros reconstruíram o projeto de forma aberta. O Ory Keto foi reescrito em torno dele em 2021, e SpiceDB, OpenFGA, Permify e Topaz vieram em seguida, em cerca de dezoito meses. Ao mesmo tempo, os mecanismos de políticas da linhagem ABAC, OPA e Cedar, amadureceram, e o grupo de trabalho AuthZEN da OpenID Foundation, formado em 2023, padronizou a forma como uma aplicação pede uma decisão a um mecanismo de autorização: sua Authorization API 1.0 tornou-se uma OpenID Final Specification em janeiro de 2026. Os detalhes de cada sistema estão nas páginas do ecossistema.
 
@@ -42,7 +42,7 @@ Depois do artigo, outros reconstruíram o projeto de forma aberta. O Ory Keto fo
       era: "Sistemas operacionais",
       year: "1971",
       title: "UNIX First Edition: bits de dono e de não dono",
-      body: "O chmod tem seis bits de modo: leitura e escrita para o dono e para quem não é dono, executável, set-user-ID. Não há classe de grupo. (Data a partir de uma cópia de arquivo; o manual original não foi conferido.)",
+      body: "O chmod tem seis bits de modo: leitura e escrita para o dono e para quem não é dono, executável, set-user-ID. Não há classe de grupo. (Data a partir de uma cópia arquivada; o manual original não foi conferido.)",
       href: "http://man.cat-v.org/unix-1st/2/sys-chmod",
     },
     {
@@ -84,7 +84,7 @@ Depois do artigo, outros reconstruíram o projeto de forma aberta. O Ory Keto fo
       era: "Modelos e padrões",
       year: "1975–1977",
       title: "Modelo de integridade de Biba",
-      body: "O dual de integridade do Bell–LaPadula. MITRE MTR-3153 (junho de 1975), geralmente citado como ESD-TR-76-372 (abril de 1977).",
+      body: "O dual de integridade do Bell–LaPadula. MITRE MTR-3153 (junho de 1975); o relatório revisado, MTR-3153 Rev. 1, foi publicado como ESD-TR-76-372 em abril de 1977 (DTIC AD-A039324).",
       href: "https://seclab.cs.ucdavis.edu/projects/history/CD/index.html",
     },
     {
@@ -152,7 +152,7 @@ Depois do artigo, outros reconstruíram o projeto de forma aberta. O Ory Keto fo
     },
     {
       era: "Escala planetária",
-      year: "até 2014",
+      year: "2014 ou antes",
       title: "Zanzibar em produção",
       body: "O artigo diz que ele \"has been in production use for more than 5 years\" (está em uso em produção há mais de 5 anos) (§4). Isso situa o início antes de meados de 2014; nenhuma fonte pública informa o ano.",
       href: "https://www.usenix.org/conference/atc19/presentation/pang",
@@ -197,7 +197,7 @@ Depois do artigo, outros reconstruíram o projeto de forma aberta. O Ory Keto fo
       era: "Código aberto e padrões",
       year: "2022",
       title: "Primeira versão do OpenFGA",
-      body: "10 de junho de 2022. Desenvolvido por funcionários da Okta; projeto CNCF Incubating desde novembro de 2025 (blog da CNCF, 11 de novembro de 2025).",
+      body: "10 de junho de 2022. Desenvolvido por funcionários da Okta; projeto CNCF Incubating desde 28 de outubro de 2025, anunciado no blog da CNCF em 11 de novembro de 2025.",
       href: "https://github.com/openfga/openfga",
     },
     {
@@ -217,7 +217,7 @@ Depois do artigo, outros reconstruíram o projeto de forma aberta. O Ory Keto fo
     {
       era: "Código aberto e padrões",
       year: "2023",
-      title: "Cedar tem o código aberto",
+      title: "Cedar se torna código aberto",
       body: "A AWS libera a linguagem de políticas Cedar sob Apache-2.0 em 10 de maio de 2023.",
       href: "https://aws.amazon.com/about-aws/whats-new/2023/05/cedar-open-source-language-access-control",
     },
@@ -297,11 +297,12 @@ Trabalhos relacionados, com todos os sistemas citados nesta página: §5. Histó
 - Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
 - J. B. Dennis e E. C. Van Horn, "Programming Semantics for Multiprogrammed Computations", CACM 9(3), 1966, [doi.org/10.1145/365230.365252](https://doi.org/10.1145/365230.365252); versão anterior MIT Project MAC TR-23, dezembro de 1965, [dspace.mit.edu](https://dspace.mit.edu/handle/1721.1/149345)
 - B. W. Lampson, "Protection", 1971; reimpresso na ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
-- UNIX First Edition sys-chmod(2), cópia de arquivo, [man.cat-v.org/unix-1st/2/sys-chmod](http://man.cat-v.org/unix-1st/2/sys-chmod)
+- UNIX First Edition sys-chmod(2), cópia arquivada, [man.cat-v.org/unix-1st/2/sys-chmod](http://man.cat-v.org/unix-1st/2/sys-chmod)
 - UNIX Fourth Edition chmod(2), repositório de história do Unix, [github.com/dspinellis/unix-history-repo](https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2)
 - J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
 - A. Grünbacher, "POSIX Access Control Lists on Linux", USENIX ATC 2003 FREENIX, [usenix.org](https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html)
 - D. E. Bell, "Looking Back at the Bell-La Padula Model", ACSAC 2005, [PDF](https://www.acsac.org/2005/papers/Bell.pdf)
+- K. J. Biba, "Integrity Considerations for Secure Computer Systems", MTR-3153 Rev. 1 / ESD-TR-76-372, abril de 1977, [DTIC AD-A039324](https://apps.dtic.mil/sti/html/tr/ADA039324/index.html)
 - Arquivo histórico do UC Davis Computer Security Lab (Biba), [seclab.cs.ucdavis.edu/projects/history/CD](https://seclab.cs.ucdavis.edu/projects/history/CD/index.html)
 - NIST, projeto Role Based Access Control, [csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
 - OASIS, especificação central do XACML 3.0, [docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html)

@@ -279,7 +279,7 @@ Em que pasta está o readme?
   width={620}
   height={270}
   minWidth={520}
-  title="Passo 3 do Check: leitura do tupleset parent"
+  title="Passo 3 do Check: leitura do conjunto de tuplas parent"
   desc="O mesmo grafo. Destacados: a aresta parent de folder:A para doc:readme e o nó folder:A. Este passo apenas encontra a pasta; ainda não decide nada."
   nodes={[
     { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
@@ -296,7 +296,7 @@ Em que pasta está o readme?
     { from: "chen", to: "folder", label: "viewer" },
     { from: "folder", to: "doc", label: "parent", on: true },
   ]}
-  caption="O tupleset doc:readme#parent contém uma tupla, que aponta para folder:A. A regra agora pergunta sobre folder:A#viewer."
+  caption="O conjunto de tuplas doc:readme#parent contém uma tupla, que aponta para folder:A. A regra agora pergunta sobre folder:A#viewer."
 />
 
 A tupla `parent` é a "relação abstrata" da Tabela 1. Sozinha, ela não concede nada; a regra de reescrita a transforma em uma nova pergunta sobre outro objeto.

@@ -13,7 +13,7 @@ import Swimlane from "../../../components/diagram/Swimlane.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 import Frames from "../../../components/diagram/Frames.astro";
 
-O Zanzibar evita o problema do “novo inimigo” com zookies, e os zookies funcionam porque o Spanner dá a cada escrita um timestamp que respeita a causalidade. [Consistência, snapshots e zookies](../consistency/) explica ambos, inclusive como o TrueTime e o commit wait produzem esses timestamps. Quase ninguém fora do Google roda sobre o TrueTime. Esta página examina o que o protocolo de zookie realmente exige de um banco de dados, e como produtos construídos sobre outros bancos de dados obtêm isso, ou passam sem isso.
+O Zanzibar evita o problema do “novo inimigo” com zookies, e os zookies funcionam porque o Spanner dá a cada escrita um timestamp que respeita a causalidade. [Consistência, snapshots e zookies](../consistency/) explica ambos, inclusive como o TrueTime e a espera de commit produzem esses timestamps. Quase ninguém fora do Google roda sobre o TrueTime. Esta página examina o que o protocolo de zookie realmente exige de um banco de dados, e como produtos construídos sobre outros bancos de dados obtêm isso, ou passam sem isso.
 
 ## O que um zookie exige do repositório de dados
 
@@ -59,9 +59,9 @@ O Spanner obtém a propriedade ① de relógios sincronizados com um limite de e
   height={250}
   minWidth={540}
   title="De onde vem a ordem de commit"
-  desc="Três fontes de ordem. Spanner: timestamps do TrueTime mais commit wait dão a cada commit um timestamp causal, entre regiões. CockroachDB: relógios lógicos híbridos dão timestamps que respeitam a causalidade apenas entre transações que tocam as mesmas chaves, por isso o SpiceDB faz as escritas tocarem uma chave comum. PostgreSQL e MySQL: um único primário decide a ordem de commit, de modo que um ID de transação ou snapshot desse primário já respeita a causalidade."
+  desc="Três fontes de ordem. Spanner: timestamps do TrueTime mais a espera de commit dão a cada commit um timestamp causal, entre regiões. CockroachDB: relógios lógicos híbridos dão timestamps que respeitam a causalidade apenas entre transações que tocam as mesmas chaves, por isso o SpiceDB faz as escritas tocarem uma chave comum. PostgreSQL e MySQL: um único primário decide a ordem de commit, de modo que um ID de transação ou snapshot desse primário já respeita a causalidade."
   nodes={[
-    { id: "sp", x: 110, y: 60, label: "Spanner\nTrueTime + commit wait", kind: "store" },
+    { id: "sp", x: 110, y: 60, label: "Spanner: TrueTime\n+ espera de commit", kind: "store" },
     { id: "cr", x: 330, y: 60, label: "CockroachDB\nrelógio lógico híbrido", kind: "store" },
     { id: "pg", x: 540, y: 60, label: "PostgreSQL, MySQL\num único primário", kind: "store" },
     { id: "sp2", x: 110, y: 180, label: "todo commit\nordenado", kind: "note" },
@@ -76,7 +76,7 @@ O Spanner obtém a propriedade ① de relógios sincronizados com um limite de e
   caption="A coluna do meio é a que precisa de ajuda da camada de aplicação."
 />
 
-Observe que os bancos de dados com um único primário obtêm a propriedade ① de graça, porque um único servidor vê todos os commits em ordem; o que eles abrem mão é da replicação global do artigo. O CockroachDB replica globalmente, mas fornece a propriedade ① apenas em parte. A próxima seção trata dessa lacuna.
+Observe que os bancos de dados com um único primário obtêm a propriedade ① de graça, porque um único servidor vê todos os commits em ordem; do que eles abrem mão é da replicação global do artigo. O CockroachDB replica globalmente, mas fornece a propriedade ① apenas em parte. A próxima seção trata dessa lacuna.
 
 ## CockroachDB: a regra das chaves sobrepostas
 
@@ -84,7 +84,7 @@ O CockroachDB não tem TrueTime. Seus nós mantêm relógios sincronizados de fo
 
 A AuthZed reproduziu o problema do “novo inimigo” no CockroachDB com o SpiceDB em 2021 ([The One Crucial Difference Between Spanner and CockroachDB, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). O resumo da lacuna feito pela publicação: "Cockroach does not provide external consistency for transactions involving _non-overlapping keys_." (O Cockroach não oferece consistência externa para transações que envolvem _chaves não sobrepostas_.) Seu teste usou duas escritas e uma verificação, executadas "in sequence (not parallel)" (em sequência, não em paralelo): escrever uma tupla `excluded`, escrever uma tupla `direct` e então verificar `allowed = direct - excluded` na revisão da segunda escrita; "the check in 3 will succeed" (a verificação em 3 terá sucesso).
 
-Como isso fica com o exemplo em curso, se o relógio de um nó estiver adiantado?
+Como isso fica com o exemplo recorrente, se o relógio de um nó estiver adiantado?
 
 <Frames>
 
@@ -93,22 +93,22 @@ Como isso fica com o exemplo em curso, se o relógio de um nó estiver adiantado
   laneWidth={132}
   rowHeight={64}
   timeLabel="tempo real"
-  ticks={["10.000", "10.100"]}
-  title="Defasagem de relógio sem chaves sobrepostas"
-  desc="No tempo real 10.000, o app de Anne remove Chen de folder:A. O nó 1, cujo relógio está 250 ms adiantado, faz o commit no timestamp 10.250. Após a confirmação, no tempo real 10.100, o app move o readme para folder:A. O nó 2, cujo relógio está correto, faz esse commit no timestamp 10.100 e o retorna como token. A verificação de Chen é executada no snapshot 10.100. Ela vê a movimentação, mas não a remoção, que tem o timestamp maior, então Chen é permitido. Esse é o problema do novo inimigo."
+  ticks={["10,000", "10,100"]}
+  title="Desvio de relógio sem chaves sobrepostas"
+  desc="No tempo real 10,000, o app de Anne remove Chen de folder:A. O nó 1, cujo relógio está 250 ms adiantado, faz o commit no timestamp 10,250. Após a confirmação, no tempo real 10,100, o app move o readme para folder:A. O nó 2, cujo relógio está correto, faz esse commit no timestamp 10,100 e o retorna como token. A verificação de Chen é executada no snapshot 10,100. Ela vê a movimentação, mas não a remoção, que tem o timestamp maior, então Chen é permitido. Esse é o problema do “novo inimigo”."
   events={[
     { lane: 0, t: 0, label: "x: remove Chen", kind: "write" },
-    { lane: 1, t: 0, label: "commit x\nat 10.250", kind: "write", mono: true },
+    { lane: 1, t: 0, label: "commit de x\nem 10,250", kind: "write", mono: true },
     { lane: 0, t: 1, label: "y: move o readme", kind: "write" },
-    { lane: 2, t: 1, label: "commit y\nat 10.100", kind: "bad", mono: true },
-    { lane: 3, t: 2, label: "check at\nsnapshot 10.100", kind: "read", mono: true },
+    { lane: 2, t: 1, label: "commit de y\nem 10,100", kind: "bad", mono: true },
+    { lane: 3, t: 2, label: "verificação no\nsnapshot 10,100", kind: "read", mono: true },
     { lane: 3, t: 3, label: "vê y, não x:\nChen permitido", kind: "bad" },
   ]}
   arrows={[
     { from: [0, 0], to: [1, 0] },
     { from: [1, 0], to: [0, 1], label: "ack", dashed: true },
     { from: [0, 1], to: [2, 1] },
-    { from: [2, 1], to: [3, 2], label: "token 10.100", dashed: true },
+    { from: [2, 1], to: [3, 2], label: "token 10,100", dashed: true },
   ]}
   caption="Violação: y aconteceu depois de x, mas T_y < T_x. O snapshot em T_y não é um prefixo do que aconteceu."
 />
@@ -118,15 +118,15 @@ Como isso fica com o exemplo em curso, se o relógio de um nó estiver adiantado
   laneWidth={132}
   rowHeight={64}
   timeLabel="tempo real"
-  ticks={["10.000", "10.100"]}
-  title="Defasagem de relógio com uma chave de sobreposição"
-  desc="As mesmas duas escritas, mas cada escrita também escreve uma chave de sobreposição compartilhada K. O nó 1 faz o commit de x, incluindo K, em 10.250. Quando o nó 2 faz o commit de y, ele também escreve K, então o CockroachDB precisa dar a y um timestamp acima da escrita de x em K, aqui 10.251. O token é 10.251, a verificação de Chen é executada nesse snapshot, vê x e y, e Chen é negado."
+  ticks={["10,000", "10,100"]}
+  title="Desvio de relógio com uma chave de sobreposição"
+  desc="As mesmas duas escritas, mas cada escrita também escreve uma chave de sobreposição compartilhada K. O nó 1 faz o commit de x, incluindo K, em 10,250. Quando o nó 2 faz o commit de y, ele também escreve K, então o CockroachDB precisa dar a y um timestamp acima da escrita de x em K, aqui 10,251. O token é 10,251, a verificação de Chen é executada nesse snapshot, vê x e y, e Chen é negado."
   events={[
     { lane: 0, t: 0, label: "x: remove Chen", kind: "write" },
-    { lane: 1, t: 0, label: "commit x + K\nat 10.250", kind: "write", mono: true },
+    { lane: 1, t: 0, label: "commit de x + K\nem 10,250", kind: "write", mono: true },
     { lane: 0, t: 1, label: "y: move o readme", kind: "write" },
-    { lane: 2, t: 1, label: "commit y + K\nat 10.251", kind: "good", mono: true },
-    { lane: 3, t: 2, label: "check at\nsnapshot 10.251", kind: "read", mono: true },
+    { lane: 2, t: 1, label: "commit de y + K\nem 10,251", kind: "good", mono: true },
+    { lane: 3, t: 2, label: "verificação no\nsnapshot 10,251", kind: "read", mono: true },
     { lane: 3, t: 3, label: "vê x e y:\nChen negado", kind: "good" },
   ]}
   arrows={[
@@ -134,14 +134,14 @@ Como isso fica com o exemplo em curso, se o relógio de um nó estiver adiantado
     { from: [1, 0], to: [0, 1], label: "ack", dashed: true },
     { from: [0, 1], to: [2, 1] },
     { from: [1, 0], to: [2, 1], label: "mesma chave K" },
-    { from: [2, 1], to: [3, 2], label: "token 10.251", dashed: true },
+    { from: [2, 1], to: [3, 2], label: "token 10,251", dashed: true },
   ]}
   caption="Correção: duas escritas na mesma chave são ordenadas pela chave, não pelos relógios."
 />
 
 </Frames>
 
-Observe a seta rotulada “mesma chave K” no quadro da direita. Nenhum relógio melhorou; o que mudou é que as duas transações agora entram em conflito, e o CockroachDB ordena corretamente transações conflitantes. Os timestamps nos dois quadros são ilustrativos; a defasagem está bem dentro do padrão de `500ms`, de modo que nenhum servidor seria encerrado.
+Observe a seta rotulada “mesma chave K” no quadro da direita. Nenhum relógio melhorou; o que mudou é que as duas transações agora entram em conflito, e o CockroachDB ordena corretamente transações conflitantes. Os timestamps nos dois quadros são ilustrativos; o desvio está bem dentro do padrão de `500ms`, de modo que nenhum servidor seria encerrado.
 
 A AuthZed constatou que uma leitura compartilhada não bastava: "we needed both transactions to write to the same key" (precisávamos que ambas as transações escrevessem na mesma chave). O driver do SpiceDB para o CockroachDB, portanto, acrescenta uma chave de sobreposição às escritas, com uma estratégia escolhida por `--datastore-tx-overlap-strategy` ([repositórios de dados](https://authzed.com/docs/spicedb/concepts/datastores)):
 
@@ -150,9 +150,9 @@ A AuthZed constatou que uma leitura compartilhada não bastava: "we needed both 
 | `static` (padrão) | "All writes overlap to guarantee safety at the cost of write throughput" (todas as escritas se sobrepõem para garantir a segurança, ao custo da vazão de escrita) |
 | `prefix` | "Only writes that contain objects with same prefix overlap" (apenas as escritas que contêm objetos com o mesmo prefixo se sobrepõem) |
 | `request` | "Only writes with the same io.spicedb.requestoverlapkey header overlap" (apenas as escritas com o mesmo cabeçalho io.spicedb.requestoverlapkey se sobrepõem) |
-| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem" (nenhuma escrita se sobrepõe, o que oferece a melhor vazão de escrita, mas pode deixá-lo vulnerável ao problema do novo inimigo) |
+| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem" (nenhuma escrita se sobrepõe, o que oferece a melhor vazão de escrita, mas pode deixá-lo vulnerável ao problema do “novo inimigo”) |
 
-O custo, nas palavras da AuthZed: "This does add a small amount of latency to the write path, but it leaves the read paths performant." (Isso acrescenta uma pequena latência ao caminho de escrita, mas mantém o bom desempenho dos caminhos de leitura.) Toda escrita `static` disputa uma única linha, que é o preço que o artigo pagou, em vez disso, com o commit wait.
+O custo, nas palavras da AuthZed: "This does add a small amount of latency to the write path, but it leaves the read paths performant." (Isso acrescenta uma pequena latência ao caminho de escrita, mas mantém o bom desempenho dos caminhos de leitura.) Toda escrita `static` disputa uma única linha, que é o preço que o artigo pagou, em vez disso, com a espera de commit.
 
 A documentação de repositórios de dados acrescenta mais uma ressalva sobre o CockroachDB, do lado da leitura: o SpiceDB escolhe uma revisão com `cluster_logical_timestamp()`, "which can differ across nodes by up to the cluster's" (que pode diferir entre os nós em até o) deslocamento máximo do cluster, e "A read may not see a recently committed write if the reading node's timestamp is behind the writing node's." (Uma leitura pode não ver uma escrita confirmada recentemente se o timestamp do nó que lê estiver atrás do timestamp do nó que escreveu.) Como resultado, "fully_consistent does not guarantee read-after-write consistency on CockroachDB." (fully_consistent não garante consistência de leitura após escrita no CockroachDB.) Um ZedToken vindo da escrita evita isso, porque ele nomeia a própria revisão da escrita ([repositórios de dados](https://authzed.com/docs/spicedb/concepts/datastores)).
 
@@ -193,7 +193,7 @@ Réplicas de leitura reintroduzem atraso. Como o SpiceDB mantém uma verificaç�
   caption="Os números de revisão são ilustrativos. Uma verificação sem um token recente tem mais chance de ser respondida pela réplica."
 />
 
-A documentação descreve exatamente isso: o atraso de replicação "would be problematic to SpiceDB's ability to solve the new enemy problem" (seria problemático para a capacidade do SpiceDB de resolver o problema do novo inimigo), então o SpiceDB verifica "if the revision has been replicated into the target replica. If missing, it will fall back to the primary." (se a revisão foi replicada na réplica de destino. Se estiver ausente, recorrerá ao primário.) Para o MySQL, isso "requires two roundtrips instead of one" (exige duas idas e voltas em vez de uma), e a documentação desaconselha um balanceador de carga na frente das réplicas MySQL "because SpiceDB will not be able to maintain consistency guarantees" (porque o SpiceDB não conseguirá manter as garantias de consistência) ([repositórios de dados](https://authzed.com/docs/spicedb/concepts/datastores)).
+A documentação descreve exatamente isso: o atraso de replicação "would be problematic to SpiceDB's ability to solve the new enemy problem" (seria problemático para a capacidade do SpiceDB de resolver o problema do “novo inimigo”), então o SpiceDB verifica "if the revision has been replicated into the target replica. If missing, it will fall back to the primary." (se a revisão foi replicada na réplica de destino. Se estiver ausente, recorrerá ao primário.) Para o MySQL, isso "requires two roundtrips instead of one" (exige duas idas e voltas em vez de uma), e a documentação desaconselha um balanceador de carga na frente das réplicas MySQL "because SpiceDB will not be able to maintain consistency guarantees" (porque o SpiceDB não conseguirá manter as garantias de consistência) ([repositórios de dados](https://authzed.com/docs/spicedb/concepts/datastores)).
 
 O Permify, que roda sobre o PostgreSQL, constrói seu Snap Token da mesma forma: o token contém um `XID8` do PostgreSQL e uma string de snapshot ([`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go), v1.7.6). Sua documentação descreve o token apenas como "a token that consists of an encoded timestamp" (um token que consiste em um timestamp codificado) ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)).
 
@@ -203,7 +203,7 @@ O SpiceDB também roda sobre o Cloud Spanner, que tem TrueTime. Ali o driver "as
 
 ## Sem nenhum token
 
-O OpenFGA não tem zookie; sua documentação diz que o artigo "has a feature called `Zookies`" (tem um recurso chamado `Zookies`) e que o OpenFGA "is considering a similar feature in future releases" (está considerando um recurso semelhante em versões futuras) ([consistência](https://openfga.dev/docs/interacting/consistency)). Em vez disso, uma consulta escolhe `MINIMIZE_LATENCY` (o padrão) ou `HIGHER_CONSISTENCY`, que "will skip the cache and query the database directly" (ignorará o cache e consultará o banco de dados diretamente). No PostgreSQL com um repositório de dados secundário configurado (`datastore.secondaryUri`, "for postgres only", apenas para postgres, [configuração](https://openfga.dev/docs/getting-started/setup-openfga/configuration)), `HIGHER_CONSISTENCY` também seleciona o primário: o comentário no código diz "If we are using higher consistency, we need to use the write database" (se estamos usando consistência mais alta, precisamos usar o banco de escrita) ([`postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go), v1.22.1).
+O OpenFGA não tem zookie; sua documentação diz que o artigo "has a feature called `Zookies`" (tem um recurso chamado `Zookies`) e que o OpenFGA "is considering a similar feature in future releases" (está considerando um recurso semelhante em versões futuras) ([consistência](https://openfga.dev/docs/interacting/consistency)). Em vez disso, uma consulta escolhe `MINIMIZE_LATENCY` (o padrão) ou `HIGHER_CONSISTENCY`, que "will skip the cache and query the database directly" (ignorará o cache e consultará o banco de dados diretamente). No PostgreSQL com um repositório de dados secundário configurado (`datastore.secondaryUri`, "for postgres only" (apenas para postgres), [configuração](https://openfga.dev/docs/getting-started/setup-openfga/configuration)), `HIGHER_CONSISTENCY` também seleciona o primário: o comentário no código diz "If we are using higher consistency, we need to use the write database" (se estamos usando consistência mais alta, precisamos usar o banco de escrita) ([`postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go), v1.22.1).
 
 Isso dá “tão atual quanto o primário”, não “pelo menos tão atual quanto a minha escrita”. A diferença importa para o custo: um zookie permite que a maioria das verificações use um cache ou uma réplica e que apenas as recentes vão ao primário, enquanto `HIGHER_CONSISTENCY` envia para lá todas essas consultas. A [página do OpenFGA](../../ecosystem/openfga/#consistência-sem-zookies) ilustra o caso do cache; a documentação sugere escolher o modo por requisição comparando o momento da última modificação de um recurso com o TTL do cache, o que faz a aplicação guardar ela mesma parte da informação de um zookie.
 
@@ -221,7 +221,7 @@ Sem um token, uma aplicação que precisa da garantia do artigo tem duas opçõe
 
 | Produto e repositório de dados | De onde vem a ordem | Token | Leituras no token ou depois dele |
 | --- | --- | --- | --- |
-| Artigo (Spanner) | TrueTime + commit wait | zookie | qualquer réplica; espera se necessário (§3.2.5) |
+| Artigo (Spanner) | TrueTime + espera de commit | zookie | qualquer réplica; espera se necessário (§3.2.5) |
 | SpiceDB sobre Spanner | TrueTime; estratégia de sobreposição dispensada | ZedToken | leitura de snapshot do Spanner |
 | SpiceDB sobre CockroachDB | timestamps HLC; chave de sobreposição nas escritas (`static` por padrão) | ZedToken | `AS OF SYSTEM TIME`; `fully_consistent` pode perder uma escrita feita em outro nó |
 | SpiceDB sobre PostgreSQL | ID de transação e snapshot do primário | ZedToken | réplica, se tiver a revisão; senão, primário |
