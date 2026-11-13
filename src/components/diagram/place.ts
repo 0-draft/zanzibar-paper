@@ -65,9 +65,6 @@ export function placeLabel(
     return inside && !boxes.some((b) => overlaps(r, b));
   };
   const hit = cands.find(fits);
-  if (hit && Math.hypot(hit.x - at.x, hit.y - at.y) > 24) {
-    console.warn(`diagram: the label "${label}" moved away from its line`);
-  }
   if (!hit) {
     // Build-time hint for the figure's author: give the label more room.
     console.warn(`diagram: no free spot for the label "${label}"`);
