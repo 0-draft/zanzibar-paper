@@ -16,7 +16,7 @@ The Zanzibar paper describes its own ancestry in [§5 Related Work](../../#s5). 
 
 ## How the ideas lead to Zanzibar
 
-The first multi-user systems had to decide who could touch what. In 1966 Dennis and Van Horn gave each computation a list of *capabilities*, unforgeable tokens that name an object and grant rights to it ([Dennis and Van Horn](https://www.princeton.edu/~rblee/ELE572Papers/Fall04Readings/ProgramSemantics_DennisvanHorn.pdf)). Lampson's 1971 access matrix showed that capabilities and access control lists are two ways of storing the same table, by row or by column ([Lampson](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)). Multics took the column view: every segment and directory carried an ACL ([Saltzer](https://dl.acm.org/doi/10.1145/361011.361067)). Zanzibar is on the ACL side too: it answers "who can touch this object?".
+The first multi-user systems had to decide who could touch what. In 1966 Dennis and Van Horn gave each computation a list of *capabilities*, unforgeable tokens that name an object and grant rights to it ([Dennis and Van Horn](https://doi.org/10.1145/365230.365252)). Lampson's 1971 access matrix showed that capabilities and access control lists are two ways of storing the same table, by row or by column ([Lampson](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)). Multics took the column view: every segment and directory carried an ACL ([Saltzer](https://dl.acm.org/doi/10.1145/361011.361067)). Zanzibar is on the ACL side too: it answers "who can touch this object?".
 
 Operating systems then made the lists cheaper and coarser, and later richer again. The paper traces this itself: in the first edition of UNIX, file flags say "whether owner and non-owner can read or write the file"; by the fourth edition there are read, write and execute bits "for owner, group, and others"; POSIX ACLs add "an arbitrary list of users and groups"; VMS "supports ACL inheritance for files created within a directory tree" (§5). Those four words, permissions, users, groups and inheritance, are what Zanzibar's data model sets out to support.
 
@@ -36,7 +36,7 @@ After the paper, others rebuilt the design in the open. Ory Keto was rewritten a
       year: "1966",
       title: "Capability lists",
       body: "Dennis and Van Horn describe a computation's \"sphere of protection\" as its list of capabilities, the C-list. Capabilities answer \"what can this subject touch?\".",
-      href: "https://www.princeton.edu/~rblee/ELE572Papers/Fall04Readings/ProgramSemantics_DennisvanHorn.pdf",
+      href: "https://doi.org/10.1145/365230.365252",
     },
     {
       era: "Operating systems",
@@ -77,7 +77,7 @@ After the paper, others rebuilt the design in the open. Ory Keto was rewritten a
       era: "Models and standards",
       year: "1973",
       title: "Bell–LaPadula",
-      body: "Mandatory confidentiality: no read up, no write down. MITRE MTR-2547 Vol. I, cited from Bell's own retrospective.",
+      body: "Mandatory confidentiality: no read up, no write down. MITRE MTR-2547 Vol. I (March 1973); the *-property (no write down) arrives in Vol. II (May 1973). Cited from Bell's own retrospective.",
       href: "https://www.acsac.org/2005/papers/Bell.pdf",
     },
     {
@@ -119,7 +119,7 @@ After the paper, others rebuilt the design in the open. Ory Keto was rewritten a
       era: "Models and standards",
       year: "2007",
       title: "\"Relationship-Based Access Control\" coined",
-      body: "Carrie Gates, W2SP 2007, as credited in Fong's 2011 abstract. Gates's paper itself was not checked.",
+      body: "Carrie Gates, W2SP 2007, as credited in Fong's 2011 paper (abstract and reference [18]). Gates's paper itself was not checked.",
       href: "https://dl.acm.org/doi/10.1145/1943513.1943539",
     },
     {
@@ -295,7 +295,7 @@ Related work, with every system named on this page: §5. Production history: §4
 ## Sources
 
 - Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
-- J. B. Dennis and E. C. Van Horn, "Programming Semantics for Multiprogrammed Computations", CACM 9(3), 1966, [PDF](https://www.princeton.edu/~rblee/ELE572Papers/Fall04Readings/ProgramSemantics_DennisvanHorn.pdf)
+- J. B. Dennis and E. C. Van Horn, "Programming Semantics for Multiprogrammed Computations", CACM 9(3), 1966, [doi.org/10.1145/365230.365252](https://doi.org/10.1145/365230.365252); earlier version MIT Project MAC TR-23, December 1965, [dspace.mit.edu](https://dspace.mit.edu/handle/1721.1/149345)
 - B. W. Lampson, "Protection", 1971; reprinted in ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
 - UNIX First Edition sys-chmod(2), archive copy, [man.cat-v.org/unix-1st/2/sys-chmod](http://man.cat-v.org/unix-1st/2/sys-chmod)
 - UNIX Fourth Edition chmod(2), Unix history repository, [github.com/dspinellis/unix-history-repo](https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2)

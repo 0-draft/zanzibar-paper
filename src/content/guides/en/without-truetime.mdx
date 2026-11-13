@@ -141,7 +141,7 @@ What does that look like with the running example, if one node's clock runs ahea
 
 </Frames>
 
-Notice the arrow labelled "same key K" in the right frame. Neither clock got better; what changed is that the two transactions now conflict, and CockroachDB orders conflicting transactions correctly. The timestamps in both frames are illustrative; the skew is well inside the `500ms` default, so no node would be removed from the cluster.
+Notice the arrow labelled "same key K" in the right frame. Neither clock got better; what changed is that the two transactions now conflict, and CockroachDB orders conflicting transactions correctly. The timestamps in both frames are illustrative; the skew is well inside the `500ms` default, so no server would crash.
 
 AuthZed found that a shared read was not enough: "we needed both transactions to write to the same key". SpiceDB's CockroachDB driver therefore adds an overlap key to writes, with a strategy chosen by `--datastore-tx-overlap-strategy` ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)):
 
@@ -205,7 +205,7 @@ SpiceDB also runs on Cloud Spanner, which has TrueTime. There the driver "assume
 
 OpenFGA has no zookie; its docs say the paper "has a feature called `Zookies`" and that OpenFGA "is considering a similar feature in future releases" ([consistency](https://openfga.dev/docs/interacting/consistency)). Instead a query picks `MINIMIZE_LATENCY` (the default) or `HIGHER_CONSISTENCY`, which "will skip the cache and query the database directly". On PostgreSQL with a secondary datastore configured (`datastore.secondaryUri`, "for postgres only", [configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)), `HIGHER_CONSISTENCY` also selects the primary: the code comment reads "If we are using higher consistency, we need to use the write database" ([`postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go), v1.22.1).
 
-That gives "as fresh as the primary", not "at least as fresh as my write". The difference matters for cost: a zookie lets most checks use a cache or replica and only recent ones go to the primary, while `HIGHER_CONSISTENCY` sends every such query there. The [OpenFGA page](../../ecosystem/openfga/#consistency-without-zookies) draws the cache case; the docs suggest sending `HIGHER_CONSISTENCY` only while a resource's last change is within the cache TTL, which makes the application keep part of a zookie's information itself.
+That gives "as fresh as the primary", not "at least as fresh as my write". The difference matters for cost: a zookie lets most checks use a cache or replica and only recent ones go to the primary, while `HIGHER_CONSISTENCY` sends every such query there. The [OpenFGA page](../../ecosystem/openfga/#consistency-without-zookies) draws the cache case; the docs suggest choosing the mode per request by comparing a resource's last-modified time with the cache TTL, which makes the application keep part of a zookie's information itself.
 
 Other products:
 
