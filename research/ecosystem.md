@@ -2,6 +2,8 @@
 
 Verified 2026-11-13. Stars, license, language, archived flag, last push and first release come from the GitHub REST API (`gh api`). SPDX ids come from each repository's LICENSE file. API names come from each project's `.proto` files. Company status comes from the companies' own posts. Schema syntax comes from official docs or maintainer sample files linked inline. Re-check everything here before relying on it after this date.
 
+A later page-by-page check (commit 23f93a6) corrected the pages, not this sheet. Where they differ, the pages in `src/content/guides/en/` are right: Warrant's open-source server returns no token and honours only `latest`; Keto's v1alpha2 services are Check, Expand, Read, Write, Namespaces and Version (the OPL syntax service is in `opl/v1alpha1`); Permify's licence history is Apache-2.0 → GPL-3.0 → AGPL-3.0 → Apache-2.0 → AGPL-3.0; OpenFGA joined the CNCF sandbox in 2022 (CNCF lists 2022-09-14, the project says December) and moved to incubating on 2025-10-28; Materialize's docs moved to `/docs/materialize/getting-started/overview`; Topaz is kept by its former Aserto maintainers.
+
 ## SpiceDB (AuthZed)
 
 - An open-source database for storing and querying fine-grained authorization relationships, modelled on Zanzibar. Maintained by AuthZed, Inc.
