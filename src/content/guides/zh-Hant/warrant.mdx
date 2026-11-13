@@ -1,0 +1,198 @@
+---
+title: "Warrant"
+description: "一套受 Zanzibar 啟發的授權服務；在 WorkOS 收購該公司並以 WorkOS FGA 延續產品之後，其開源儲存庫自 2024 年中以來便沉寂下來。"
+section: ecosystem
+order: 6
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4"]
+product:
+  name: Warrant
+  maintainer: WorkOS (acquired 2024)
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/warrant-dev/warrant
+  docs: https://workos.com/docs/fga
+  status: "開源版本處於休眠狀態；以 WorkOS FGA 延續"
+  latest: v1.15.1 (2024-06-10)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+Warrant 是一套以 Go 撰寫的授權服務。其 README 描述的是 "a relationship based access control (ReBAC) engine (inspired by Google Zanzibar)"（一個以關係為基礎的存取控制（ReBAC）引擎（受 Google Zanzibar 啟發）），同時也涵蓋以角色與以屬性為基礎的規則，並將一個關係寫成 `[user:1] is an [editor] of [document:docA]`（[README](https://github.com/warrant-dev/warrant)）。一個儲存的關係稱為 *warrant*。
+
+WorkOS 於 2024 年收購了 Warrant。日期 2024-04-23 來自 WorkOS 在 X 上的一則貼文（[貼文](https://x.com/WorkOS/status/1782774170146791776)）：X 沒有將該頁面提供給本站的檢查程式，因此日期是從貼文的 ID 解碼而來，而貼文的文字（"Today, we are excited to announce the acquisition of @warrant_dev"，今天，我們很高興宣布收購 @warrant_dev）只在搜尋結果中看到。沒有找到 WorkOS 第一手的部落格文章。Warrant 網站現在顯示 "Warrant —> Now WorkOS FGA"（[warrant.dev](https://warrant.dev)），而 README 連結到 WorkOS FGA 的文件。
+
+## 論文與 Warrant 並列對照
+
+Warrant 的文件網站已經不存在，因此本表取材自開源程式碼。
+
+| 論文中 | Warrant（開源版）中 |
+| --- | --- |
+| 命名空間設定（§2.3） | 物件型別：含 `type` 與 `relations` 的 JSON，每個關係是一條規則（[spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)） |
+| 關係元組 `object#relation@user`（§2.1） | 一個 warrant：`objectType`、`objectId`、`relation`，以及一個含 `objectType`、`objectId` 與選擇性 `relation` 的 `subject` |
+| `_this` | 直接 warrant，檢查一律會先嘗試它（"1. Check for direct warrant match"，1. 檢查直接 warrant 是否相符，[check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go)） |
+| `computed_userset` | `{ "inheritIf": "owner" }` |
+| `tuple_to_userset` | `{ "inheritIf": "viewer", "ofType": "folder", "withRelation": "parent" }` |
+| 聯集、交集、排除 | 將 `inheritIf` 設為 `anyOf`、`allOf` 或 `noneOf`，並搭配巢狀的 `rules` |
+| zookie（§2.2、§2.4） | `Warrant-Token` 標頭；開源伺服器只對值 `latest` 作出反應（見「一致性」）（[wookie.go](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go)） |
+| Check（§2.4.4） | `POST /v2/check`（另有 `/v2/authorize`） |
+| Read（§2.4.1） | `GET /v2/warrants`；`GET /v2/query` 用於對圖的查詢 |
+| Write（§2.4.2） | `POST /v2/warrants`、`DELETE /v2/warrants` |
+| Watch（§2.4.3） | 無 |
+| Expand（§2.4.5） | 無 |
+| Leopard（§3.2.4） | 無 |
+| Spanner（§3.1） | MySQL、PostgreSQL 或 SQLite，可選用唯讀副本 |
+
+## 以物件型別表示貫穿全站的範例
+
+論文的圖 1 讓擁有者成為編輯者、編輯者成為檢視者，並讓上層資料夾的檢視者成為文件的檢視者（§2.3.1）。在 Warrant 中，每個物件型別列出其關係；空物件 `{}` 表示「只有直接 warrant」，`inheritIf` 則加入一條規則。
+
+```json
+[
+  { "type": "group", "relations": { "member": {} } },
+  { "type": "folder", "relations": { "viewer": {} } },
+  {
+    "type": "doc",
+    "relations": {
+      "parent": {},
+      "owner": {},
+      "editor": { "inheritIf": "owner" },
+      "viewer": {
+        "inheritIf": "anyOf",
+        "rules": [
+          { "inheritIf": "editor" },
+          { "inheritIf": "viewer", "ofType": "folder", "withRelation": "parent" }
+        ]
+      }
+    }
+  }
+]
+```
+
+這裡沒有 `user` 項目：伺服器在其初始資料庫遷移中建立了內建的 `user` 物件型別（[migration](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql)）。帶有 `ofType` 與 `withRelation` 的規則會找出 warrant `doc:readme#parent@folder:…`，並對找到的每個資料夾檢查 `viewer`，與檢查程式碼中的做法相同（[check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go) 中的 `getMatchingSubjectsBySubjectType`）。
+
+<Callout title="已對照程式碼查核，未實際執行">
+這些物件型別依照截至 2026-11-13 開源伺服器所接受的結構撰寫：[spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go) 中的 `RelationRule` 型別，以及維護者的測試資料，例如 [tests/v2/authz.json](https://github.com/warrant-dev/warrant/blob/main/tests/v2/authz.json)。它們尚未被送到 Warrant 伺服器。延續 Warrant 的產品 WorkOS FGA 的設定方式不同（見「狀態」）。
+</Callout>
+
+貫穿全站範例的五個 warrant，以 `POST /v2/warrants` 的請求本文表示：
+
+```json
+{ "objectType": "doc", "objectId": "readme", "relation": "owner", "subject": { "objectType": "user", "objectId": "anne" } }
+{ "objectType": "group", "objectId": "eng", "relation": "member", "subject": { "objectType": "user", "objectId": "beto" } }
+{ "objectType": "doc", "objectId": "readme", "relation": "viewer", "subject": { "objectType": "group", "objectId": "eng", "relation": "member" } }
+{ "objectType": "doc", "objectId": "readme", "relation": "parent", "subject": { "objectType": "folder", "objectId": "A" } }
+{ "objectType": "folder", "objectId": "A", "relation": "viewer", "subject": { "objectType": "user", "objectId": "chen" } }
+```
+
+哪一個 warrant 與哪一條規則決定了每個人與 readme 之間的 `viewer` 關係？
+
+<Graph
+  width={600}
+  height={260}
+  title="以 Warrant 的 warrant 表示貫穿全站的範例"
+  desc="五個 warrant。user anne 是 doc readme 的 owner。user beto 是 group eng 的 member。group eng#member 是 doc readme 的 viewer。folder A 是 doc readme 的 parent。user chen 是 folder A 的 viewer。從 Chen 經由 folder A 的路徑被標出：它由 ofType 為 folder、withRelation 為 parent 的規則解析。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer (#member)", dashed: true },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Anne：經由 inheritIf，owner → editor → viewer。Beto：主體為 group:eng#member 的 warrant。Chen：ofType／withRelation 規則。虛線：帶有關係的主體。"
+/>
+
+## 架構
+
+由哪個資料庫回答請求？
+
+<Graph
+  width={600}
+  height={240}
+  title="依開源程式碼的 Warrant 部署"
+  desc="你的服務呼叫一個 Warrant HTTP 服務。寫入，以及攜帶 Warrant-Token latest 的讀取，送往主 SQL 資料庫。在設定了 reader DSN 時，其他讀取送往 reader 連線池。"
+  nodes={[
+    { id: "app", x: 90, y: 120, label: "你的服務", kind: "client" },
+    { id: "w", x: 300, y: 120, label: "Warrant\nHTTP 服務", kind: "server" },
+    { id: "primary", x: 500, y: 50, label: "主資料庫", kind: "store" },
+    { id: "replica", x: 500, y: 190, label: "Reader 資料庫\n（選用）", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "w", label: "/v2/check, /v2/warrants" },
+    { from: "w", to: "primary", label: "寫入、latest" },
+    { from: "w", to: "replica", label: "其他讀取", dashed: true },
+  ]}
+  caption="黃色：Warrant 服務。綠色：資料庫。藍色：呼叫端。虛線：只有在設定了 reader DSN 時才使用。"
+/>
+
+- 由一個 Go 服務提供 HTTP API（[router.go](https://github.com/warrant-dev/warrant/blob/main/pkg/service/router.go)）。
+- MySQL 與 PostgreSQL 的設定接受一個 `dsn` 與一個選擇性的 `readerDsn`（[config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)）；也支援 SQLite，"in-memory or file"（記憶體內或檔案）（[README](https://github.com/warrant-dev/warrant)）。
+- 選擇連線池的規則寫在 [sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go) 的一段註解中：若呼叫是寫入、若沒有 reader、若 context "contains 'latest' wookie"（包含 'latest' wookie），或若伺服器內部程式碼設定了強制使用 writer，就使用 writer；否則使用 reader。
+
+## 一致性
+
+Warrant 的程式碼將其權杖稱為 *wookie*（[wookie](https://github.com/warrant-dev/warrant/tree/main/pkg/wookie)）。`Token` 型別存有一個 ID、一個版本與一個時間戳記，但開源伺服器從未將其送給客戶端：warrant 服務在該位置傳回 `nil`，而 HTTP handler 會忽略它（[warrant/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/warrant/service.go)、[warrant/handlers.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/warrant/handlers.go)）。伺服器實際讀取的是請求標頭 `Warrant-Token`，而只有一個值會改變行為：`latest`。
+
+對於緊接在寫入之後的檢查，`Warrant-Token: latest` 改變了什麼？
+
+<Swimlane
+  lanes={["你的服務", "Warrant", "主資料庫", "Reader 資料庫"]}
+  timeLabel="時間"
+  laneWidth={140}
+  title="Warrant-Token: latest"
+  desc="服務寫入 warrant doc:readme viewer group:eng#member；它被送往主資料庫。不帶標頭的檢查從 reader 資料庫讀取。帶有 Warrant-Token latest 的檢查從主資料庫讀取，而主資料庫已存有該寫入。"
+  events={[
+    { lane: 0, t: 0, label: "POST\n/v2/warrants", kind: "write" },
+    { lane: 2, t: 0, label: "warrant\n已寫入", kind: "write" },
+    { lane: 0, t: 1, label: "檢查，\n不帶標頭", kind: "read" },
+    { lane: 3, t: 1, label: "從 reader\n連線池讀取", kind: "note" },
+    { lane: 0, t: 2, label: "以 latest\n檢查", kind: "read" },
+    { lane: 2, t: 2, label: "從主資料庫\n讀取", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [0, 1], to: [3, 1] },
+    { from: [0, 2], to: [2, 2] },
+  ]}
+  caption="論文的 zookie 指名的是一個快照（§2.4）；latest 指名的只是一個資料庫。"
+/>
+
+README 本身指出，在高吞吐量下達到低延遲 "requires running Warrant as a distributed service with the use of Warrant-Tokens (also referred to as Zookies in Google Zanzibar)"（需要將 Warrant 作為分散式服務執行，並使用 Warrant-Token（在 Google Zanzibar 中也稱為 Zookie）），而 "this open source version of Warrant is only capable of handling low-to-moderate throughput"（這個開源版本的 Warrant 只能處理低到中等的吞吐量）（[README](https://github.com/warrant-dev/warrant)，廠商撰寫）。其 Warrant-Token 的連結現在導向 WorkOS FGA 的一般概覽頁面，該頁面並未描述它們。
+
+請注意與論文的差異。zookie 設定的是下限，這讓 Zanzibar 能 "to choose any timestamp fresher than the one encoded in a zookie"（選擇任何比 zookie 中所編碼者更新鮮的時間戳記），並以 "at a default staleness with already replicated data"（預設陳舊度、使用已複製的資料）處理大多數檢查（§2.2）。`latest` 中沒有任何時間點：它將讀取移到主資料庫，那是最新的副本，但也就放棄了唯讀副本。
+
+## 與論文的差異
+
+- 如上所述，開源伺服器中**沒有快照權杖**。
+- **內建 RBAC 與 ABAC。** 內建角色、權限、租戶、定價方案與功能等物件型別，以及 warrant 上的政策條件（[README](https://github.com/warrant-dev/warrant)、[migration](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql)）。
+- **查詢語言。** `GET /v2/query` 回答論文的 Read 與 Expand 無法回答的列出類問題（[query handlers](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/query/handlers.go)）。
+- **沒有 Watch、Expand 或 Leopard**，並以單一 SQL 主資料庫取代 Spanner（§3.1）。
+
+## 狀態
+
+- 開源版：首個版本 v0.1.0 發布於 2023-02-23；最後一個版本 v1.15.1 發布於 2024-06-10；最後一次 commit 於 2025-12-05，是對 README 的變更；未封存；GitHub 星數約 1.3k（[releases](https://github.com/warrant-dev/warrant/releases)、GitHub API，2026-11-13）。
+- 公司：被 WorkOS 收購，於 2024-04-23 在 X 上宣布（見上文；貼文本身無法載入）。
+- 產品：WorkOS FGA。其目前的文件沒有提到 Warrant 或 Zanzibar。它將 FGA 呈現為 WorkOS RBAC 的延伸："You configure resource types in the WorkOS Dashboard"（你在 WorkOS Dashboard 中設定資源型別），且 FGA "can be adopted incrementally, with no data migration or confusing schema DSL"（可以逐步採用，不需要資料遷移，也沒有令人困惑的 schema DSL）（[WorkOS FGA docs](https://workos.com/docs/fga)，廠商撰寫）。本頁的物件型別 JSON 是開源版的格式，而非 WorkOS FGA 的格式。
+
+## 資料來源
+
+- Warrant repository and README: [github.com/warrant-dev/warrant](https://github.com/warrant-dev/warrant)
+- Object type spec: [pkg/authz/objecttype/spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)
+- Check engine: [pkg/authz/check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go)
+- Tokens: [pkg/wookie](https://github.com/warrant-dev/warrant/tree/main/pkg/wookie)
+- Database pools: [pkg/database/sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go), [pkg/config/config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)
+- Default object types: [000002_create_default_obj_types.up.sql](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql)
+- Test fixtures: [tests/v2/authz.json](https://github.com/warrant-dev/warrant/blob/main/tests/v2/authz.json)
+- Website: [warrant.dev](https://warrant.dev)
+- WorkOS post on X: [x.com/WorkOS/status/1782774170146791776](https://x.com/WorkOS/status/1782774170146791776)
+- WorkOS FGA docs: [workos.com/docs/fga](https://workos.com/docs/fga)

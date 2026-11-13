@@ -1,0 +1,370 @@
+---
+title: "架构：从一次 Check 到 Spanner"
+description: "Zanzibar 背后的服务器和数据库，沿着一次 Check 请求和 Watch 流逐一说明。"
+section: guide
+part: mechanisms
+order: 5
+checked: "2026-11-13"
+paper: ["3", "3.1", "3.2.5", "3.2.6", "3.2.7", "4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar 是位于一组 Spanner 数据库前面的一组服务器。本页先列出各个组成部分，再跟随一次 Check 请求穿过它们，然后看数据在磁盘上如何布局。最后的数字是论文所报告的 2018 年生产环境数据。
+
+## 组成部分
+
+有哪些方框，数据在它们之间如何流动？论文用图 2 回答了这个问题。下面的版本保留了其配色（客户端为蓝色，服务器为黄色，Spanner 数据库为绿色），并省去了细节。
+
+<Graph
+  width={640}
+  height={400}
+  minWidth={560}
+  title="Zanzibar 架构（简化）"
+  desc="客户端向 Zanzibar 服务集群中的 aclservers 发送 Check、Read、Expand 和 Write；与论文一样，watchserver 画在集群之外。aclservers 从 Spanner 加载命名空间配置，在每个命名空间一个的 Spanner 数据库中读写关系元组，并把每次写入追加到同样位于 Spanner 中的变更日志。watchserver 跟踪变更日志，把变更以流的形式发送给客户端（Watch API）和 Leopard（论文图 2 把 Leopard 画成一个独立的索引系统）。一条周期性的离线流水线读取元组数据库、转储快照并对旧版本进行垃圾回收；Leopard 根据这些快照构建索引，并为 aclservers 回答集合计算。"
+  groups={[
+    { x: 178, y: 28, w: 184, h: 112, label: "Zanzibar 服务集群" },
+    { x: 425, y: 20, w: 210, h: 262, label: "Spanner" },
+  ]}
+  nodes={[
+    { id: "cl", x: 55, y: 90, label: "客户端", kind: "client" },
+    { id: "acl", x: 270, y: 90, label: "aclservers", kind: "server" },
+    { id: "watch", x: 270, y: 250, label: "watchserver", kind: "server" },
+    { id: "wcl", x: 55, y: 250, label: "客户端", kind: "client" },
+    { id: "cfg", x: 531, y: 70, label: "命名空间配置", kind: "store" },
+    { id: "tup", x: 531, y: 150, label: "关系元组\n（每个命名空间一个库）", kind: "store" },
+    { id: "log", x: 495, y: 248, label: "变更日志", kind: "store" },
+    { id: "pipe", x: 585, y: 360, label: "离线\n流水线\n（周期性）", kind: "server" },
+    { id: "leo", x: 120, y: 360, label: "Leopard", kind: "server" },
+  ]}
+  edges={[
+    { from: "cl", to: "acl", label: "Check, Read,\nExpand, Write", dir: "both" },
+    { from: "cfg", to: "acl", label: "加载" },
+    { from: "acl", to: "tup", label: "读、写", dir: "both", labelOffset: 12 },
+    { from: "acl", to: "log", label: "追加", labelOffset: -12 },
+    { from: "log", to: "watch", label: "跟踪" },
+    { from: "watch", to: "wcl", label: "Watch" },
+    { from: "watch", to: "leo", label: "变更" },
+    { from: "tup", to: "pipe", label: "转储、\nGC", dir: "both", labelOffset: -24 },
+    { from: "pipe", to: "leo", label: "快照" },
+    { from: "leo", to: "acl", label: "集合\n计算", labelOffset: -34 },
+  ]}
+  caption="根据论文图 2 重绘并简化。箭头表示数据流向。客户端出现两次只是为了让线条分开：调用 aclservers 的客户端和订阅 Watch 的客户端是同一批。"
+/>
+
+注意，客户端与两类服务器打交道。`aclservers` 回答四种请求；`watchservers` 只以流的形式发送变更。用论文的话说，`aclservers` "are organized in clusters and respond to Check, Read, Expand, and Write requests"（以集群形式组织，响应 Check、Read、Expand 和 Write 请求），而 `watchservers` "tail the changelog and serve a stream of namespace changes to clients in near real time"（跟踪变更日志，并以近乎实时的方式向客户端提供命名空间变更流）（§3）。Leopard 是面向大型和深度嵌套组的索引，有[单独的页面](../leopard/)。
+
+离线流水线生成 "dumps of the relation tuples in each namespace at a known snapshot timestamp"（各命名空间在某个已知快照时间戳上的关系元组转储），并对 "tuple versions older than a threshold configured per namespace"（早于按命名空间配置的阈值的元组版本）进行垃圾回收（§3）。
+
+## 一次 Check 的逐步过程
+
+要跟随的请求：Beto 是 readme 的查看者吗？在贯穿示例中，readme 的查看者包括 `group:eng` 的成员，而 Beto 是其中之一，因此答案是“是”。Zanzibar 必须通过读取两个对象 `doc:readme` 和 `group:eng` 才能得出这一结论。
+
+### 请求可落在任意服务器上，再由它扇出
+
+由哪台服务器来做这项工作？任何一台都可以接收请求，之后工作按对象分散出去。
+
+<Graph
+  width={640}
+  height={260}
+  title="一次 Check 在集群中扇出"
+  desc="客户端向 aclserver A 发送 Check。服务器 A 询问负责 doc:readme 的 aclserver B：Beto 是否是 readme 的查看者。服务器 B 发现 group:eng 的成员是查看者，于是询问负责 group:eng 的 aclserver C：Beto 是否是成员。答案沿着相同的箭头传回 A，A 再回复客户端。"
+  nodes={[
+    { id: "cl", x: 60, y: 130, label: "客户端", kind: "client" },
+    { id: "a", x: 240, y: 130, label: "aclserver A\n接收 Check", kind: "server" },
+    { id: "b", x: 480, y: 60, label: "aclserver B\n键：doc:readme", kind: "server", on: true },
+    { id: "c", x: 480, y: 210, label: "aclserver C\n键：group:eng", kind: "server", on: true },
+  ]}
+  edges={[
+    { from: "cl", to: "a", label: "Check", dir: "both" },
+    { from: "a", to: "b", label: "是 readme 的 viewer？", dir: "both", labelOffset: -12 },
+    { from: "b", to: "c", label: "是 eng 的 member？", dir: "both" },
+  ]}
+  caption="Check(user:beto, viewer, doc:readme)。答案沿着相同的箭头返回；A 回复客户端。"
+/>
+
+服务器 A 并不需要负责其中任何一个对象。论文描述的正是这种形态："Requests arrive at any server in a cluster and that server fans out the work to other servers in the cluster as necessary. Those servers may in turn contact other servers to compute intermediate results. The initial server gathers the final result and returns it to the client."（请求到达集群中的任意服务器，该服务器根据需要将工作扇出到集群中的其他服务器。这些服务器又可能联系其他服务器来计算中间结果。最初的服务器汇集最终结果并将其返回给客户端。）（§3）
+
+### 一致性哈希选出对端
+
+A 如何知道应该就 readme 去问 B？一个集群的服务器构成一个分布式缓存："Cache entries are distributed across Zanzibar servers with consistent hashing"（缓存条目通过一致性哈希分布在 Zanzibar 服务器上）（§3.2.5）。该方案出自 [Karger 等人（STOC '97）](https://people.csail.mit.edu/karger/Papers/web.pdf)，论文将其引为 [20]。对大多数命名空间而言，转发键根据对象 ID 计算（§3.2.5）。
+
+<Graph
+  width={640}
+  height={350}
+  title="转发键映射到服务器环上"
+  desc="四台 aclserver A、B、C、D 位于一个环上。请求 doc:readme#viewer 和 doc:readme#owner 都按对象 doc:readme 计算哈希，发往服务器 B。group:eng#member 发往服务器 C。folder:A#viewer 发往服务器 D。"
+  nodes={[
+    { id: "A", x: 320, y: 60, label: "aclserver A", kind: "server" },
+    { id: "B", x: 420, y: 165, label: "aclserver B", kind: "server" },
+    { id: "C", x: 320, y: 270, label: "aclserver C", kind: "server" },
+    { id: "D", x: 220, y: 165, label: "aclserver D", kind: "server" },
+    { id: "kv", x: 545, y: 50, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "ko", x: 545, y: 275, label: "doc:readme#owner", kind: "object", mono: true },
+    { id: "kg", x: 130, y: 325, label: "group:eng#member", kind: "object", mono: true },
+    { id: "kf", x: 100, y: 60, label: "folder:A#viewer", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "A", to: "B", dir: "none" },
+    { from: "B", to: "C", dir: "none" },
+    { from: "C", to: "D", dir: "none" },
+    { from: "D", to: "A", dir: "none" },
+    { from: "kv", to: "B", label: "hash(doc:readme)", dashed: true, on: true, labelOffset: -14 },
+    { from: "ko", to: "B", label: "hash(doc:readme)", dashed: true, on: true, labelOffset: 14 },
+    { from: "kg", to: "C", label: "hash(group:eng)", dashed: true, labelOffset: 14 },
+    { from: "kf", to: "D", label: "hash(folder:A)", dashed: true, labelOffset: -12 },
+  ]}
+  caption="两个 readme 请求都发往 B，因为键是对象而不是关系。环形图是教科书中一致性哈希的示意；论文没有说明 Zanzibar 使用哪种变体。"
+/>
+
+注意，readme 上的 `viewer` 和 `owner` 落在同一台服务器上。这正是以对象为键的意义所在："processing a check on ⟨*object#relation*⟩ often involves indirect ACL checks on other relations of the same object and reading relation tuples of the object. These checks and reads can be processed by the same server since they share the same forwarding key with the parent check request."（处理针对 ⟨*object#relation*⟩ 的检查，往往涉及对同一对象其他关系的间接 ACL 检查以及读取该对象的关系元组。由于这些检查和读取与父检查请求共享同一个转发键，它们可以由同一台服务器处理。）（§3.2.5）Karger 等人设计一致性哈希时，使得增加或移除一个缓存时，只需移动为保持负载均衡所需的最少比例的对象，这正是它适合缓存的原因。
+
+对于热点键，论文补充说它使用 [Slicer](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya) "to help distribute hot keys to multiple servers"（帮助把热点键分布到多台服务器上）（§3.2.5）。
+
+### 调用两端都缓存结果
+
+当许多服务器同时就 `group:eng` 询问 C 时会发生什么？例如一个搜索结果页面要检查几十个全都共享给 eng 的文档。
+
+<Graph
+  width={640}
+  height={300}
+  title="调用方和被调用方的缓存构成一棵树"
+  desc="三台各带缓存的 aclserver A、D、E 询问 aclserver C：某用户是否是 group:eng 的成员。服务器 C 有自己的缓存，只有在未命中时才从 Spanner 读取 group:eng 的元组。"
+  nodes={[
+    { id: "a", x: 100, y: 60, label: "aclserver A\n+ 缓存", kind: "server" },
+    { id: "d", x: 100, y: 150, label: "aclserver D\n+ 缓存", kind: "server" },
+    { id: "e", x: 100, y: 240, label: "aclserver E\n+ 缓存", kind: "server" },
+    { id: "c", x: 340, y: 150, label: "aclserver C\n+ 缓存", kind: "server", on: true },
+    { id: "db", x: 570, y: 150, label: "group 元组\n（Spanner）", kind: "store" },
+  ]}
+  edges={[
+    { from: "a", to: "c", label: "是 eng 成员？" },
+    { from: "d", to: "c" },
+    { from: "e", to: "c" },
+    { from: "c", to: "db", label: "未命中时", on: true },
+  ]}
+  caption="调用方命中可省去一次发往 C 的 RPC。C 命中可省去一次 Spanner 读取。"
+/>
+
+调用方的缓存和被调用方的缓存叠成一棵树："To handle hot forwarding keys, we cache results at both the caller and the callee of internal RPCs, effectively forming cache trees."（为处理热点转发键，我们在内部 RPC 的调用方和被调用方都缓存结果，实际上形成了缓存树。）（§3.2.5）缓存键包含快照时间戳，而时间戳会被 "rounded up to a coarse granularity, such as one or ten seconds"（向上取整到较粗的粒度，例如 1 秒或 10 秒），从而使大多数近期请求共享缓存条目（§3.2.5）。在生产环境中，检查缓存 "a 10% hit rate on the delegate’s side"（在被委托方的命中率为 10%），在委托方为 "a 2% hit rate"（命中率为 2%）；论文指出，这些命中率看起来虽低，但 "they prevent 500K internal RPCs per second from creating hot spots"（它们防止了每秒 50 万次内部 RPC 形成热点）（§4.4）。
+
+### 锁表合并相同的请求
+
+缓存只有在存有答案之后才有用。如果在第一个请求完成之前就到达了许多相同的请求，它们都会未命中，并全部发往 Spanner：这就是[缓存踩踏](https://en.wikipedia.org/wiki/Cache_stampede)（论文的参考文献 [3]）。C 如何避免这种情况？
+
+<Swimlane
+  lanes={["请求 1", "aclserver C", "请求 2", "Spanner"]}
+  laneWidth={140}
+  rowHeight={58}
+  timeLabel="时间"
+  title="锁表只放行多个相同请求中的一个"
+  desc="请求 1 向 C 请求缓存键 K；C 未命中，并在锁表中记录 K。请求 2 请求同一个键，被要求等待。C 从 Spanner 读取一次数据行，填充缓存并释放该条目。两个请求都得到答案。"
+  events={[
+    { lane: 0, t: 0, label: "请求键 K", kind: "read" },
+    { lane: 1, t: 0, label: "未命中：锁定 K", kind: "write" },
+    { lane: 2, t: 1, label: "请求键 K", kind: "read" },
+    { lane: 1, t: 1, label: "K 已锁定：等待", kind: "note" },
+    { lane: 1, t: 2, label: "只读一次", kind: "read" },
+    { lane: 3, t: 2, label: "数据行", kind: "read" },
+    { lane: 1, t: 3, label: "填充缓存", kind: "good" },
+    { lane: 0, t: 4, label: "答案", kind: "good" },
+    { lane: 2, t: 4, label: "答案", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [2, 1], to: [1, 1] },
+    { from: [1, 2], to: [3, 2] },
+    { from: [1, 3], to: [0, 4] },
+    { from: [1, 3], to: [2, 4] },
+  ]}
+  caption="请求 2 被阻塞，而不是发往 Spanner。对键 K 只发出一次读取。"
+/>
+
+论文写道："we maintain a *lock table* on each server to track outstanding reads and checks. Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated."（我们在每台服务器上维护一个*锁表*，用于跟踪未完成的读取和检查。在共享同一缓存键的请求中，只有一个请求会开始处理；其余请求阻塞，直到缓存被填充。）（§3.2.5）对于检查，锁表在被委托方 "an additional 12%"（额外节省了 12%），在委托方 "an additional 3%"（额外节省了 3%）（§4.4）。
+
+后来又有两项改进（§3.2.5）。对于非常热门的对象，Zanzibar 一次性读取并缓存 ⟨*object#relation*⟩ 的*全部*元组，"trading read bandwidth for cacheability"（以读取带宽换取可缓存性）。此外，由于被取消的子检查会让其缓存键留空，它会推迟 "eager cancellation when there are waiters on the corresponding lock table entry"（在相应锁表条目上有等待者时的及早取消）。
+
+### 对 Spanner 的读取共用一个池
+
+现在来看一个涉及同一对象多个关系的检查：Chen 是 readme 的查看者吗？在论文图 1 的配置下，`viewer` 包含 `editor`，`editor` 包含 `owner`，而 `parent` 文件夹的查看者也是文档的查看者。因此服务器 B 要读取 readme 的四个元组集。
+
+<Graph
+  width={640}
+  height={300}
+  title="一次检查的叶节点读取共用一个池"
+  desc="判断 Chen 是否是 doc:readme 的查看者，需要 readme 的 viewer、editor、owner 和 parent 元组。这四个叶节点在 aclserver B 上同时求值，B 先把它们的读取汇入一个池，再发往 Spanner 中的 doc 数据库。"
+  nodes={[
+    { id: "v", x: 110, y: 50, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "e", x: 110, y: 117, label: "doc:readme#editor", kind: "object", mono: true },
+    { id: "o", x: 110, y: 184, label: "doc:readme#owner", kind: "object", mono: true },
+    { id: "p", x: 110, y: 251, label: "doc:readme#parent", kind: "object", mono: true },
+    { id: "b", x: 350, y: 150, label: "aclserver B\n汇集读取", kind: "server", on: true },
+    { id: "db", x: 575, y: 150, label: "doc 元组\n（Spanner）", kind: "store" },
+  ]}
+  edges={[
+    { from: "v", to: "b" },
+    { from: "e", to: "b" },
+    { from: "o", to: "b" },
+    { from: "p", to: "b" },
+    { from: "b", to: "db", label: "更少的 RPC", on: true },
+  ]}
+  caption="Check(user:chen, viewer, doc:readme)。四个叶节点同时开始；它们的读取一起发出。"
+/>
+
+叶节点并发执行："we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled."（我们并发地评估布尔表达式树的所有叶节点。当某个节点的结果决定了子树的结果时，子树中其他节点的评估会被取消。）（§3.2.3）它们的读取被归并："We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner."（我们采用一种池化机制，把同一 ACL 检查的读取归并在一起，以尽量减少发往 Spanner 的读取 RPC 数量。）（§3.2.3）随后 parent 元组指向 `folder:A`，`folder:A#viewer` 被转发给负责 `folder:A` 的服务器，并在那里找到 Chen。论文没有说明一个池会变成多少次 RPC；它只说到“更少”为止。
+
+元组的布局让这件事代价很低：主键顺序 "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair"（使我们能够查找给定对象 ID 或 *(对象 ID, 关系)* 对的所有关系元组）（§3.1.1，参见下文的[存储](#存储)）。
+
+### 对缓慢的 Spanner 读取进行对冲
+
+有些读取会因为与请求本身无关的原因而变慢。对于发往 Spanner 和 Leopard 的调用，Zanzibar 使用请求对冲，该方法出自 [Dean 和 Barroso 的 “The Tail at Scale”（CACM，2013）](https://research.google/pubs/the-tail-at-scale/)，即论文的参考文献 [16]。第二个请求何时发出？
+
+<Swimlane
+  lanes={["aclserver", "Spanner 副本 1", "Spanner 副本 2"]}
+  laneWidth={180}
+  rowHeight={58}
+  timeLabel="时间"
+  title="延迟发出的对冲读取"
+  desc="aclserver 向 Spanner 副本 1 发送一次读取，该副本很慢。经过对冲延迟后，aclserver 向副本 2 发送同样的读取。副本 2 先回复；aclserver 使用该答案，并取消副本 1 上的读取。"
+  events={[
+    { lane: 0, t: 0, label: "发送读取", kind: "read" },
+    { lane: 1, t: 0, label: "缓慢", kind: "bad" },
+    { lane: 0, t: 1, label: "延迟已过", kind: "note" },
+    { lane: 2, t: 1, label: "同样的读取", kind: "read" },
+    { lane: 2, t: 2, label: "回复", kind: "good" },
+    { lane: 0, t: 3, label: "使用最先的回复", kind: "good" },
+    { lane: 1, t: 4, label: "已取消", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [0, 1], to: [2, 1], label: "对冲" },
+    { from: [2, 2], to: [0, 3] },
+    { from: [0, 3], to: [1, 4], label: "取消", dashed: true },
+  ]}
+  caption="只有在确知第一次读取较慢之后，才会发出对冲请求。"
+/>
+
+对冲是指 "we send the same request to multiple servers, use whichever response comes back first, and cancel the other requests"（我们把同一请求发送到多台服务器，使用最先返回的响应，并取消其他请求）（§3.2.7）。第二个请求会等待："we first send one request and defer sending hedged requests until the initial request is known to be slow"（我们先发送一个请求，并推迟发送对冲请求，直到确知初始请求较慢），延迟由一个估计 "*N*th percentile latency based on recent measurements"（基于近期测量的第 *N* 百分位延迟）的估计器设定（§3.2.7）。在生产环境中，"1% of Spanner reads, or 200K reads per second, benefit from hedging"（1% 的 Spanner 读取，即每秒 20 万次读取，从对冲中受益）（§4.4）。
+
+<Callout kind="note" title="aclserver 之间不做对冲">
+Zanzibar 不对其自身的内部调用进行对冲。各个检查的代价差别很大："Hedging check requests would result in duplicating the most expensive workloads and, ironically, worsening latency."（对冲检查请求会导致重复执行代价最高的工作负载，反而使延迟恶化。）（§3.2.7）它转而依靠副本和监控来避开缓慢的服务器。
+</Callout>
+
+### 对每个客户端加以隔离
+
+共享服务必须防止一个客户端拖慢其他客户端。§3.2.6 列出了四种限制：
+
+- CPU：每个 RPC 以 "generic *cpu-seconds*"（通用 *CPU 秒*）计算成本；每个客户端有一个全局 CPU 上限，"its RPCs will be throttled if it exceeds the limit *and* there is no spare capacity in the overall system"（如果它超出上限*并且*整个系统没有空闲容量，它的 RPC 将被限流）。
+- 未完成的 RPC：每台服务器限制其总数，以及每个客户端的数量。
+- Spanner："the maximum number of concurrent reads per *(object, client)* and per client on each Spanner server"（每台 Spanner 服务器上按 *(对象, 客户端)* 和按客户端的最大并发读取数）。
+- 锁表："different lock table keys for requests from different clients"（来自不同客户端的请求使用不同的锁表键），这样 Spanner 对一个客户端的限流不会阻塞另一个客户端。
+
+## Watch 路径
+
+写入还会馈入一条流。Anne 写入一个元组之后，变更会去往哪里？
+
+<Graph
+  width={640}
+  height={330}
+  title="从一次写入到 Watch 流"
+  desc="客户端向 aclserver 发送 Write。aclserver 在一个 Spanner 事务中把元组写入 doc 命名空间数据库，并把一个条目写入某个变更日志分片。watchserver 跟踪变更日志，把变更以流的形式发送给 Watch 客户端和 Leopard 的增量索引器。"
+  nodes={[
+    { id: "w", x: 60, y: 70, label: "客户端\nWrite", kind: "client" },
+    { id: "acl", x: 230, y: 70, label: "aclserver", kind: "server" },
+    { id: "tup", x: 470, y: 40, label: "doc 元组", kind: "store" },
+    { id: "log", x: 470, y: 140, label: "变更日志分片", kind: "store", on: true },
+    { id: "watch", x: 470, y: 240, label: "watchserver", kind: "server", on: true },
+    { id: "cl", x: 300, y: 300, label: "Watch 客户端", kind: "client" },
+    { id: "leo", x: 580, y: 300, label: "Leopard\n索引器", kind: "server" },
+  ]}
+  edges={[
+    { from: "w", to: "acl", label: "元组" },
+    { from: "acl", to: "tup", label: "同一事务", labelOffset: -10 },
+    { from: "acl", to: "log", label: "同一事务", labelOffset: 10 },
+    { from: "log", to: "watch", label: "跟踪", on: true },
+    { from: "watch", to: "cl", label: "变更" },
+    { from: "watch", to: "leo" },
+  ]}
+  caption="元组及其变更日志条目在一个事务中提交，因此流既不会漏掉一次写入，也不会出现未提交的写入。"
+/>
+
+"Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction."（每次 Zanzibar 写入都在单个事务中同时提交到元组存储和变更日志分片。）托管变更日志分片的 Spanner 服务器充当事务协调者，"to minimize blocking of changelog reads on pending transactions"（以尽量减少变更日志读取因未决事务而阻塞）（§3.1.2）。Leopard 是这条流的一个消费者：它的增量索引器 "calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications"（调用 Zanzibar 的 Watch API，接收按时间排序的 Zanzibar 元组修改流）（§3.2.4）。
+
+## 存储
+
+有哪些数据库，一行数据长什么样？共有三类（§3）。
+
+<Graph
+  width={640}
+  height={300}
+  title="Zanzibar 的 Spanner 数据库"
+  desc="每个命名空间一个数据库，存放关系元组：此处为 doc、group 和 folder。单个命名空间配置数据库存放配置以及配置更新的变更日志。单个由所有命名空间共享的变更日志数据库记录元组更新。aclservers 读写元组数据库，加载并监视配置数据库，并向变更日志追加记录。"
+  nodes={[
+    { id: "doc", x: 90, y: 60, label: "doc 元组", kind: "store" },
+    { id: "grp", x: 90, y: 150, label: "group 元组", kind: "store" },
+    { id: "fol", x: 90, y: 240, label: "folder 元组", kind: "store" },
+    { id: "acl", x: 320, y: 150, label: "aclservers", kind: "server" },
+    { id: "cfg", x: 520, y: 60, label: "命名空间配置\n（配置 + 其变更日志）", kind: "store" },
+    { id: "log", x: 520, y: 240, label: "变更日志\n（所有命名空间）", kind: "store" },
+  ]}
+  edges={[
+    { from: "acl", to: "doc", dir: "both" },
+    { from: "acl", to: "grp", label: "读、写", dir: "both" },
+    { from: "acl", to: "fol", dir: "both" },
+    { from: "cfg", to: "acl", label: "加载、监视" },
+    { from: "acl", to: "log", label: "追加" },
+  ]}
+  caption="每个命名空间一个元组数据库（左），一个配置数据库和一个由所有命名空间共享的变更日志（右）。"
+/>
+
+**元组数据库。** "We store relation tuples of each namespace in a separate database, where each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*."（我们把每个命名空间的关系元组存储在单独的数据库中，每一行由主键 *(分片 ID, 对象 ID, 关系, 用户, 提交时间戳)* 标识。）（§3.1.1）由于提交时间戳是键的一部分，旧版本保留在各自的行上，"so that we can evaluate checks and reads at any timestamp within the garbage collection window"（使我们能够在垃圾回收窗口内的任意时间戳上评估检查和读取）。贯穿示例中的元组在 `doc` 和 `group` 数据库中会是这样：
+
+| 数据库 | 分片 ID | 对象 ID | 关系 | 用户 | 提交时间戳 |
+| --- | --- | --- | --- | --- | --- |
+| `doc` | *s*(readme) | `readme` | `owner` | `user:anne` | *t*₁ |
+| `doc` | *s*(readme) | `readme` | `parent` | `folder:A#...` | *t*₂ |
+| `doc` | *s*(readme) | `readme` | `viewer` | `group:eng#member` | *t*₃ |
+| `group` | *s*(eng) | `eng` | `member` | `user:beto` | *t*₄ |
+
+同一对象的行排在一起；论文说这种键顺序 "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair"（使我们能够查找给定对象 ID 或 *(对象 ID, 关系)* 对的所有关系元组）。"Usually the shard ID is determined solely by the object ID"（通常分片 ID 仅由对象 ID 决定）；对于成员非常多的组，它可以 "computed from both object ID and user"（由对象 ID 和用户共同计算得出）（§3.1.1）。论文没有给出分片函数，因此上面的 *s*(…) 只是占位符，用户列的确切编码也没有描述。
+
+**变更日志。** 所有命名空间共用一个数据库，键为 *(变更日志分片 ID, 时间戳, 唯一更新 ID)*，"where a changelog shard is randomly selected for each write"（其中每次写入随机选择一个变更日志分片）（§3.1.2）。
+
+**命名空间配置。** 一个数据库，包含两张表：配置表 "keyed by namespace IDs"（以命名空间 ID 为键），以及 "a changelog of config updates"（配置更新的变更日志），后者 "keyed by commit timestamps"（以提交时间戳为键）。服务器在启动时加载所有配置，然后持续跟随该变更日志（§3.1.3）。
+
+**复制。** "Replicas exist in dozens of locations around the world, with multiple replicas per region. The 5 voting replicas are in eastern and central United States, in 3 different metropolitan areas to isolate failures but within 25 milliseconds of each other so that Paxos transactions commit quickly."（副本分布在全球数十个地点，每个区域有多个副本。5 个投票副本位于美国东部和中部，分布在 3 个不同的大都市区以隔离故障，但彼此之间的距离在 25 毫秒以内，从而使 Paxos 事务能够快速提交。）（§3.1.4）Spanner 本身见 [Corbett 等人（OSDI '12）](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)，即论文的参考文献 [15]。
+
+## 运行数据
+
+论文 §4 报告了以下数字。按 API 统计的峰值和延迟来自 2018 年 12 月的 7 天期间（§4、§4.2）；其他数字论文没有对应到明确的时间段。每个单元格均按原文引用。
+
+| 项目 | 论文原文 | § |
+| --- | --- | --- |
+| 生产运行时间 | "more than 5 years"（超过 5 年） | 4 |
+| 命名空间 | "more than 1,500 namespaces defined by hundreds of client applications"（由数百个客户端应用定义的 1,500 多个命名空间） | 4 |
+| 元组 | "more than 2 trillion relation tuples that occupy close to 100 terabytes"（超过 2 万亿条关系元组，占用近 100 TB） | 4 |
+| 复制 | "fully replicated in more than 30 locations around the world"（在全球 30 多个地点完整复制） | 4 |
+| 客户端负载 | "more than 10 million client queries per second (QPS)"（每秒超过 1000 万次客户端查询（QPS）） | 4 |
+| 各 API 峰值 | "Check requests peak at roughly 4.2M QPS, Read at 8.2M, Expand at 760K, and Write at 25K"（Check 请求峰值约 420 万 QPS，Read 为 820 万，Expand 为 76 万，Write 为 2.5 万） | 4 |
+| 服务器 | "more than 10,000 servers organized in several dozen clusters around the world"（超过 10,000 台服务器，组织成分布在全球的几十个集群） | 4 |
+| 每个集群的服务器数 | "from fewer than 100 to more than 1,000, with the median near 500"（从不到 100 台到超过 1,000 台，中位数接近 500 台） | 4 |
+| Check Safe 延迟 | "At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively."（在第 50、95、99 和 99.9 百分位，其峰值分别约为 3、11、20 和 93 毫秒。） | 4.2 |
+| 可用性 | "above 99.999% over the past 3 years of operation at Google"（在 Google 过去 3 年的运行中高于 99.999%） | 4.3 |
+| 内部 RPC | "22 million internal “delegated” RPCs per second, split about evenly between reads and checks"（每秒 2200 万次内部“委托”RPC，读取和检查大约各占一半） | 4.4 |
+| 缓存查找 | "approximately 200 million lookups per second at peak, 150 million from checks and 50 million from reads"（峰值时每秒约 2 亿次查找，其中 1.5 亿次来自检查，5000 万次来自读取） | 4.4 |
+| 对 Spanner 的读取 | "only 20 million read RPCs per second to Spanner"（每秒只有 2000 万次发往 Spanner 的读取 RPC） | 4.4 |
+| Spanner 读取延迟 | "0.5 msec at the median, and 2 msec at the 95th percentile"（中位数 0.5 毫秒，第 95 百分位 2 毫秒） | 4.4 |
+| 对冲读取 | "1% of Spanner reads, or 200K reads per second, benefit from hedging"（1% 的 Spanner 读取，即每秒 20 万次读取，从对冲中受益） | 4.4 |
+
+注意最后几行中的比例：每秒 2 亿次缓存查找，对比每秒 2000 万次发往 Spanner 的读取 RPC，即每向存储发出一次读取，大约对应十次内存查找。
+
+## 来源
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3, §3.1, §3.2.3, §3.2.5–§3.2.7, §4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- Karger et al., "Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the World Wide Web", STOC '97（论文参考文献 [20]）：[https://people.csail.mit.edu/karger/Papers/web.pdf](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- Dean and Barroso, "The Tail at Scale", Communications of the ACM 56(2), 2013（论文参考文献 [16]）：[https://research.google/pubs/the-tail-at-scale/](https://research.google/pubs/the-tail-at-scale/)
+- "Cache stampede", Wikipedia，论文所引用（参考文献 [3]）：[https://en.wikipedia.org/wiki/Cache_stampede](https://en.wikipedia.org/wiki/Cache_stampede)
+- Adya et al., "Slicer: Auto-sharding for datacenter applications", OSDI '16（论文参考文献 [12]）：[https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya)
+- Corbett et al., "Spanner: Google's globally-distributed database", OSDI '12（论文参考文献 [15]）：[https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)

@@ -1,0 +1,273 @@
+---
+title: "タプルをデータと同期させる"
+description: "論文が二重書き込みを論じない理由、アプリケーションのデータベースと認可サービスの食い違いで何が起きるか、両者を同期させるために使われるパターン。"
+section: guide
+part: practice
+order: 9
+checked: "2026-11-13"
+paper: ["1", "2.2", "2.4.2", "2.4.3", "2.4.4", "3.1.2"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+認可サービスは、教えられたことしか知らない。Anne が `doc:readme` を共有したり、Beto を `group:eng` から外したりするとき、その事実はたいていアプリケーション自身のデータベースで始まり、タプルとして認可サービスに届かなければならない。2 つのシステム、2 つの書き込みがあり、共有されたトランザクションはない。本ページでは、論文がこの問題にほとんど触れない理由、2 つの書き込みがどう失敗するか、そして両者を同期させるために使われるパターンを説明する。
+
+## 論文がこれを省ける理由
+
+論文は Zanzibar を "a system for storing permissions and performing authorization checks based on the stored permissions" (権限を格納し、格納された権限に基づいて認可チェックを行うシステム) と説明し (§1)、"unified ACL storage and an RPC-based API" (統一された ACL ストレージと RPC ベースの API) を "a philosophy also core to Zanzibar’s design" (Zanzibar の設計にとっても中核となる考え方) として挙げている (§5)。ACL とグループは Zanzibar の中にある。クライアントアプリケーションは自身の *コンテンツ* を自前のストレージに保持し、認可について格納するのは zookie だけである。
+
+論文のプロトコルは、両側にまたがる唯一の書き込みがクライアント側でアトミックになるように形作られている。"The client stores the zookie with the content change in an atomic write to the client storage" (クライアントは、クライアントストレージへのアトミックな書き込みで、内容の変更とともに zookie を格納する) (§2.2)。zookie を生み出したチェックは読み取りであり、"the content-change check does not need to be evaluated in the same transaction as the application content modification" (コンテンツ変更チェックは、アプリケーションの内容変更と同一のトランザクション内で評価する必要はない) (§2.2)。Zanzibar の内部では、タプルとその変更ログのエントリは 1 つのトランザクションである。"Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction" (Zanzibar のすべての書き込みは、単一のトランザクションでタプルストレージと変更ログシャードの両方にコミットされる) (§3.1.2)。したがって Watch がコミット済みの書き込みを取りこぼすことはない。
+
+論文は、Google のアプリケーションが「このドキュメントを誰が所有しているか」のような事実を自前でも保持しているのか、保持しているならどう突き合わせるのかを述べていない。このケースは論じられていない。
+
+多くの導入者は別のところから出発する。所有者は `documents` テーブルの列であり、チームのメンバーシップは結合テーブルであり、課金のシートは別のサービスにある。すると同じ事実が 2 か所に存在し、その変更はすべて *二重書き込み* になる。
+
+## 二重書き込みはどう失敗するか
+
+この主題に関する AuthZed の記事ははっきりと述べている。"The dual-write problem presents itself in all distributed systems" (二重書き込みの問題はあらゆる分散システムに現れる) ([AuthZed, The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem))。2 つの書き込みのどちらの順序も、それだけでは安全ではない。プロセスがその間で止まりうるからである。それぞれの順序で何が起きるか。
+
+<Frames>
+
+<Swimlane
+  lanes={["アプリ", "アプリの DB", "認可サービス"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="時間"
+  title="データベースが先、タプルの書き込みが失われる"
+  desc="Anne が Beto を group eng から外す。アプリは変更をデータベースにコミットする。認可サービスのタプルを削除する前にアプリがクラッシュする。タプルは残っているので、アプリ自身のデータでは Beto はもうメンバーではないのに、その後のチェックは Beto に readme の閲覧を許す。"
+  events={[
+    { lane: 0, t: 0, label: "Anne が Beto を\neng から外す", kind: "note" },
+    { lane: 1, t: 1, label: "member 行を削除、\nCOMMIT", kind: "write" },
+    { lane: 0, t: 2, label: "タプル削除の\n前にクラッシュ", kind: "bad" },
+    { lane: 2, t: 3, label: "eng member\nbeto: 残っている", kind: "bad" },
+    { lane: 2, t: 4, label: "Beto が readme\nを閲覧: 許可", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1] },
+    { from: [0, 2], to: [2, 3], label: "送られない", dashed: true },
+  ]}
+  caption="失われた取り消しはアクセスを許す方向に失敗し、アプリ上には何も現れない。"
+/>
+
+<Swimlane
+  lanes={["アプリ", "アプリの DB", "認可サービス"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="時間"
+  title="タプルが先、データベースがロールバックされる"
+  desc="Anne が Beto を readme の編集者にする。アプリはデータベースのトランザクションを開始して共有の行を挿入し、続いて editor タプルを認可サービスに書き込み、コミット前にクラッシュする。データベースはロールバックされるのでアプリには共有が表示されないが、認可サービスは Beto に編集を許す。"
+  events={[
+    { lane: 0, t: 0, label: "Anne が Beto を\n編集者にする", kind: "note" },
+    { lane: 1, t: 1, label: "BEGIN、共有の\n行を挿入", kind: "write" },
+    { lane: 2, t: 2, label: "readme editor\nbeto を書き込む", kind: "write" },
+    { lane: 0, t: 3, label: "COMMIT 前に\nクラッシュ", kind: "bad" },
+    { lane: 1, t: 4, label: "ロールバック:\n共有の行なし", kind: "bad" },
+    { lane: 2, t: 4, label: "Beto は編集可", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1] },
+    { from: [1, 1], to: [2, 2] },
+  ]}
+  caption="2 つのシステムが食い違う。ここでは付与が UI に表示できない場所にだけ存在する。"
+/>
+
+</Frames>
+
+左の図はセキュリティにとって危険であり、右の図は信頼にとって危険であることに注意したい。Beto は失うべきアクセスを持ち続けるか、誰も取り消せるよう目にできないアクセスを持つ。右の図は AuthZed が順を追って説明しているケースである。"we've written to SpiceDB but we haven't committed the transaction to our database, and now SpiceDB and our database disagree about the state of the world" (SpiceDB には書き込んだがデータベースへのトランザクションはコミットしておらず、SpiceDB とデータベースとで世界の状態についての認識が食い違っている) ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem))。リクエストハンドラ内でリトライしてもどちらの隙間も塞がらない。リトライの前にクラッシュが起こりうるからである。
+
+## 選択肢
+
+AuthZed の記事は選択肢を列挙している。何もしない、帯域外での整合性チェック、認可サービスを信頼できる唯一の情報源にする、イベントソーシング/CQRS、永続実行環境、トランザクショナルアウトボックスである ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem))。何もしないことも "*is* an option that may be viable in the right context" (適切な文脈では成り立ちうる選択肢 *である*)。帯域外のチェックとは "you can check that the two systems agree on a periodic basis" (2 つのシステムが一致していることを定期的にチェックできる) ということであり、ずれを見つけはするが防ぎはしない。以下の 3 つは、隙間を構造的に取り除くか、確実に塞ぐものである。
+
+### 認可サービスを信頼できる唯一の情報源にする
+
+各関係を認可サービスに 1 度だけ格納し、他のどこにも格納しない。これが論文の構成である。AuthZed: "make a single write to SpiceDB and avoid the dual-write problem entirely" (SpiceDB への書き込みを 1 回にして、二重書き込みの問題を完全に避ける) ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem))。
+
+代償は、アプリケーションがそのデータを自分のデータのようには問い合わせられなくなることである。所有関係が SpiceDB にしかないと、その上のユーザーインターフェースは "wouldn't be able to filter, sort, or paginate that table as easily" (そのテーブルを容易には絞り込み、並べ替え、ページ分割できない)。SpiceDB は "isn't a general-purpose database" (汎用データベースではない) からである。すると [ユーザーが見られるものの一覧](../listing/) の一覧の問題が、その関係を表示するすべての画面に当てはまる。Oso は自社製品について逆の方向を主張しており、"apply your application data to authorization decisions without synchronizing it" (アプリケーションのデータを同期せずに認可判定に適用する) ことができるとしている ([Oso, Launching Local Authorization](https://www.osohq.com/post/local-authorization)、ベンダーの記事)。これはデータを移すのではなくアプリケーションのデータベースに置いたままにすることで同期を避けるものである。
+
+### トランザクショナルアウトボックスとリレー
+
+アプリケーションのデータベースを信頼できる唯一の情報源のままにし、2 つ目の書き込みを即時ではなく永続的なものにする。業務上の変更と同じトランザクションで、タプルの変更を記述した行を *アウトボックス* テーブルに挿入する。別の *リレー* がアウトボックスを読み、変更を認可サービスに適用し、成功するまでリトライする。このパターンの一般形は次のとおりである。"first store the message in the database as part of the transaction that updates the business entities" (まず、業務エンティティを更新するトランザクションの一部としてメッセージをデータベースに格納する) ([Chris Richardson, Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html))。
+
+認可サービスが一時的に利用できないとき、リレーは何をするか。
+
+<Swimlane
+  lanes={["アプリ", "アプリの DB", "リレー", "認可サービス"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="時間"
+  title="トランザクショナルアウトボックスとリレー"
+  desc="Anne が Beto を group eng から外す。アプリは 1 つのデータベーストランザクションで member の行を削除し、アウトボックスの行を挿入する。リレーはアウトボックスの行を読み、タプルの削除を送る。最初の試行は失敗するのでリトライする。2 回目の試行は成功し、リレーはアウトボックスの行を完了済みにする。それまでの間、認可サービスは依然として Beto を通す。"
+  events={[
+    { lane: 0, t: 0, label: "Anne が Beto を\neng から外す", kind: "note" },
+    { lane: 1, t: 1, label: "1 txn: member 行\n+ outbox 行", kind: "write" },
+    { lane: 2, t: 2, label: "次の outbox\n行を読む", kind: "read" },
+    { lane: 3, t: 2, label: "Beto はまだ\n許可される", kind: "bad" },
+    { lane: 2, t: 3, label: "削除に失敗:\nリトライ", kind: "bad" },
+    { lane: 3, t: 4, label: "タプル削除", kind: "good" },
+    { lane: 1, t: 5, label: "outbox 行を\n完了済みに", kind: "write" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "アトミック" },
+    { from: [1, 1], to: [2, 2] },
+    { from: [2, 3], to: [3, 4], label: "リトライ" },
+    { from: [3, 4], to: [1, 5], label: "ack" },
+  ]}
+  caption="何も失われないが、変更が認可サービスに届くのはデータベースより後になる。"
+/>
+
+右側の赤い箱に注意したい。アウトボックスが保証するのは変更が *届く* ことであり、*すぐに* 届くことではない。コミットからリレーの成功までの間、古いアクセスは有効なままである。リレーは繰り返しにも耐えなければならない。このパターン自身の言葉では "The Message relay might publish a message more than once" (メッセージリレーはメッセージを複数回発行するかもしれない) からである ([Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html))。AuthZed は "SpiceDB allowing for idempotent writes with its TOUCH operation" (TOUCH 操作で冪等な書き込みを可能にする SpiceDB) を挙げ、順序についても "As long as this process is effectively single-threaded and retries operations until they succeed" (このプロセスが実質的にシングルスレッドであり、操作を成功するまでリトライする限り) と述べている ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem))。先行する作成より前に削除を適用すると、誤った状態が残る。
+
+### 変更データキャプチャ
+
+アウトボックスをポーリングする代わりに、データベース自身のコミットログを読む。たとえば [Debezium](https://debezium.io/documentation/reference/stable/connectors/postgresql.html) は PostgreSQL の論理デコーディングを使う。初回のスナップショットの後、"continuously captures row-level changes that insert, update, and delete database content and that were committed to a PostgreSQL database" (PostgreSQL データベースにコミットされた、データベースの内容を挿入、更新、削除する行レベルの変更を継続的に取得し)、それを Kafka のトピックにストリームする。AuthZed はこれをアウトボックスパターンで最もよく使われるツールの 1 つとして説明している。"It watches changes in an outbox table and submits them as events to Kafka" (アウトボックステーブルの変更を監視し、イベントとして Kafka に送る) ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem))。
+
+変更はコミットからタプルまでどこを通るか。
+
+<Graph
+  width={640}
+  height={250}
+  title="認可サービスへの変更データキャプチャ"
+  desc="アプリは業務の行とアウトボックスの行を 1 つのトランザクションでデータベースにコミットする。Debezium はコミット済みの変更を先行書き込みログから読み、Kafka のトピックに発行する。コンシューマーはトピックを読み、各イベントをタプルの書き込みまたは削除に変換して認可サービスに適用する。コネクタの再起動後には重複がありうるので、コンシューマーの書き込みは冪等でなければならない。"
+  nodes={[
+    { id: "app", x: 70, y: 50, label: "アプリ", kind: "client" },
+    { id: "db", x: 250, y: 50, label: "アプリの DB\n行 + outbox", kind: "store" },
+    { id: "dbz", x: 470, y: 50, label: "Debezium\n(WAL を読む)", kind: "server", on: true },
+    { id: "kafka", x: 470, y: 185, label: "Kafka トピック", kind: "store", on: true },
+    { id: "cons", x: 250, y: 185, label: "コンシューマー:\nイベント → タプル", kind: "server" },
+    { id: "authz", x: 70, y: 185, label: "認可サービス", kind: "server" },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "1 txn" },
+    { from: "db", to: "dbz", label: "コミット済み\nの変更", on: true },
+    { from: "dbz", to: "kafka", label: "発行", on: true },
+    { from: "kafka", to: "cons", label: "消費" },
+    { from: "cons", to: "authz", label: "TOUCH /\nDELETE" },
+  ]}
+  minWidth={520}
+  caption="経由点ごとに遅延が加わる。パイプラインに入るのはコミット済みの変更だけなので、ロールバックされたトランザクションがタプルになることはない。"
+/>
+
+最初の経由点に注意したい。Debezium は *コミット済み* の変更を読むので、上の右側の失敗は起こりえない。ただし重複は起こりうる。Debezium の PostgreSQL のドキュメントによれば、"while it is recovering from the fault, it's possible that the connector might emit some duplicate change events" (障害から回復している間、コネクタが重複した変更イベントを出力する可能性がある)、そして "consumers should always anticipate some duplicate events" (コンシューマーは常にいくらかの重複イベントを想定すべきである) ([Debezium PostgreSQL connector](https://debezium.io/documentation/reference/stable/connectors/postgresql.html))。その outbox event router は、アウトボックスと CDC の組み合わせをパッケージにしたものである。"An outbox pattern implementation avoids inconsistencies between a service's internal state (as typically persisted in its database) and state in events consumed by services that need the same data" (アウトボックスパターンの実装は、サービスの内部状態 (通常はそのデータベースに永続化されている) と、同じデータを必要とするサービスが消費するイベント内の状態との不整合を避ける) ([Debezium, Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html))。
+
+## Watch はインデックスを動かすが、キューではない
+
+上のパターンは変更を認可サービスの *中へ* 移す。Watch (§2.4.3) は変更を *外へ* 移す。"Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API." (一部のクライアントは Zanzibar のリレーションタプルのセカンダリインデックスを維持している。それは Watch API で行える。) レスポンスは変更を "in ascending timestamp order" (タイムスタンプの昇順で) *ハートビート zookie* まで含み、ハートビート zookie は "the client can use … to resume watching where the previous watch response left off" (クライアントが前回の Watch レスポンスの終わったところから監視を再開するのに使える) (§2.4.3)。Leopard の差分インデクサーは論文自身のコンシューマーである (§3.2.4)。
+
+再開位置はクライアントが持ち、サーバーは履歴を一定期間しか保持しない。SpiceDB のドキュメント: "Historical changes can only be requested until the configured garbage collection window on the underlying datastore. This is typically 24 hours, but may differ based on the datastore used" (過去の変更は、基盤となるデータストアに設定されたガベージコレクションの期間内でしか要求できない。これは通常 24 時間だが、使うデータストアによって異なることがある) ([SpiceDB, Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch))。SpiceDB の issue はその帰結を述べている。"the Watch API is non-durable; if you want to write to a durable queue, you have to take the messages coming from the Watch API and put them somewhere" (Watch API は永続的ではない。永続的なキューに書き込みたいなら、Watch API から来るメッセージを受け取ってどこかに置かなければならない) ([spicedb#2015](https://github.com/authzed/spicedb/issues/2015)、2026-10-29 に not planned としてクローズ)。オープン中の issue [spicedb#2285](https://github.com/authzed/spicedb/issues/2285) は、デフォルトの挙動が "starts watching from the HEAD revision which leaves gaps of updates that may have not been seen" (HEAD リビジョンから監視を始めるので、見られていない可能性のある更新の隙間が残る) と付け加えている。
+
+コンシューマーがその期間より長く停止していたインデックスには何が起きるか。
+
+<Swimlane
+  lanes={["認可サービス", "インデクサー", "インデックス"]}
+  laneWidth={150}
+  rowHeight={64}
+  timeLabel="時間"
+  title="Watch の再開と、位置の喪失"
+  desc="インデクサーは変更のバッチを適用し、ストリームトークン t50 をインデックスの行と一緒に保存する。接続が切れ、t50 で再接続し、それ以降の変更を受け取る。その後、データストアのガベージコレクションの期間より長く停止する。t50 は期限切れになっているので再開できず、全件読み取りからインデックスを再構築しなければならない。"
+  events={[
+    { lane: 0, t: 0, label: "トークン t50\nまでの変更", kind: "write", mono: true },
+    { lane: 1, t: 0, label: "バッチを適用", kind: "read" },
+    { lane: 2, t: 0, label: "行 + t50、\n1 txn", kind: "write", mono: true },
+    { lane: 1, t: 1, label: "切断", kind: "note" },
+    { lane: 1, t: 2, label: "t50 から Watch", kind: "read", mono: true },
+    { lane: 0, t: 2, label: "t50 以降\nの変更", kind: "good" },
+    { lane: 1, t: 3, label: "GC 期間より\n長く停止", kind: "bad" },
+    { lane: 0, t: 4, label: "t50 期限切れ", kind: "bad", mono: true },
+    { lane: 2, t: 5, label: "全件読み取り\nから再構築", kind: "write" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 0], label: "保存" },
+    { from: [1, 2], to: [0, 2], label: "再開" },
+    { from: [1, 3], to: [0, 4], label: "再開できない", dashed: true },
+  ]}
+  caption="トークンは、それが対象とする行と同じトランザクションで保存し、履歴が失われたときのための再構築の経路を用意しておく。"
+/>
+
+インデックスのレーンの 2 行目に注意したい。トークンは、それが生み出した行と一緒に保存されている。インデクサーがトークンを先に保存してからクラッシュすると、変更を飛ばすことになる。行を適用して保存前にクラッシュすると、それらを再適用することになり、これはインデックスへの書き込みが冪等な場合にのみ無害である。長い停止を乗り切るには、issue が言うようにストリームを自分の管理する永続的なキューにコピーするか、再構築の準備をしておく。SpiceDB の再開用のフィールドは `ChangesThrough` である。ドキュメントは Watch を "in a loop, sending in the last received ZedToken from `ChangesThrough` if the call disconnects" (ループの中で、呼び出しが切断されたら `ChangesThrough` から最後に受け取った ZedToken を送って) 呼ぶことを推奨している ([Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch))。
+
+## zookie と各選択肢
+
+zookie プロトコルはクライアントに 2 つのことを求める。内容が保存されるときに zookie を要求すること、そしてそれを内容とともに格納することである (§2.2、§2.4.4)。SpiceDB のドキュメントも ZedToken について同じ助言をしている。ZedToken は "alongside the newly updated content in the application database" (アプリケーションのデータベース内で、新たに更新された内容と並べて) 格納し、リソースが作成または削除されたとき、その内容が変わったとき、そしてそれへのアクセスが追加または削除されたときに更新する ([SpiceDB, Consistency](https://authzed.com/docs/spicedb/concepts/consistency))。コンテンツ変更チェック自体には二重書き込みの問題はない。それは読み取りであり、トークンは内容と同じトランザクションでアプリケーションのデータベースに入るからである。
+
+選択肢によって、そのトークンが約束できることが異なる。
+
+| 選択肢 | ACL の変更が認可サービスに入るとき | 格納したトークンがカバーするもの |
+| --- | --- | --- |
+| 認可サービスを信頼できる唯一の情報源にする | 書き込みが返ったとき、ユーザーに伝える前 | すべて (論文と同じ)。書き込みのトークン、またはその後のコンテンツ変更チェックは、ACL の変更と少なくとも同じだけ新しい |
+| アウトボックスとリレー | リレーが成功したとき、データベースのコミットの後 | リレーがすでに適用した変更だけ。その前に行われたコンテンツ変更チェックは古い ACL を見る |
+| 変更データキャプチャ | ログが読まれ、発行され、消費された後 | アウトボックスと同じで、遅延の経由点がさらに多い |
+| Watch で更新するインデックス | すでに入っている。遅延はインデックス側にある | 直接には何もない。zookie は不透明なので、インデックスは自分が特定のトークンと同じだけ新しいかを判断できない。そのトークンで再チェックするか、インデックス自身が保存した位置と比べる |
+
+アウトボックスと CDC の行では、論文の保証は見た目より弱い。§2.2 の例 B は、内容の変更 (B2) がチェックされる前に ACL の変更 (B1) が Zanzibar に入っていることに依存している。間にリレーがあると、Anne が Beto を外し、その 1 秒後に新しい内容を保存し、リレーが削除を適用する前に実行されたコンテンツ変更チェックから zookie を得る、ということが起こりうる。zookie は Zanzibar が持っていたデータについては正しいが、そのデータが遅れていた。緩和策は 2 つある。どちらも上の出典にはなく、ここではどちらも試していない。取り消しは認可サービスに直接送り、データベースへの記録は 2 番目にする (左側の失敗モードを、「一覧には出るが拒否される」という目に見える状態として受け入れる)、あるいはリレーが受け取ったトークンを影響を受けた行に書き戻し、その後のチェックがそれを持ち運ぶようにする。
+
+論文の不透明性の規則は意図的なものである。zookie が不透明なのは "to discourage our clients from choosing arbitrary timestamps and to allow future extensions" (クライアントが任意のタイムスタンプを選ぶのを抑止し、将来の拡張を可能にするため) である (§2.4)。その代償が最後の行に表れている。クライアントは 2 つの zookie を比べてどちらが新しいかを判断できない。
+
+## オブジェクトのタプルを安全に書き換える: ロックタプル
+
+同期ジョブは、あるオブジェクトのすべてのタプルをデータベースに合わせて置き換えたいことがよくある。たとえば、readme の閲覧者を共有テーブルの内容とちょうど同じにしたい場合である。そのようなジョブが 2 つ、あるいはジョブとユーザーの編集が競合しうる。論文の答えは、*ロックタプル* を用いた楽観的並行性制御である (§2.4.2)。
+
+<Callout kind="paper" title="§2.4.2、読み取り・変更・書き込み">
+
+1. オブジェクトのすべてのリレーションタプルを読み取る。これにはオブジェクトごとの「ロック」タプルも含まれる。
+2. 書き込みまたは削除するタプルを生成する。ロックタプルへの touch とともに書き込みを Zanzibar に送信する。その際、読み取り以降にロックタプルが変更されていない場合にのみ書き込みがコミットされる、という条件を付ける。
+3. 書き込み条件が満たされなかった場合は、ステップ 1 に戻る。
+
+</Callout>
+
+"The lock tuple is just a regular relation tuple used by clients to detect write races" (ロックタプルは、クライアントが書き込みの競合を検出するために用いる通常のリレーションタプルにすぎない) (§2.4.2)。2 つの同期ジョブが同時に readme のタプルを書き換えると何が起きるか。
+
+<Swimlane
+  lanes={["同期ジョブ 1", "同期ジョブ 2", "Zanzibar"]}
+  laneWidth={150}
+  rowHeight={64}
+  timeLabel="時間"
+  title="ロックタプルによる楽観的並行性制御"
+  desc="両方の同期ジョブが、ロックタプルを含む doc:readme のすべてのタプルを同じバージョンで読み取る。ジョブ 1 は、ロックが変わっていないことを条件として、ロックタプルへの touch とともに書き込みを送る。Zanzibar はコミットし、ロックが変わる。ジョブ 2 も同じ条件で書き込みを送る。ロックは変わっているので Zanzibar はそれを拒否し、ジョブ 2 はステップ 1 に戻って読み直す。"
+  events={[
+    { lane: 0, t: 0, label: "readme のタプル\n+ ロックを読む", kind: "read" },
+    { lane: 2, t: 0, label: "ロックは\nバージョン 7", kind: "note" },
+    { lane: 1, t: 1, label: "readme のタプル\n+ ロックを読む", kind: "read" },
+    { lane: 0, t: 2, label: "書き込み + touch、\nロック不変なら", kind: "write" },
+    { lane: 2, t: 2, label: "コミット;\nロック変更", kind: "good" },
+    { lane: 1, t: 3, label: "書き込み + touch、\nロック不変なら", kind: "write" },
+    { lane: 2, t: 3, label: "ロック変更済み:\n拒否", kind: "bad" },
+    { lane: 1, t: 4, label: "ステップ 1 へ:\n読み直す", kind: "read" },
+  ]}
+  arrows={[
+    { from: [0, 2], to: [2, 2] },
+    { from: [1, 3], to: [2, 3] },
+    { from: [2, 3], to: [1, 4], label: "リトライ" },
+  ]}
+  caption="どちらのジョブも計算中にロックを保持しない。条件付き書き込みがコミット時に競合を検出する。"
+/>
+
+ジョブ 1 が作業している間、ジョブ 2 はブロックされないことに注意したい。ジョブ 2 はコミットしようとして初めて競合を知り、新しいデータから計算し直す。これは、常にデータベースから計算し直せる同期ジョブに向いている。
+
+<Callout kind="note" title="応用であり、文書化されていない">
+
+SpiceDB の `WriteRelationships` は `optional_preconditions` を受け付け、"if any preconditions fail, the entire transaction will be reverted" (いずれかの前提条件が満たされなければ、トランザクション全体が取り消される)。前提条件は、関係のフィルターに対する `MUST_MATCH` または `MUST_NOT_MATCH` である ([SpiceDB `permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto))。論文のロックタプルを模倣する 1 つの方法は、`doc:readme#lock@version:7` のような関係を置き、それに対する `MUST_MATCH` の前提条件を付け、同じ書き込みでバージョン 7 の削除とバージョン 8 の作成を行うことである。この構成は本サイト独自のものであり、SpiceDB のドキュメントにはなく、実行もしていない。
+
+</Callout>
+
+<Callout kind="paper" title="論文では">
+
+権限の格納先としての Zanzibar: §1、§5。zookie プロトコルとクライアントのアトミックな書き込み: §2.2。Write とロックタプル: §2.4.2。Watch とハートビート zookie: §2.4.3。コンテンツ変更チェック: §2.4.4。1 つのトランザクションでのタプルと変更ログ: §3.1.2。用語: [ロックタプル](../glossary/#lock-tuple)、[Watch](../glossary/#watch)、[ハートビート zookie](../glossary/#heartbeat-zookie)、[コンテンツ変更チェック](../glossary/#content-change-check)、[zookie](../glossary/#zookie)。
+
+</Callout>
+
+## 出典
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §1, §2.2, §2.4, §2.4.2, §2.4.3, §2.4.4, §3.1.2, §3.2.4, §5.
+- AuthZed (ベンダー), [The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem), 2025-01-02。
+- AuthZed (ベンダー), [Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch) および [Consistency](https://authzed.com/docs/spicedb/concepts/consistency), SpiceDB ドキュメント。
+- AuthZed, [Add external support for streaming relationships into and out of SpiceDB](https://github.com/authzed/spicedb/issues/2015), spicedb issue #2015, 2024-08-07 起票, 2026-10-29 に not planned としてクローズ。
+- AuthZed, [Watching Relationship Changes More Ergonomically](https://github.com/authzed/spicedb/issues/2285), spicedb issue #2285, 2025-03-19 起票, 2026-11-13 時点でオープン。
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto), authzed/api。
+- Chris Richardson, [Pattern: Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html), microservices.io。
+- Debezium, [Debezium connector for PostgreSQL](https://debezium.io/documentation/reference/stable/connectors/postgresql.html) および [Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html)。
+- Oso (ベンダー), [Launching Local Authorization](https://www.osohq.com/post/local-authorization), 2024-04-16。

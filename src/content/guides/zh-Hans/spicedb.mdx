@@ -1,0 +1,233 @@
+---
+title: "SpiceDB"
+description: "AuthZed 面向授权关系的开源数据库，对照 Zanzibar 论文阅读。"
+section: ecosystem
+order: 1
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4"]
+product:
+  name: SpiceDB
+  maintainer: AuthZed, Inc.
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/authzed/spicedb
+  docs: https://authzed.com/docs
+  status: "活跃"
+  latest: v1.57.1 (2026-11-10)
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+SpiceDB 是一个开源数据库，以 Zanzibar 的风格存储关系，并在其上回答权限查询。它用 Go 编写，采用 Apache-2.0 许可证，由 AuthZed, Inc. 维护（[仓库](https://github.com/authzed/spicedb)）。它在 GitHub 上的首个版本 v1.0.0 发布于 2021-09-30。AuthZed 还围绕它销售托管和商业服务；下文会明确标出这些服务。本页的大多数来源是 AuthZed 自己的文档和博客。
+
+## 论文术语与 SpiceDB 术语
+
+| 论文中 | SpiceDB 中 |
+| --- | --- |
+| 命名空间配置（§2.3） | schema 中的一个 `definition`（[schema 文档](https://authzed.com/docs/spicedb/concepts/schema)） |
+| 关系元组 `object#relation@user`（§2.1） | 关系（relationship）`resource#relation@subject`，例如 `document:readme#editor@user:emilia`（[relationships](https://authzed.com/docs/spicedb/concepts/relationships)） |
+| `_this`（§2.3.1） | 一个 `relation` 及其允许的主体类型；为它存储的关系 |
+| `computed_userset` | 在 `permission` 表达式中写出另一个关系或权限的名称 |
+| `tuple_to_userset` | 箭头 `parent->view`（别名 `parent.any(view)`） |
+| `union` / `intersection` / `exclusion` | `+` / `&` / `-` |
+| zookie（§2.4） | ZedToken（[一致性](https://authzed.com/docs/spicedb/concepts/consistency)） |
+| Check（§2.4.4） | `CheckPermission`、`CheckBulkPermissions` |
+| Read（§2.4.1） | `ReadRelationships` |
+| Write（§2.4.2） | `WriteRelationships`、`DeleteRelationships` |
+| Watch（§2.4.3） | `Watch` |
+| Expand（§2.4.5） | `ExpandPermissionTree` |
+| 不在论文的 API 中 | `LookupResources`、`LookupSubjects`、`ImportBulkRelationships`、`ExportBulkRelationships` |
+| Leopard（§3.2.4） | AuthZed Materialize，面向 AuthZed Dedicated 客户的商业服务（[文档](https://authzed.com/docs/materialize/getting-started/overview)） |
+| Spanner（§3） | CockroachDB、Cloud Spanner、PostgreSQL、MySQL、memdb（[datastores](https://authzed.com/docs/spicedb/concepts/datastores)） |
+
+API 名称来自 AuthZed 的协议文件：[`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto) 和 [`watch_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)。
+
+## 用 schema 表示贯穿示例
+
+论文的图 1 使所有者成为编辑者，编辑者成为查看者，父文件夹的查看者成为文档的查看者（§2.3.1）。在 SpiceDB 中，存储的关系和计算的权限分开声明：`relation` 行说明谁可以被写入关系，`permission` 行说明访问权如何计算。
+
+```text
+definition user {}
+
+definition group {
+    relation member: user
+}
+
+definition folder {
+    relation viewer: user | group#member
+    permission view = viewer
+}
+
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+}
+```
+
+<Callout kind="note" title="未经验证器检查">
+
+这个 schema 只使用截至 2026-11-13 SpiceDB [schema 语言页面](https://authzed.com/docs/spicedb/concepts/schema)上展示过的构造：`definition`、带 `user | group#member` 的 `relation`、带 `+` 和 `->` 的 `permission`。它没有经过 `zed` 或 SpiceDB Playground 的运行。
+
+</Callout>
+
+Anne、Beto 和 Chen 的关系：
+
+```text
+doc:readme#owner@user:anne
+doc:readme#parent@folder:A
+group:eng#member@user:beto
+doc:readme#viewer@group:eng#member
+folder:A#viewer@user:chen
+```
+
+哪些已存储的关系让每个人获得 readme 上的 `view`？
+
+<Graph
+  width={600}
+  height={270}
+  title="以 SpiceDB 关系表示的贯穿示例"
+  desc="五条关系。user:anne 是 doc:readme 的 owner。user:beto 是 group:eng 的 member，group:eng#member 是 doc:readme 的 viewer。user:chen 是 folder:A 的 viewer，folder:A 是 doc:readme 的 parent。从 Chen 经由 folder:A 到 readme 的路径被高亮：它就是箭头 parent->view。"
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 225, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 280, y: 135, label: "group:eng", kind: "object", mono: true },
+    { id: "folder", x: 280, y: 225, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 500, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer\n(eng#member)" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="每个箭头是一条已存储的关系。Anne 经由 edit（owner）到达 view，Beto 经由组，Chen 经由高亮的 parent->view 箭头。"
+/>
+
+注意，没有任何关系提到 `view` 或 `edit`：二者都是权限，在检查时根据 schema 计算得出，就像论文中的重写规则是计算出来的而不是存储的一样（§2.3.1）。
+
+## 架构
+
+一个 SpiceDB 部署如何回答一次检查？AuthZed 把 SpiceDB 描述为 "fundamentally a gRPC service"（本质上是一个 gRPC 服务），并带有一个可选的 HTTP 网关（[架构文章，2021-11-17](https://authzed.com/blog/spicedb-architecture)）。一个节点把请求拆分成更小的问题，并转发给其他节点，这一过程称为分派（dispatch）；每个节点都保留 "an in-memory cache of permissions queries it has resolved in the past"（一个内存缓存，存放它过去解析过的权限查询）（[性能文档](https://authzed.com/docs/spicedb/ops/performance)）。一致性哈希把 "the same (sub-)requests to the same server"（相同的（子）请求发往同一台服务器）（[架构文章](https://authzed.com/blog/spicedb-architecture)）。所有节点共享一个数据存储。如果使用 Materialize，它会预先计算选定的权限，并且 SpiceDB "can dispatch sub-queries to Materialize"（可以把子查询分派给 Materialize）（[性能文档](https://authzed.com/docs/spicedb/ops/performance)）。
+
+<Graph
+  width={640}
+  height={320}
+  minWidth={560}
+  title="SpiceDB 架构"
+  desc="一个应用客户端向三个 SpiceDB 节点之一发送 CheckPermission。节点之间相互分派子请求，由一致性哈希路由。三个节点都读写同一个共享数据存储（CockroachDB、Spanner、PostgreSQL 或 MySQL）。一个 Watch 消费者从某个 SpiceDB 节点接收变更流。商业服务 AuthZed Materialize 监视数据存储并读取其周期性快照，并回答 SpiceDB 分派给它的子查询。"
+  nodes={[
+    { id: "app", x: 320, y: 40, label: "应用\n（gRPC / HTTP 客户端）", kind: "client" },
+    { id: "a", x: 170, y: 150, label: "SpiceDB\n节点", kind: "server" },
+    { id: "b", x: 320, y: 150, label: "SpiceDB\n节点", kind: "server" },
+    { id: "c", x: 470, y: 150, label: "SpiceDB\n节点", kind: "server" },
+    { id: "ds", x: 320, y: 275, label: "数据存储\nCockroachDB · Spanner\nPostgreSQL · MySQL", kind: "store" },
+    { id: "watch", x: 80, y: 275, label: "Watch\n消费者", kind: "client" },
+    { id: "mat", x: 565, y: 275, label: "AuthZed Materialize\n（商业）", kind: "server" },
+  ]}
+  edges={[
+    { from: "app", to: "b", label: "CheckPermission" },
+    { from: "a", to: "b", label: "分派", dir: "both" },
+    { from: "b", to: "c", label: "分派", dir: "both" },
+    { from: "a", to: "ds", dir: "both" },
+    { from: "b", to: "ds", label: "读取 / 写入", dir: "both" },
+    { from: "c", to: "ds", dir: "both" },
+    { from: "a", to: "watch", label: "Watch" },
+    { from: "ds", to: "mat", label: "变更、快照", dashed: true },
+    { from: "c", to: "mat", label: "子查询", dashed: true },
+  ]}
+  caption="黄色：服务器。绿色：共享的数据存储。蓝色：客户端。虚线：可选的商业 Materialize 路径。"
+/>
+
+对比论文的图 2（§3）：在那里，`aclservers` 同样会把工作扇出到集群中的其他服务器，但存储始终是 Spanner，Watch 由跟踪变更日志的独立 `watchservers` 提供，而 Leopard 既读取离线快照也读取 Watch。在这里引用的文档中，SpiceDB 没有单独的 watch 服务器类型；`Watch` 是同一服务上的一个 RPC。
+
+## 一致性：ZedToken 与 zookie
+
+AuthZed 称 ZedToken 为 "the SpiceDB equivalent of Google Zanzibar's Zookie concept which protects users from the New Enemy Problem"（SpiceDB 中与 Google Zanzibar 的 Zookie 概念对应的东西，它保护用户免受 New Enemy 问题的影响）（[一致性文档](https://authzed.com/docs/spicedb/concepts/consistency)）。写入会返回一个（`written_at`），检查也会返回一个（`checked_at`）。请求可以选择以下四种模式之一：
+
+| 模式 | 要求什么 | 论文中的对应 |
+| --- | --- | --- |
+| `minimize_latency` | 服务器能最快回答的任何结果 | 不带 zookie："a reasonably recent snapshot"（一个合理较新的快照）（§2.4.1） |
+| `at_least_as_fresh` + ZedToken | 不旧于该令牌的快照 | 检查或读取中的 zookie（§2.2、§2.4） |
+| `at_exact_snapshot` + ZedToken | 恰好是该令牌的快照 | 复用读取 zookie 以得到 "the same snapshot as a previous read"（与先前那次读取相同的快照）（§2.4.1） |
+| `fully_consistent` | 最新的数据 | 没有直接对应；论文中的内容变更检查在最新快照上评估（§2.4.4） |
+
+在 CockroachDB 上，文档警告说 `fully_consistent` "does not guarantee read-after-write consistency"（不保证写后读一致性），因为节点时钟之间的偏差最多可达集群的 `max_offset`；文档建议改用带 `at_least_as_fresh` 的 ZedToken（[一致性文档](https://authzed.com/docs/spicedb/concepts/consistency)）。
+
+`fully_consistent` 是 `WriteRelationships`、`DeleteRelationships`、`ReadSchema` 和 `WriteSchema` 的默认值；`minimize_latency` 是其他所有 API 的默认值（[一致性文档](https://authzed.com/docs/spicedb/concepts/consistency)）。
+
+ZedToken 如何阻止 Chen 看到他在编辑之前就已被移除的 readme？
+
+<Swimlane
+  lanes={["应用", "SpiceDB", "应用数据库"]}
+  laneWidth={190}
+  timeLabel="时间"
+  title="像 zookie 一样使用 ZedToken"
+  desc="应用通过 WriteRelationships 移除 Chen 对文件夹 A 的查看权。SpiceDB 提交并以 written_at 返回 ZedToken Z1。应用把新的 readme 内容与 Z1 一起保存。之后，一次针对 Chen 和 readme 的检查带着 at_least_as_fresh Z1 发出。SpiceDB 在不旧于 Z1 的快照上评估它，因此看到了该移除，Chen 被拒绝。"
+  events={[
+    { lane: 0, t: 0, label: "把 Chen 从 A 中移除", kind: "write" },
+    { lane: 1, t: 0, label: "提交", kind: "write" },
+    { lane: 0, t: 1, label: "持有 Z1", kind: "note", mono: true },
+    { lane: 0, t: 2, label: "保存 readme + Z1", kind: "write" },
+    { lane: 2, t: 2, label: "content, Z1", kind: "write", mono: true },
+    { lane: 0, t: 3, label: "Chen 能查看吗？", kind: "read" },
+    { lane: 1, t: 3, label: "快照 ≥ Z1", kind: "read" },
+    { lane: 1, t: 4, label: "拒绝", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0], label: "WriteRelationships" },
+    { from: [1, 0], to: [0, 1], label: "written_at = Z1" },
+    { from: [0, 2], to: [2, 2] },
+    { from: [0, 3], to: [1, 3], label: "at_least_as_fresh Z1" },
+    { from: [1, 4], to: [0, 4], dashed: true },
+  ]}
+  caption="令牌随内容一起传递，就像论文中的 zookie 一样（§2.2）。没有它，一次 minimize_latency 检查可能由早于该移除的缓存作答。"
+/>
+
+在论文中，与内容一起存储的 zookie 来自内容变更检查（§2.2、§2.4.4）。SpiceDB 的文档说，当资源发生变化时，"a new ZedToken is either returned or it should be requested by performing a check with full consistency"（要么会返回一个新的 ZedToken，要么应该通过执行一次完全一致的检查来请求一个），因此两种途径都存在。
+
+`Watch` 也使用 ZedToken：请求可以从 `optional_start_cursor` 开始，每个响应都带有用于恢复的 `changes_through`，这与论文中的心跳 zookie 对应（§2.4.3）（[`watch_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)）。
+
+## 与论文的差异
+
+- **存储。** 论文把一切都存储在 Spanner 中（§3.1）。SpiceDB 的数据存储可插拔：CockroachDB（"high throughput and/or multi-region"，高吞吐量和/或多区域）、Cloud Spanner、PostgreSQL（"single-region"，单区域）、MySQL（"Not recommended"，不推荐）和 memdb（本地开发和测试）（[datastores](https://authzed.com/docs/spicedb/concepts/datastores)）。
+- **关系与权限分开。** 论文把用户集重写附加到关系上（§2.3.1）。SpiceDB 把存储的 `relation` 与计算的 `permission` 分开（[schema](https://authzed.com/docs/spicedb/concepts/schema)）。
+- **Caveat。** 关系可以携带一个具名的 CEL 表达式，在 schema 中用 `with` 附加（例如 `relation viewer: user | user with ip_allowlist`）（[caveats](https://authzed.com/docs/spicedb/concepts/caveats)）。论文的元组（§2.1）没有这样的字段。
+- **通配符。** `relation viewer: user | user:*` 允许公开授权（[schema](https://authzed.com/docs/spicedb/concepts/schema)）。论文的元组语法只有用户 ID 或用户集（§2.1），没有通配符。
+- **交集箭头。** `.all()` 要求每个相关对象都授予该权限（[schema](https://authzed.com/docs/spicedb/concepts/schema)）。论文的三种重写叶节点（§2.3.1）没有这样的形式。
+- **默认陈旧度。** 论文根据区外读取的统计数据自适应地选择默认陈旧度（§3.2.1），并另外把评估时间戳向上取整 "to a coarse granularity, such as one or ten seconds"（到较粗的粒度，例如 1 秒或 10 秒），以便共享缓存条目（§3.2.5）。SpiceDB 只有取整：它把请求的修订版本归入由 `--datastore-revision-quantization-interval` 设定的窗口，以便复用缓存条目；AuthZed 给出 "the default is 5s"（默认值为 5s）（[热点缓存文章，2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)），这与[源码](https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go)中的 `RevisionQuantization: 5 * time.Second` 一致。
+- **查找 API。** `LookupResources` 和 `LookupSubjects` 回答“哪些资源”和“哪些主体”的问题（[`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)）。论文的 API 有 Read、Write、Watch、Check 和 Expand（§2.4）。
+- **Leopard。** "AuthZed Materialize takes inspiration from the Leopard index component described in the Zanzibar paper"（AuthZed Materialize 从 Zanzibar 论文所描述的 Leopard 索引组件中获得灵感）（[Materialize 文档](https://authzed.com/docs/materialize/getting-started/overview)）。它属于 AuthZed 的付费产品，而不是开源的 SpiceDB：文档说其 Accelerated Queries 功能 "generally available to users of AuthZed Dedicated"（已向 AuthZed Dedicated 用户正式提供）。
+
+## 状态
+
+截至 2026-11-13：活跃。最新版本 v1.57.1 发布于 2026-11-10，仓库未归档，约 7.2k 个 GitHub star，Apache-2.0（[仓库](https://github.com/authzed/spicedb)，[releases](https://github.com/authzed/spicedb/releases)）。
+
+AuthZed 还在 [zanzibar.tech](https://zanzibar.tech) 发布了一份带注释的论文（"Annotations © 2026 AuthZed, Inc. Zanzibar Paper © USENIX and original authors"）。
+
+## 来源
+
+- [https://github.com/authzed/spicedb](https://github.com/authzed/spicedb)
+- [https://github.com/authzed/spicedb/releases](https://github.com/authzed/spicedb/releases)
+- [https://authzed.com/docs](https://authzed.com/docs)
+- [https://authzed.com/docs/spicedb/concepts/schema](https://authzed.com/docs/spicedb/concepts/schema)
+- [https://authzed.com/docs/spicedb/concepts/relationships](https://authzed.com/docs/spicedb/concepts/relationships)
+- [https://authzed.com/docs/spicedb/concepts/consistency](https://authzed.com/docs/spicedb/concepts/consistency)
+- [https://authzed.com/docs/spicedb/concepts/datastores](https://authzed.com/docs/spicedb/concepts/datastores)
+- [https://authzed.com/docs/spicedb/concepts/caveats](https://authzed.com/docs/spicedb/concepts/caveats)
+- [https://authzed.com/docs/spicedb/ops/performance](https://authzed.com/docs/spicedb/ops/performance)
+- [https://authzed.com/docs/materialize/getting-started/overview](https://authzed.com/docs/materialize/getting-started/overview)
+- [https://authzed.com/blog/spicedb-architecture](https://authzed.com/blog/spicedb-architecture)
+- [https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go](https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go)
+- [https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)
+- [https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- [https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)
+- [https://zanzibar.tech](https://zanzibar.tech)

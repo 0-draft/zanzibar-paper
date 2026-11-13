@@ -1,0 +1,384 @@
+---
+title: "リレーションタプルとユーザーセット"
+description: "Zanzibar がすべての権限を小さな事実として格納する方法、名前空間設定がその事実を実効的な ACL に変える方法、そして Check がその結果をグラフとしてたどる方法。"
+section: guide
+part: mechanisms
+order: 3
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "2.3.1", "2.4.1", "2.4.5", "3.2.3"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar は権限を *リレーションタプル* として格納する。1 行に 1 つの事実を持ち、「このユーザーはこのオブジェクトに対してこの関係を持つ」と読む。このページで扱うそれ以外のもの、すなわち書き換えルール、Check、Expand はすべて、これらの行から計算される。
+
+本サイトで共通に使う例は次のとおりである。Anne、Beto、Chen (`user:anne`、`user:beto`、`user:chen`)、`folder:A` の中にあるドキュメント `doc:readme`、グループ `group:eng`。Anne は readme を所有し、Beto は eng に所属し、eng のメンバーは readme を閲覧でき、Chen はフォルダ A を閲覧できる。
+
+## 文法
+
+論文 (§2.1) は、テキスト表記を 4 つの規則で示している。
+
+```text
+⟨tuple⟩   ::= ⟨object⟩ ‘#’ ⟨relation⟩ ‘@’ ⟨user⟩
+⟨object⟩  ::= ⟨namespace⟩ ‘:’ ⟨object_id⟩
+⟨user⟩    ::= ⟨user_id⟩ | ⟨userset⟩
+⟨userset⟩ ::= ⟨object⟩ ‘#’ ⟨relation⟩
+```
+
+タプルは 3 つの部分から成る。*オブジェクト* は名前空間と ID の組で、たとえば `doc:readme` である。*関係* は名前空間が定義する名前で、たとえば `owner` や `viewer` である。*ユーザー* は単一のユーザー ID か *ユーザーセット* のいずれかである。論文ではユーザー ID は整数だが、本サイトでは例を読みやすくするために `user:anne` と書く。
+
+1 つのタプルは何を表しているのか。
+
+<Graph
+  width={560}
+  height={150}
+  title="1 つのリレーションタプル"
+  desc="user:anne と書かれた楕円から、owner と書かれた矢印が doc:readme と書かれた箱を指している。これはタプル doc:readme#owner@user:anne である。"
+  nodes={[
+    { id: "anne", x: 110, y: 75, label: "user:anne", kind: "subject", mono: true },
+    { id: "doc", x: 450, y: 75, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner" }]}
+  caption="doc:readme#owner@user:anne を、ユーザーからオブジェクトへの辺として描いたもの。"
+/>
+
+表しているのは 1 つのことだけである。Anne は `doc:readme` に対して関係 `owner` を持つ。論文は、タプルを識別する主キーとして名前空間、オブジェクト ID、関係、ユーザーを挙げている。
+
+## ユーザーセット：グループを指すタプル
+
+文法の 4 番目の規則が重要である。ユーザーセットそれ自体もオブジェクトと関係の組であり、`group:eng#member` は「`group:eng` に対して関係 `member` を持つすべてのユーザー」を意味する。タプルのユーザーがユーザーセットである場合、1 行でユーザーの集合全体に何かを付与することになり、その集合は別の行によって定義される。
+
+1 つのタプルで、eng の全メンバーに readme へのアクセスを与えるにはどうするのか。
+
+<Graph
+  width={600}
+  height={170}
+  minWidth={480}
+  title="ユーザーがユーザーセットであるタプル"
+  desc="user:beto から member と書かれた矢印が破線の箱 group:eng#member に向かう。その破線の箱から viewer と書かれた矢印が doc:readme に向かう。Beto はグループを経由してのみ readme に到達する。"
+  nodes={[
+    { id: "beto", x: 80, y: 85, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 85, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 515, y: 85, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+  ]}
+  caption="2 つのタプル group:eng#member@user:beto と doc:readme#viewer@group:eng#member。破線の箱は単一のユーザーではなくユーザーセットである。"
+/>
+
+Beto と readme の両方に言及する行が 1 つもないことに注意されたい。Beto が閲覧者であるのは、2 つ目のタプルが指す集合に彼が含まれているからである。eng にメンバーを追加すれば、readme の ACL を変更しなくても、そのメンバーは readme を閲覧できる。
+
+同じ仕組みは入れ子にできる。グループのメンバーを別のユーザーセットにすることができ、たとえば `group:eng#member@group:sre#member` (仮のサブチームであり、共通の例には含まれない) のように書ける。こうするとメンバーシップは、タプルが記述する段数だけたどられる。論文はこれを 1 文で述べている。"a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership" (⟨*userset*⟩ によって ACL がグループを参照でき、それにより入れ子のグループメンバーシップを表現できる) (§2.1)。その利点も説明している。オブジェクトごとの ACL ではなくタプルでモデル化することは "allows us to unify the concepts of ACLs and groups" (ACL とグループの概念を統一できる) (§2.1)。グループとは、`member` 関係が ACL であるオブジェクトにすぎない。
+
+## 表 1 を 1 つのグラフとして見る
+
+論文の表 1 は 4 つのタプルの例を挙げている。ユーザー 10 と 11 を Anne と Beto に置き換え、Chen のタプルを 1 つ加えると、次のようになる。
+
+| タプル | 読み方 |
+| --- | --- |
+| `doc:readme#owner@user:anne` | Anne は readme の所有者である |
+| `group:eng#member@user:beto` | Beto は eng のメンバーである |
+| `doc:readme#viewer@group:eng#member` | eng のメンバーは readme の閲覧者である |
+| `doc:readme#parent@folder:A#...` | readme はフォルダ A の中にある |
+| `folder:A#viewer@user:chen` | Chen はフォルダ A の閲覧者である (表 1 にはない) |
+
+4 行目の `#...` は、「タプルのセマンティクスに影響しない関係」(表 1 のキャプション) を表す論文の記法である。このタプルはフォルダの利用者の集合ではなく、フォルダそのものを指している。
+
+5 行すべてをまとめるとどうなるか。
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="表 1 と Chen のタプルを 1 つのグラフにしたもの"
+  desc="左に 3 人のユーザー。user:anne から owner と書かれた矢印が右の doc:readme にまっすぐ向かう。user:beto から member と書かれた矢印が破線のユーザーセット group:eng#member に向かい、そこから viewer と書かれた矢印が doc:readme に向かう。user:chen から viewer と書かれた矢印が folder:A に向かい、そこから parent と書かれた矢印が doc:readme に向かう。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="格納された各タプルは 1 本の辺であり、ユーザー (またはユーザーセット) からオブジェクトに向けて描かれる。"
+/>
+
+`parent` の辺はアクセスについて何も述べていないことに注意されたい。論文の言葉では、一部の関係は "only define abstract relations between objects. These abstract relations may indirectly affect access control given userset rewrite rules specified in namespace configs" (オブジェクト間の抽象的な関係を定義するだけである。これらの抽象的な関係は、名前空間設定で指定されたユーザーセット書き換えルールによって、間接的にアクセス制御に影響することがある) (§2.1)。Chen が readme を閲覧できるかどうかはそのようなルールによって決まる。それが次の節の内容である。
+
+## 名前空間の設定
+
+クライアントはタプルを格納する前に、`doc` や `folder` のような *名前空間* を設定する (§2.3)。設定には名前空間の関係が列挙され、それぞれが名前と *リレーション設定* を持つ。さらにストレージパラメータ、すなわちシャーディングの設定とオブジェクト ID のエンコーディングも含まれる。
+
+タプルだけでは実効的な ACL は定まらない。多くのクライアントは、すべての編集者を閲覧者にもしたいと考える。各オブジェクトの各編集者について `viewer` タプルを追加で格納するのは、論文の言葉では "wasteful and make it hard to make modifications across all objects" (無駄であり、全オブジェクトにまたがる変更も困難になる) (§2.3.1)。代わりに、リレーション設定は *ユーザーセット書き換えルール* を持つことができる。これはオブジェクト ID を受け取り、ユーザーセット式の木を返す関数である。
+
+以下は論文の図 1 をそのまま写したものである。
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+
+relation {
+ name: "editor"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "owner" } }
+} } }
+
+relation {
+ name: "viewer"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "editor" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+> 図 1: ドキュメントに対する同心円状の関係を持つ単純な名前空間設定。すべての所有者は編集者であり、すべての編集者は閲覧者である。さらに、親フォルダの閲覧者はそのドキュメントの閲覧者でもある。
+
+書き換え木の葉には 3 種類がある (§2.3.1)。
+
+| 葉 | 返すもの | 図 1 での例 |
+| --- | --- | --- |
+| `_this` | このオブジェクトと関係について格納されたタプル中のユーザー。それらのタプルが指すユーザーセットも含む。関係にルールがない場合のデフォルト。 | `doc:readme` に格納された `viewer` タプル |
+| `computed_userset` | 同じオブジェクトの別の関係のユーザーセット。 | 同じドキュメントの `editor`。`editor` については `owner` |
+| `tuple_to_userset` | オブジェクトから *タプルセット* を読み取り、見つかった各タプルからユーザーセットを計算する。 | ドキュメントの `parent` タプルを読み、各親フォルダの `viewer` を取る |
+
+葉は和集合、積集合、除外で組み合わされる (§2.3.1)。図 1 は和集合だけを使っている。積集合はユーザーがすべての子に含まれることを要求し、たとえば「eng にも所属する編集者」を表せる。除外は集合を取り除き、たとえば「ブロックリストを除いた閲覧者」を表せる。この 2 つの例は説明のためのものであり、論文にはない。
+
+`viewer` ルールは 1 つのドキュメントに対してどのような木を作るのか。
+
+<Graph
+  width={620}
+  height={380}
+  minWidth={540}
+  title="doc:readme#viewer の式の木"
+  desc="根は doc:readme#viewer で、その下に破線の union ノードがある。union には 3 つの子がある。格納された viewer タプルを読む _this、relation editor の computed_userset、そして tupleset parent と computed_userset viewer を持ち親フォルダの閲覧者に到達する tuple_to_userset である。editor の子は editor 自身のルールによって、_this と relation owner の computed_userset から成るもう 1 つの union に展開される。"
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "this1", x: 90, y: 180, label: "_this", kind: "group", mono: true },
+    { id: "cue", x: 310, y: 180, label: "computed_userset\nrelation: editor", kind: "group", mono: true },
+    { id: "ttu", x: 520, y: 180, label: "tuple_to_userset\ntupleset: parent\nthen: viewer", kind: "group", mono: true },
+    { id: "n1", x: 90, y: 250, label: "ドキュメントに格納\nされた viewer タプル", kind: "note" },
+    { id: "n3", x: 520, y: 270, label: "各親フォルダの\n閲覧者", kind: "note" },
+    { id: "u2", x: 310, y: 262, label: "union", kind: "group", mono: true },
+    { id: "this2", x: 200, y: 345, label: "_this", kind: "group", mono: true },
+    { id: "cuo", x: 420, y: 345, label: "computed_userset\nrelation: owner", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "this1" },
+    { from: "u1", to: "cue" },
+    { from: "u1", to: "ttu" },
+    { from: "cue", to: "u2", label: "editor のルール", dashed: true, labelOffset: 48 },
+    { from: "u2", to: "this2" },
+    { from: "u2", to: "cuo" },
+  ]}
+  caption="図 1 の viewer ルール。editor の枝は editor 自身のルールで展開してある。破線の箱は格納されたものではなく計算されたものである。"
+/>
+
+`owner` が 2 段下にあることに注意されたい。所有者は編集者であり、編集者は閲覧者である。これが図 1 のキャプションにある「同心円状の関係」の意味である。ドキュメントの外に出るのは右の枝だけであり、格納された `parent` の辺をたどって別のオブジェクトに向かう。
+
+## グラフ探索としての Check
+
+Check リクエストはユーザーセット ⟨*object#relation*⟩ とユーザーを指定し、そのユーザーがユーザーセットに含まれるかを問う (§2.4.4)。書き換えルールがない場合、論文は評価を再帰的な式として書いている (§3.2.3)。タプル ⟨*object#relation@U*⟩ が存在するか、U′ がユーザーセットでありユーザーが U′ に含まれるようなタプル ⟨*object#relation@U′*⟩ が存在すれば、ユーザーは ⟨*object#relation*⟩ に含まれる。論文はこの再帰を「pointer chasing」(ポインタ追跡) と呼ぶ。書き換えルールも "are also translated to boolean expressions as part of check evaluation" (チェック評価の一部としてブール式に変換される) (§3.2.3)。したがって上の式の木は、3 つの枝の OR になる。
+
+次の 4 つの図で扱う問いは、Chen は `doc:readme` を閲覧できるか、である。どの図も同じグラフを使い、その時点の枝が読む辺を強調している。`folder` の名前空間設定は論文にはない。これらの図では `folder#viewer` には書き換えルールがなく、単に `_this` であると仮定する。
+
+<Callout kind="note" title="時系列ではなくコマ割り">
+
+各図は 1 つの枝ずつ進むので、それぞれを単独で読める。Zanzibar がこのように順番に待つわけではない。Zanzibar は "all leaf nodes of the boolean expression tree concurrently" (ブール式の木のすべての葉ノードを並行に) 評価し、あるノードが部分木の結果を決めた時点で残りをキャンセルする (§3.2.3)。
+
+</Callout>
+
+### ステップ 1：`_this`
+
+readme に格納された `viewer` タプルは Chen を含むか。
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check のステップ 1：_this の枝"
+  desc="表 1 と同じグラフ。強調されているのは、group:eng#member から doc:readme への viewer の辺、グループのノード、user:beto からグループへの member の辺である。user:chen は強調された経路上にない。この枝の結果は no。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="_this は group:eng#member を指す viewer タプルを 1 つ見つける。それをたどると Beto だけが見つかる。枝の結果は no。"
+/>
+
+格納された閲覧者はユーザーセットだけなので、Check は `group:eng#member` へ再帰する。そのメンバーは Beto だけである。この枝の答えは no である。
+
+### ステップ 2：`computed_userset` で editor、次に owner
+
+Chen は編集者か、あるいは所有者か。
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check のステップ 2：editor と owner の枝"
+  desc="同じグラフ。強調されているのは、user:anne から doc:readme への owner の辺である。editor タプルは存在しない。user:chen は強調された経路上にない。この枝の結果は no。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="editor = _this ∪ owner。editor タプルは存在せず、所有者は Anne だけである。枝の結果は no。"
+/>
+
+書き換えは同じオブジェクト上で `viewer` から `editor`、`owner` へと移る。最初の 2 つのホップに格納されたタプルは要らない。それらは設定から得られる。所有者は Anne 1 人なので、この枝の答えも no である。
+
+### ステップ 3：`tuple_to_userset` で親を見つける
+
+readme はどのフォルダにあるか。
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check のステップ 3：parent のタプルセットを読む"
+  desc="同じグラフ。強調されているのは、folder:A から doc:readme への parent の辺と folder:A のノードである。このステップはフォルダを見つけるだけで、まだ何も決めない。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="タプルセット doc:readme#parent は folder:A を指すタプルを 1 つ持つ。ルールは次に folder:A#viewer を問う。"
+/>
+
+`parent` タプルは表 1 の「抽象的な関係」である。それ自体は何も付与しない。書き換えルールがそれを、別のオブジェクトについての新しい問いに変える。
+
+### ステップ 4：`folder:A#viewer`
+
+Chen はフォルダ A の閲覧者か。
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check のステップ 4：yes と答える経路"
+  desc="同じグラフ。強調されているのは、user:chen、user:chen から folder:A への viewer の辺、folder:A、doc:readme への parent の辺、doc:readme である。これは Chen から readme までの完全な経路である。結果は yes。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="folder:A#viewer@user:chen が格納されている。union の子の 1 つが真なので、Check は yes と答える。"
+/>
+
+経路 user:chen → folder:A → doc:readme が問いに答える。どの図でも辺の向きは同じだが、探索は readme から外側へ向かって進んだことに注意されたい。Check は ⟨*object#relation*⟩ から出発してユーザーを探す。
+
+このようなポインタ追跡は "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide" (ほとんどの種類の ACL やグループではうまく機能するが、間接 ACL やグループが深い場合や広い場合にはコストが高くなりうる) (§3.2.3)。そうした名前空間に対して Zanzibar は Leopard インデックスを使う。これは [Leopard のページ](../leopard/) で説明する。
+
+## Read と Expand
+
+2 つの API 呼び出しは、同じデータを異なる高さから見る。
+
+**Read** (§2.4.1) は格納されたタプルだけを返す。リクエストは 1 つ以上の *タプルセット* を指定する。タプルセットは単一のタプルキーか、名前空間内のあるオブジェクト ID またはユーザーセットを持つすべてのタプルであり、任意で 1 つの関係に絞り込める。論文は "Read results only depend on contents of relation tuples and do not reflect userset rewrite rules" (Read の結果はリレーションタプルの内容のみに依存し、ユーザーセット書き換えルールを反映しない) (§2.4.1) と明言している。共通の例で `doc:readme` を関係 `viewer` で Read すると、1 行が返る。
+
+```text
+doc:readme#viewer@group:eng#member
+```
+
+すべての所有者は閲覧者であるにもかかわらず Anne は含まれず、Chen も readme を閲覧できるにもかかわらず含まれない。
+
+**Expand** (§2.4.5) は "follows indirect references expressed through userset rewrite rules" (ユーザーセット書き換えルールによって表現された間接参照をたどる)。Expand は *ユーザーセット木* を返す。葉はユーザー ID か、他の ⟨*object#relation*⟩ ペアを指すユーザーセットであり、中間ノードは和集合、積集合、除外である。
+
+`doc:readme#viewer` に対して Expand は何を返すか。
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={540}
+  title="doc:readme#viewer に対する Expand の結果"
+  desc="木。根は doc:readme#viewer で、その下に 3 つの子を持つ union がある。1 つ目の子はユーザーセットの葉 group:eng#member。2 つ目は editor の union で、owner から来る葉 user:anne を 1 つ持つ。3 つ目はユーザーセットの葉 folder:A#viewer。ユーザーセットの葉は破線で、user:anne は楕円である。"
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 100, y: 180, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 310, y: 180, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 520, y: 180, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "anne", x: 310, y: 262, label: "user:anne", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "eng", label: "_this" },
+    { from: "u1", to: "ed", label: "editor" },
+    { from: "u1", to: "fold", label: "parent → viewer" },
+    { from: "ed", to: "anne", label: "owner" },
+  ]}
+  caption="Expand は書き換えルールを適用する。Read であれば group:eng#member の行だけを返していた。"
+/>
+
+破線の葉が 2 つあることに注意されたい。§2.4.5 によれば、葉は他所を指すユーザーセットでありうるので、個々のユーザー (Beto、Chen) をすべて知りたいクライアントは、それらの葉をさらに Expand する。1 回の Expand 呼び出しがどの深さまで再帰するかは論文に書かれていない。この図は、ドキュメント自身のルールが到達するユーザーセットで止めている。論文はユースケースを挙げている。Expand によってクライアントは "reason about the complete set of users and groups that have access to their objects, which allows them to build efficient search indices for access-controlled content" (自身のオブジェクトにアクセスできるユーザーとグループの完全な集合を把握でき、それによってアクセス制御されたコンテンツのための効率的な検索インデックスを構築できる) (§2.4.5)。
+
+<Callout kind="paper" title="論文では">
+
+タプルと文法：§2.1 と表 1。名前空間設定：§2.3。書き換えルールと図 1：§2.3.1。Read：§2.4.1。Check：§2.4.4。Expand：§2.4.5。チェック評価とポインタ追跡：§3.2.3。用語は [用語集](../glossary/) にまとめてある。
+
+</Callout>
+
+## 出典
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

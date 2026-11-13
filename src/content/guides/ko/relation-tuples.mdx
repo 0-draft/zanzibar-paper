@@ -1,0 +1,384 @@
+---
+title: "관계 튜플과 유저셋"
+description: "Zanzibar가 모든 권한을 작은 사실 하나로 저장하는 방법, 네임스페이스 설정이 그 사실들을 실효 ACL로 바꾸는 방법, 그리고 Check가 그 결과를 그래프로 탐색하는 방법."
+section: guide
+part: mechanisms
+order: 3
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "2.3.1", "2.4.1", "2.4.5", "3.2.3"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar는 권한을 *관계 튜플*로 저장한다. 행 하나에 사실 하나이며, "이 사용자는 이 객체에 대해 이 관계를 가진다"로 읽는다. 이 페이지에서 다루는 나머지, 즉 재작성 규칙, Check, Expand는 모두 이 행들로부터 계산된다.
+
+예제: Anne, Beto, Chen(`user:anne`, `user:beto`, `user:chen`), `folder:A`에 있는 문서 `doc:readme`, 그룹 `group:eng`. Anne은 readme를 소유하고, Beto는 eng에 속하며, eng 멤버는 readme를 열람하고, Chen은 폴더 A를 열람한다.
+
+## 문법
+
+논문(§2.1)은 텍스트 표기법을 네 개의 규칙으로 제시한다.
+
+```text
+⟨tuple⟩   ::= ⟨object⟩ ‘#’ ⟨relation⟩ ‘@’ ⟨user⟩
+⟨object⟩  ::= ⟨namespace⟩ ‘:’ ⟨object_id⟩
+⟨user⟩    ::= ⟨user_id⟩ | ⟨userset⟩
+⟨userset⟩ ::= ⟨object⟩ ‘#’ ⟨relation⟩
+```
+
+튜플은 세 부분으로 이루어진다. *객체*는 `doc:readme`처럼 네임스페이스와 ID를 합친 것이다. *관계*는 `owner`나 `viewer`처럼 네임스페이스가 정의하는 이름이다. *사용자*는 단일 사용자 ID이거나 *유저셋*이다. 논문에서 사용자 ID는 정수지만, 이 사이트는 예제를 읽기 쉽게 하려고 `user:anne`처럼 쓴다.
+
+튜플 하나는 무엇을 말하는가?
+
+<Graph
+  width={560}
+  height={150}
+  title="관계 튜플 하나"
+  desc="user:anne이라는 알약 모양 노드에서 owner라는 화살표가 doc:readme 상자를 가리킨다. 이것이 튜플 doc:readme#owner@user:anne이다."
+  nodes={[
+    { id: "anne", x: 110, y: 75, label: "user:anne", kind: "subject", mono: true },
+    { id: "doc", x: 450, y: 75, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner" }]}
+  caption="doc:readme#owner@user:anne을 사용자에서 객체로 향하는 간선으로 그린 것."
+/>
+
+이 튜플이 말하는 것은 하나다. Anne은 `doc:readme`에 대해 `owner` 관계를 가진다. 논문은 튜플을 식별하는 기본 키로 네임스페이스, 객체 ID, 관계, 사용자를 든다.
+
+## 유저셋: 그룹을 가리키는 튜플
+
+네 번째 문법 규칙이 흥미로운 부분이다. 유저셋은 그 자체로 객체와 관계의 쌍이다. `group:eng#member`는 "`group:eng`에 대해 `member` 관계를 가진 모든 사용자"를 뜻한다. 튜플의 사용자가 유저셋이면 행 하나가 사용자 집합 전체에 무언가를 부여하며, 그 집합은 다른 행들이 정의한다.
+
+튜플 하나가 어떻게 eng의 모든 멤버에게 readme 접근을 주는가?
+
+<Graph
+  width={600}
+  height={170}
+  minWidth={480}
+  title="사용자가 유저셋인 튜플"
+  desc="user:beto에서 member라는 화살표가 점선 상자 group:eng#member로 간다. 그 점선 상자에서 viewer라는 화살표가 doc:readme로 간다. Beto는 그룹을 통해서만 readme에 도달한다."
+  nodes={[
+    { id: "beto", x: 80, y: 85, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 85, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 515, y: 85, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+  ]}
+  caption="튜플 두 개: group:eng#member@user:beto와 doc:readme#viewer@group:eng#member. 점선 상자는 단일 사용자가 아니라 유저셋이다."
+/>
+
+Beto와 readme를 함께 언급하는 행은 하나도 없다는 점에 주목하라. Beto가 열람자인 것은 두 번째 튜플이 가리키는 집합에 속하기 때문이다. eng에 멤버를 추가하면 readme의 ACL을 전혀 바꾸지 않고도 그 멤버가 readme를 열람할 수 있다.
+
+같은 방법은 중첩된다. 그룹의 멤버는 다른 유저셋일 수 있다. 예를 들어 `group:eng#member@group:sre#member`(가상의 하위 팀으로, 예제에는 포함되지 않는다)라고 쓰면, 멤버십은 튜플이 기술하는 만큼 여러 단계를 거쳐 이어진다. 논문은 이를 한 줄로 표현한다. "a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership"(⟨*userset*⟩을 통해 ACL이 그룹을 참조할 수 있으며, 따라서 중첩된 그룹 멤버십을 표현할 수 있다)(§2.1). 논문은 그 이점도 설명한다. 객체별 ACL 대신 튜플로 모델링하면 "allows us to unify the concepts of ACLs and groups"(ACL과 그룹이라는 개념을 통합할 수 있다)(§2.1). 그룹은 `member` 관계가 ACL인 객체일 뿐이다.
+
+## 그래프 하나로 본 표 1
+
+논문의 표 1에는 예시 튜플 네 개가 있다. 사용자 10과 11을 Anne과 Beto로 바꾸고 Chen의 튜플 하나를 추가하면 다음과 같다.
+
+| 튜플 | 읽는 법 |
+| --- | --- |
+| `doc:readme#owner@user:anne` | Anne은 readme의 소유자다 |
+| `group:eng#member@user:beto` | Beto는 eng의 멤버다 |
+| `doc:readme#viewer@group:eng#member` | eng의 멤버는 readme의 열람자다 |
+| `doc:readme#parent@folder:A#...` | readme는 폴더 A에 있다 |
+| `folder:A#viewer@user:chen` | Chen은 폴더 A의 열람자다(표 1에는 없음) |
+
+네 번째 행의 `#...`는 "튜플의 의미에 영향을 주지 않는 관계"를 나타내는 논문의 표기다(표 1 캡션). 이 튜플은 폴더의 사용자 집합이 아니라 폴더 자체를 가리킨다.
+
+다섯 행을 모두 함께 그리면 어떻게 보이는가?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="표 1과 Chen의 튜플을 그래프 하나로"
+  desc="왼쪽에 사용자 세 명. user:anne에서 owner라는 화살표가 오른쪽의 doc:readme로 곧장 간다. user:beto에서 member라는 화살표가 점선 유저셋 group:eng#member로 가고, 거기서 viewer라는 화살표가 doc:readme로 간다. user:chen에서 viewer라는 화살표가 folder:A로 가고, folder:A에서 parent라는 화살표가 doc:readme로 간다."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="저장된 튜플 하나가 간선 하나이며, 사용자(또는 유저셋)에서 객체로 그린다."
+/>
+
+`parent` 간선은 접근에 대해 아무것도 말하지 않는다는 점에 주목하라. 논문의 표현으로는 어떤 관계는 "only define abstract relations between objects. These abstract relations may indirectly affect access control given userset rewrite rules specified in namespace configs"(객체 사이의 추상적인 관계만 정의한다. 이러한 추상적 관계는 네임스페이스 설정에 지정된 유저셋 재작성 규칙에 따라 간접적으로 접근 제어에 영향을 줄 수 있다)(§2.1). Chen이 readme를 볼 수 있는지는 그런 규칙에 달려 있으며, 그것이 다음 절의 내용이다.
+
+## 네임스페이스 설정
+
+클라이언트는 튜플을 저장하기 전에 `doc`이나 `folder` 같은 *네임스페이스*를 설정한다(§2.3). 설정에는 네임스페이스의 관계 목록(각각 이름과 *관계 설정*을 가진다)과 저장소 매개변수, 즉 샤딩 설정과 객체 ID 인코딩이 들어간다.
+
+튜플만으로는 실효 ACL이 정의되지 않는다. 많은 클라이언트는 모든 편집자가 열람자이기도 하기를 원한다. 각 객체의 편집자마다 `viewer` 튜플을 추가로 저장하는 것은 논문의 표현으로 "wasteful and make it hard to make modifications across all objects"(낭비이며 모든 객체에 걸친 수정을 어렵게 만든다)(§2.3.1). 대신 관계 설정에는 *유저셋 재작성 규칙*을 넣을 수 있다. 이는 객체 ID를 받아 유저셋 표현식 트리를 반환하는 함수다.
+
+다음은 논문의 그림 1을 그대로 옮긴 것이다.
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+
+relation {
+ name: "editor"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "owner" } }
+} } }
+
+relation {
+ name: "viewer"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "editor" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+> 그림 1: 문서에 대한 동심원 관계를 가진 간단한 네임스페이스 설정. 모든 소유자는 편집자이고, 모든 편집자는 열람자다. 또한 상위 폴더의 열람자는 그 문서의 열람자이기도 하다.
+
+재작성 트리의 리프는 세 종류다(§2.3.1).
+
+| 리프 | 반환하는 것 | 그림 1에서 |
+| --- | --- | --- |
+| `_this` | 이 객체와 관계에 대해 저장된 튜플의 사용자. 그 튜플이 가리키는 유저셋도 포함한다. 관계에 규칙이 없을 때의 기본값이다. | `doc:readme`에 저장된 `viewer` 튜플 |
+| `computed_userset` | 같은 객체에 대한 다른 관계의 유저셋. | 같은 문서의 `editor`. `editor`에서는 `owner` |
+| `tuple_to_userset` | 객체로부터 *튜플셋*을 읽은 다음, 찾은 각 튜플로부터 유저셋을 계산한다. | 문서의 `parent` 튜플을 읽고, 각 상위 폴더의 `viewer`를 취한다 |
+
+리프는 합집합, 교집합, 차집합(exclusion)으로 결합된다(§2.3.1). 그림 1은 합집합만 사용한다. 교집합은 사용자가 모든 자식에 속할 것을 요구한다. 예를 들어 "eng에도 속한 편집자"다. 차집합은 어떤 집합을 제거한다. 예를 들어 "차단 목록을 제외한 열람자"다. 이 두 예는 설명을 위한 것이며 논문에서 온 것이 아니다.
+
+`viewer` 규칙은 문서 하나에 대해 어떤 트리를 만드는가?
+
+<Graph
+  width={620}
+  height={380}
+  minWidth={540}
+  title="doc:readme#viewer의 표현식 트리"
+  desc="루트 doc:readme#viewer 아래에 점선 union 노드가 있다. union의 자식은 셋이다. 저장된 viewer 튜플을 읽는 _this, relation이 editor인 computed_userset, 그리고 tupleset이 parent이고 computed_userset이 viewer인 tuple_to_userset으로, 마지막 것은 상위 폴더의 열람자에 도달한다. editor 자식은 editor 자신의 규칙을 통해 _this와 relation이 owner인 computed_userset의 또 다른 union으로 전개된다."
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "this1", x: 90, y: 180, label: "_this", kind: "group", mono: true },
+    { id: "cue", x: 310, y: 180, label: "computed_userset\nrelation: editor", kind: "group", mono: true },
+    { id: "ttu", x: 520, y: 180, label: "tuple_to_userset\ntupleset: parent\nthen: viewer", kind: "group", mono: true },
+    { id: "n1", x: 90, y: 250, label: "문서에 저장된\nviewer 튜플", kind: "note" },
+    { id: "n3", x: 520, y: 270, label: "각 상위 폴더의\n열람자", kind: "note" },
+    { id: "u2", x: 310, y: 262, label: "union", kind: "group", mono: true },
+    { id: "this2", x: 200, y: 345, label: "_this", kind: "group", mono: true },
+    { id: "cuo", x: 420, y: 345, label: "computed_userset\nrelation: owner", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "this1" },
+    { from: "u1", to: "cue" },
+    { from: "u1", to: "ttu" },
+    { from: "cue", to: "u2", label: "editor의 규칙", dashed: true, labelOffset: 48 },
+    { from: "u2", to: "this2" },
+    { from: "u2", to: "cuo" },
+  ]}
+  caption="그림 1의 viewer 규칙. editor 가지는 editor 자신의 규칙으로 전개했다. 점선 상자는 저장된 것이 아니라 계산된 것이다."
+/>
+
+`owner`가 두 단계 아래에 있다는 점에 주목하라. 소유자는 편집자이고, 편집자는 열람자다. 그림 1의 캡션이 말하는 "동심원 관계(concentric relations)"가 이것이다. 오른쪽 가지만이 문서를 벗어난다. 저장된 `parent` 간선을 따라 다른 객체로 간다.
+
+## 그래프 탐색으로서의 Check
+
+Check 요청은 유저셋 ⟨*object#relation*⟩과 사용자를 지정하고, 그 사용자가 유저셋에 속하는지 묻는다(§2.4.4). 재작성 규칙이 없을 때 논문은 평가를 재귀식으로 쓴다(§3.2.3). 튜플 ⟨*object#relation@U*⟩가 존재하거나, U′가 유저셋이고 사용자가 U′에 속하는 튜플 ⟨*object#relation@U′*⟩가 존재하면, 사용자는 ⟨*object#relation*⟩에 속한다. 논문은 이 재귀를 "포인터 추적(pointer chasing)"이라고 부른다. 재작성 규칙은 "are also translated to boolean expressions as part of check evaluation"(검사 평가의 일부로 불리언 표현식으로 변환된다)(§3.2.3). 따라서 위의 표현식 트리는 세 가지의 OR가 된다.
+
+다음 네 그림의 질문은 이것이다. Chen은 `doc:readme`를 열람할 수 있는가? 각 프레임은 같은 그래프를 쓰고, 현재 가지가 읽는 간선을 강조한다. `folder` 네임스페이스 설정은 논문에 없다. 이 프레임들은 `folder#viewer`에 재작성 규칙이 없어 그냥 `_this`라고 가정한다.
+
+<Callout kind="note" title="타임라인이 아니라 프레임">
+
+프레임은 각각 따로 읽을 수 있도록 한 번에 가지 하나씩 진행한다. Zanzibar가 이렇게 기다리는 것은 아니다. Zanzibar는 "all leaf nodes of the boolean expression tree concurrently"(불리언 표현식 트리의 모든 리프 노드를 동시에) 평가하고, 한 노드가 결과를 결정하면 그 하위 트리의 나머지를 취소한다(§3.2.3).
+
+</Callout>
+
+### 1단계: `_this`
+
+readme에 저장된 `viewer` 튜플에 Chen이 포함되는가?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 1단계: _this 가지"
+  desc="표 1과 같은 그래프. 강조된 것: group:eng#member에서 doc:readme로 가는 viewer 간선, 그룹 노드, user:beto에서 그룹으로 들어가는 member 간선. user:chen은 강조된 경로에 없다. 이 가지의 결과: 아니요."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="_this는 group:eng#member를 가리키는 viewer 튜플 하나를 찾는다. 이를 따라가면 Beto만 나온다. 가지 결과: 아니요."
+/>
+
+저장된 열람자는 유저셋 하나뿐이므로 Check는 `group:eng#member`로 재귀한다. 그 멤버는 Beto뿐이다. 이 가지의 답은 아니요다.
+
+### 2단계: `computed_userset` editor, 이어서 owner
+
+Chen은 편집자인가, 아니면 소유자인가?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 2단계: editor와 owner 가지"
+  desc="같은 그래프. 강조된 것: user:anne에서 doc:readme로 가는 owner 간선. editor 튜플은 없다. user:chen은 강조된 경로에 없다. 이 가지의 결과: 아니요."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="editor = _this ∪ owner. editor 튜플은 없고, 소유자는 Anne뿐이다. 가지 결과: 아니요."
+/>
+
+재작성은 같은 객체에서 `viewer`에서 `editor`로, 다시 `owner`로 이동한다. 처음 두 단계에는 저장된 튜플이 필요 없다. 설정에서 나오기 때문이다. 소유자는 Anne 한 명이므로 이 가지의 답도 아니요다.
+
+### 3단계: `tuple_to_userset`, 상위 폴더 찾기
+
+readme는 어느 폴더에 있는가?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 3단계: parent 튜플셋 읽기"
+  desc="같은 그래프. 강조된 것: folder:A에서 doc:readme로 가는 parent 간선과 folder:A 노드. 이 단계는 폴더를 찾기만 하고 아직 아무것도 결정하지 않는다."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="튜플셋 doc:readme#parent에는 folder:A를 가리키는 튜플 하나가 있다. 이제 규칙은 folder:A#viewer에 대해 묻는다."
+/>
+
+`parent` 튜플은 표 1의 "추상적 관계"다. 그 자체로는 아무것도 부여하지 않는다. 재작성 규칙이 이를 다른 객체에 대한 새로운 질문으로 바꾼다.
+
+### 4단계: `folder:A#viewer`
+
+Chen은 폴더 A의 열람자인가?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check 4단계: 예라고 답하는 경로"
+  desc="같은 그래프. 강조된 것: user:chen, user:chen에서 folder:A로 가는 viewer 간선, folder:A, doc:readme로 가는 parent 간선, doc:readme. Chen에서 readme까지 완전한 경로다. 결과: 예."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="folder:A#viewer@user:chen이 저장되어 있다. union의 자식 하나가 참이므로 Check는 예라고 답한다."
+/>
+
+경로 user:chen → folder:A → doc:readme가 질문에 답한다. 모든 프레임에서 간선은 같은 방향을 가리키지만 탐색은 readme에서 바깥쪽으로 진행되었다는 점에 주목하라. Check는 ⟨*object#relation*⟩에서 시작해 사용자를 찾는다.
+
+이러한 포인터 추적은 "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide"(대부분의 ACL 및 그룹 유형에서 잘 작동하지만, 간접 ACL이나 그룹이 깊거나 넓으면 비용이 커질 수 있다)(§3.2.3). 그런 네임스페이스에 대해 Zanzibar는 Leopard 인덱스를 사용하며, [Leopard 페이지](../leopard/)에서 설명한다.
+
+## Read와 Expand
+
+두 API 호출은 같은 데이터를 서로 다른 높이에서 본다.
+
+**Read**(§2.4.1)는 저장된 튜플만 반환한다. 요청은 하나 이상의 *튜플셋*을 지정한다. 튜플셋은 단일 튜플 키이거나, 네임스페이스에서 주어진 객체 ID나 유저셋을 가진 모든 튜플이며, 선택적으로 관계 하나로 좁힐 수 있다. 논문은 "Read results only depend on contents of relation tuples and do not reflect userset rewrite rules"(Read 결과는 관계 튜플의 내용에만 의존하며 유저셋 재작성 규칙을 반영하지 않는다)라고 명시한다(§2.4.1). 예제에서 관계 `viewer`로 `doc:readme`를 읽으면 행 하나가 반환된다.
+
+```text
+doc:readme#viewer@group:eng#member
+```
+
+모든 소유자가 열람자인데도 Anne이 빠져 있고, Chen이 readme를 볼 수 있는데도 Chen이 빠져 있다.
+
+**Expand**(§2.4.5)는 "follows indirect references expressed through userset rewrite rules"(유저셋 재작성 규칙을 통해 표현된 간접 참조를 따라간다). Expand는 *유저셋 트리*를 반환한다. 리프는 사용자 ID이거나 다른 ⟨*object#relation*⟩ 쌍을 가리키는 유저셋이고, 내부 노드는 합집합, 교집합, 차집합이다.
+
+`doc:readme#viewer`에 대해 Expand는 무엇을 반환하는가?
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={540}
+  title="doc:readme#viewer에 대한 Expand 결과"
+  desc="트리. 루트 doc:readme#viewer 아래에 자식 셋을 가진 union이 있다. 첫째 자식은 유저셋 리프 group:eng#member다. 둘째는 editor에 대한 union으로, owner에서 온 리프 user:anne 하나를 가진다. 셋째는 유저셋 리프 folder:A#viewer다. 유저셋 리프는 점선이고, user:anne은 알약 모양이다."
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 100, y: 180, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 310, y: 180, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 520, y: 180, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "anne", x: 310, y: 262, label: "user:anne", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "eng", label: "_this" },
+    { from: "u1", to: "ed", label: "editor" },
+    { from: "u1", to: "fold", label: "parent → viewer" },
+    { from: "ed", to: "anne", label: "owner" },
+  ]}
+  caption="Expand는 재작성 규칙을 적용한다. Read였다면 group:eng#member 행만 반환했을 것이다."
+/>
+
+점선 리프 두 개에 주목하라. §2.4.5에 따르면 리프는 다른 곳을 가리키는 유저셋일 수 있으므로, 모든 개인(Beto, Chen)을 원하는 클라이언트는 그 리프들을 차례로 전개한다. 논문은 Expand 호출 한 번이 얼마나 깊이 재귀하는지 말하지 않는다. 이 그림은 문서 자신의 규칙이 도달하는 유저셋에서 멈춘다. 논문은 용도를 밝힌다. Expand는 클라이언트가 "reason about the complete set of users and groups that have access to their objects, which allows them to build efficient search indices for access-controlled content"(자신의 객체에 접근할 수 있는 사용자와 그룹의 전체 집합을 추론할 수 있게 하며, 이를 통해 접근 제어되는 콘텐츠를 위한 효율적인 검색 인덱스를 구축할 수 있다)(§2.4.5).
+
+<Callout kind="paper" title="논문에서">
+
+튜플과 문법: §2.1과 표 1. 네임스페이스 설정: §2.3. 재작성 규칙과 그림 1: §2.3.1. Read: §2.4.1. Check: §2.4.4. Expand: §2.4.5. 검사 평가와 포인터 추적: §3.2.3. 용어는 [용어집](../glossary/)에 모아 두었다.
+
+</Callout>
+
+## 출처
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

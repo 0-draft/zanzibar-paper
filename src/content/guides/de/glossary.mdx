@@ -1,0 +1,165 @@
+---
+title: "Glossar"
+description: "Jeder Begriff, dem Leser im Zanzibar-Paper begegnen, in einfachen Worten, mit einem Verweis auf die Guide-Seite und den Abschnitt des Papers, die ihn erklären."
+section: guide
+part: reference
+order: 16
+checked: "2026-11-13"
+paper: []
+---
+
+Die Begriffe stehen in alphabetischer Reihenfolge ihrer englischen Bezeichnung, wie sie im Paper vorkommt; die deutsche Entsprechung steht in Klammern. Codenamen aus der Konfigurationssprache des Papers (`_this`, `computed_userset`, `tuple_to_userset`) sind ohne ihre Unterstriche einsortiert. Die Beispiele verwenden das durchgehende Beispiel: Anne, Beto und Chen; `doc:readme` in `folder:A`; `group:eng`.
+
+## A–C
+
+<dl>
+  <dt id="acl">ACL</dt>
+  <dd>Access Control List (Zugriffskontrollliste): die Menge der Benutzer, die mit einem Objekt etwas tun dürfen. In Zanzibar wird eine ACL nicht als eine Liste gespeichert, sondern als viele Relationstupel. Mehr: <a href="../access-control-models/">Zugriffskontrollmodelle</a>, §1, §2.1.</dd>
+  <dt id="aclserver">aclserver</dt>
+  <dd>Der wichtigste Servertyp von Zanzibar. Beantwortet Check, Read, Expand und Write und fächert Arbeit auf andere aclserver in seinem Cluster auf. Mehr: <a href="../architecture/">Architektur</a>, §3.</dd>
+  <dt id="at-least-as-fresh">at-least-as-fresh (mindestens so aktuell)</dt>
+  <dd>Die Regel für einen zookie: Zanzibar darf auf jedem Snapshot auswerten, der nicht älter ist als der Zeitstempel des zookie, nicht nur auf genau diesem. Diese Freiheit erlaubt es, die meisten Anfragen aus lokalen Replikaten zu bedienen. Mehr: <a href="../consistency/">Konsistenz</a>, §2.2.</dd>
+  <dt id="bounded-staleness">bounded staleness (begrenzte Veraltung)</dt>
+  <dd>Ein Snapshot-Lesevorgang darf älter sein als „jetzt“, aber nicht älter als eine Grenze. In Zanzibar ist die Grenze der zookie, den der Client mitsendet. Spanner bietet dies direkt an: Der Client gibt eine Obergrenze für die Veraltung an, und Spanner wählt den Zeitstempel (<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner-Paper</a>, §4.1). Mehr: <a href="../consistency/">Konsistenz</a>, §2.2.</dd>
+  <dt id="cache-stampede">cache stampede</dt>
+  <dd>Viele gleichzeitige Anfragen nach demselben nicht gecachten Ergebnis gehen alle auf einmal an den Speicher, bevor sich der Cache füllt. Zanzibar verhindert das mit einer Lock-Tabelle. Das Paper zitiert für den Begriff den <a href="https://en.wikipedia.org/wiki/Cache_stampede">Wikipedia-Artikel</a> (Referenz [3]). Mehr: <a href="../architecture/">Architektur</a>, §3.2.5.</dd>
+  <dt id="changelog">changelog</dt>
+  <dd>Eine Spanner-Datenbank, die die Historie der Tupelaktualisierungen enthält und in derselben Transaktion wie jeder Tupel-Schreibvorgang geschrieben wird. Watch liest daraus. Mehr: <a href="../architecture/">Architektur</a>, §3.1.2.</dd>
+  <dt id="check">Check</dt>
+  <dd>Der API-Aufruf, der fragt, ob ein Benutzer in einem Userset ⟨<em>object#relation</em>⟩ enthalten ist, zum Beispiel „ist Chen ein Betrachter von <code>doc:readme</code>?“. Wird auf einem Snapshot ausgewertet, der nicht früher liegt als der angegebene zookie. Mehr: <a href="../relation-tuples/#check-als-graphsuche">Relationstupel</a>, §2.4.4, §3.2.3.</dd>
+  <dt id="computed-userset"><code>computed_userset</code></dt>
+  <dd>Ein Blatt einer Umschreibregel, das das Userset einer anderen Relation auf demselben Objekt nimmt, zum Beispiel „jeder Bearbeiter ist ein Betrachter“. Mehr: <a href="../relation-tuples/#namespace-konfiguration">Relationstupel</a>, §2.3.1.</dd>
+  <dt id="consistent-hashing">consistent hashing (konsistentes Hashing)</dt>
+  <dd>Ein Verfahren, Schlüssel so auf Server zu verteilen, dass das Hinzufügen oder Entfernen eines Servers nur einen kleinen Teil der Schlüssel verschiebt. Zanzibar verwendet es, um Cache-Einträge über die Server eines Clusters zu verteilen. Eingeführt von <a href="https://people.csail.mit.edu/karger/Papers/web.pdf">Karger et al. (STOC 1997)</a> für Web-Caches. Mehr: <a href="../architecture/">Architektur</a>, §3.2.5.</dd>
+  <dt id="content-change-check">content-change check (Content-Change-Prüfung)</dt>
+  <dd>Ein Check, der gesendet wird, wenn ein Benutzer gerade neue Inhalte speichern will. Er trägt keinen zookie, wird auf dem neuesten Snapshot ausgewertet und gibt einen zookie zurück, den der Client mit der neuen Inhaltsversion speichert. Mehr: <a href="../consistency/">Konsistenz</a>, §2.2, §2.4.4.</dd>
+</dl>
+
+## D–H
+
+<dl>
+  <dt id="denormalization">denormalization (Denormalisierung)</dt>
+  <dd>Eine vorberechnete Kopie abgeleiteter Daten speichern, etwa abgeflachte Gruppe-zu-Gruppe-Mitgliedschaften, statt sie aus den ursprünglichen Zeilen zu berechnen. Zanzibar vermeidet das im Speicher und verwendet es nur in Leopard. Mehr: <a href="../leopard/">Leopard</a>, §3.2.4, §3.2.5.</dd>
+  <dt id="exclusion">exclusion (Ausschluss)</dt>
+  <dd>Ein Operator einer Umschreibregel: die Benutzer, die in einem Userset enthalten sind, aber nicht in einem anderen. Mehr: <a href="../relation-tuples/#namespace-konfiguration">Relationstupel</a>, §2.3.1.</dd>
+  <dt id="expand">Expand</dt>
+  <dd>Der API-Aufruf, der das effektive Userset von ⟨<em>object#relation</em>⟩ als Baum zurückgibt und dabei den Umschreibregeln folgt. Blätter sind Benutzer-IDs oder Usersets; innere Knoten sind Vereinigung, Schnittmenge oder Ausschluss. Mehr: <a href="../relation-tuples/#read-und-expand">Relationstupel</a>, §2.4.5.</dd>
+  <dt id="external-consistency">external consistency (externe Konsistenz)</dt>
+  <dd>Wenn Aktualisierung x vor Aktualisierung y geschieht, erhält x einen kleineren Zeitstempel als y, auch wenn die beiden außerhalb des Systems koordiniert werden. Zanzibar erhält diese Eigenschaft von Spanner. Das Paper zitiert für den Begriff Giffords Stanford-Dissertation von 1981 (Referenz [18]); <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner</a> formuliert sie so: Wenn T1 committet, bevor T2 beginnt, ist der Commit-Zeitstempel von T1 kleiner als der von T2. Mehr: <a href="../consistency/">Konsistenz</a>, §2.2.</dd>
+  <dt id="fan-out">fan-out (Auffächerung)</dt>
+  <dd>Eine Anfrage, die zu vielen Teilanfragen wird, zum Beispiel wenn ein aclserver Teile eines Check an andere Server in seinem Cluster sendet. Mehr: <a href="../architecture/">Architektur</a>, §3, §3.2.5.</dd>
+  <dt id="heartbeat-zookie">heartbeat zookie (Heartbeat-zookie)</dt>
+  <dd>Ein zookie in jeder Watch-Antwort, der markiert, wie weit der Stream gekommen ist, damit der Client von dort aus fortsetzen kann. Mehr: §2.4.3.</dd>
+  <dt id="hedging">hedging (Request-Hedging)</dt>
+  <dd>Dieselbe Anfrage an einen zweiten Server senden, sobald bekannt ist, dass der erste langsam ist, die zuerst eintreffende Antwort verwenden und die andere abbrechen. Zanzibar hedgt Aufrufe an Spanner und Leopard, nicht Aufrufe zwischen seinen eigenen Servern. Die Technik ist beschrieben in Dean und Barroso, <a href="https://research.google/pubs/the-tail-at-scale/">„The Tail at Scale“</a> (CACM, 2013). Mehr: <a href="../architecture/">Architektur</a>, §3.2.7.</dd>
+  <dt id="hot-spot">hot spot (Hotspot)</dt>
+  <dd>Ein Schlüssel, ein Objekt oder eine Gruppe, die weit mehr Verkehr erhält als andere und den Server überlasten kann, der sie speichert, zum Beispiel eine beliebte Gruppe, die von vielen ACLs geteilt wird. Mehr: <a href="../architecture/">Architektur</a>, §3.2.5.</dd>
+</dl>
+
+## I–N
+
+<dl>
+  <dt id="intersection">intersection (Schnittmenge)</dt>
+  <dd>Ein Operator einer Umschreibregel: die Benutzer, die in jedem von mehreren Usersets enthalten sind. Mehr: <a href="../relation-tuples/#namespace-konfiguration">Relationstupel</a>, §2.3.1.</dd>
+  <dt id="leopard">Leopard</dt>
+  <dd>Ein Indexierungssystem für tief verschachtelte oder sehr breite Gruppen. Es flacht Gruppenmitgliedschaften zu Mengen ganzer Zahlen ab, sodass eine Mitgliedschaftsprüfung zu einer Mengenschnittmenge wird, und hält sich über Watch aktuell. Mehr: <a href="../leopard/">Leopard</a>, §3.2.4.</dd>
+  <dt id="lock-table">lock table (Lock-Tabelle)</dt>
+  <dd>Eine Tabelle pro Server mit laufenden Lesevorgängen und Prüfungen. Von den Anfragen, die einen Cache-Schlüssel teilen, läuft nur eine; die übrigen warten auf ihr Ergebnis. Mehr: <a href="../architecture/">Architektur</a>, §3.2.5.</dd>
+  <dt id="lock-tuple">lock tuple (Lock-Tupel)</dt>
+  <dd>Ein gewöhnliches Relationstupel, das Clients bei jedem Schreibvorgang auf ein Objekt anfassen, sodass ein Schreibvorgang davon abhängig gemacht werden kann, dass seit dem Lesevorgang niemand sonst geschrieben hat. Mehr: §2.4.2.</dd>
+  <dt id="namespace">namespace (Namespace)</dt>
+  <dd>Eine vom Client definierte Art von Objekt, etwa <code>doc</code> oder <code>folder</code>. Der Teil vor dem Doppelpunkt in <code>doc:readme</code>. Die Tupel jedes Namespace liegen in einer eigenen Datenbank. Mehr: <a href="../relation-tuples/#namespace-konfiguration">Relationstupel</a>, §2.1, §2.3, §3.1.1.</dd>
+  <dt id="namespace-config">namespace config (Namespace-Konfiguration)</dt>
+  <dd>Die Konfiguration eines Namespace: seine Relationen, jede mit einer optionalen Userset-Umschreibregel, dazu Speicherparameter wie das Sharding. Mehr: <a href="../relation-tuples/#namespace-konfiguration">Relationstupel</a>, §2.3, §3.1.3.</dd>
+  <dt id="new-enemy-problem">new enemy problem („New Enemy“-Problem)</dt>
+  <dd>Inhalte jemandem zeigen, der aus ihrer ACL entfernt wurde, weil die Prüfung die Reihenfolge zweier ACL-Änderungen ignoriert oder eine ACL angewendet hat, die älter ist als der Inhalt. Mehr: <a href="../consistency/">Konsistenz</a>, §2.2.</dd>
+</dl>
+
+## O–R
+
+<dl>
+  <dt id="object">object (Objekt)</dt>
+  <dd>Das zu schützende Ding, geschrieben ⟨<em>namespace</em>⟩:⟨<em>object_id</em>⟩, etwa <code>doc:readme</code>. Mehr: <a href="../relation-tuples/#die-grammatik">Relationstupel</a>, §2.1.</dd>
+  <dt id="paxos">Paxos</dt>
+  <dd>Ein Konsensprotokoll, mit dem sich eine Gruppe von Replikaten auf jeden Schreibvorgang einigen kann, auch wenn einige von ihnen ausfallen. Das Paper platziert die fünf stimmberechtigten Replikate des Zanzibar-Speichers innerhalb von 25 ms voneinander, damit Paxos-Transaktionen schnell committen. Siehe Lamport, <a href="https://lamport.azurewebsites.net/pubs/paxos-simple.pdf">„Paxos Made Simple“</a> (2001). Mehr: <a href="../architecture/">Architektur</a>, §3.1.4.</dd>
+  <dt id="pointer-chasing">pointer chasing (Zeigerverfolgung)</dt>
+  <dd>Einen Check beantworten, indem man Usersets Schritt für Schritt folgt: von den Betrachtern des Readme zu <code>group:eng#member</code>, dann zu den Mitgliedern dieser Gruppe und so weiter. Langsam, wenn Gruppen tief oder breit sind. Mehr: <a href="../relation-tuples/#check-als-graphsuche">Relationstupel</a>, <a href="../leopard/">Leopard</a>, §3.2.3, §3.2.4.</dd>
+  <dt id="read">Read</dt>
+  <dd>Der API-Aufruf, der gespeicherte Tupel zurückgibt, die zu einer oder mehreren Tupelmengen passen. Er wendet keine Umschreibregeln an. Mehr: <a href="../relation-tuples/#read-und-expand">Relationstupel</a>, §2.4.1.</dd>
+  <dt id="recent-request">Recent request (Recent-Anfrage)</dt>
+  <dd>Siehe <a href="#safe-and-recent-requests">Safe-/Recent-Anfragen</a>. Mehr: <a href="../consistency/">Konsistenz</a>, §4.1.</dd>
+  <dt id="relation">relation (Relation)</dt>
+  <dd>Eine benannte Beziehung zwischen einem Objekt und einem Benutzer oder zwischen zwei Objekten (so wie <code>parent</code> ein Dokument mit seinem Ordner verbindet), etwa <code>owner</code>, <code>viewer</code>, <code>member</code> oder <code>parent</code>. Definiert in der Namespace-Konfiguration. Mehr: <a href="../relation-tuples/#die-grammatik">Relationstupel</a>, §2.1, §2.3.</dd>
+  <dt id="relation-tuple">relation tuple (Relationstupel)</dt>
+  <dd>Ein gespeicherter Fakt, ⟨<em>object</em>⟩#⟨<em>relation</em>⟩@⟨<em>user</em>⟩, etwa <code>doc:readme#owner@user:anne</code>. Die einzige Art von Berechtigungsdaten, die Zanzibar speichert. Mehr: <a href="../relation-tuples/">Relationstupel</a>, §2.1.</dd>
+  <dt id="replica">replica (Replikat)</dt>
+  <dd>Eine Kopie der Daten an einem Standort. Die Daten von Zanzibar werden an Dutzende Standorte repliziert, damit die meisten Lesevorgänge in der Nähe bedient werden können. Mehr: <a href="../architecture/">Architektur</a>, §3.1.4.</dd>
+</dl>
+
+## S
+
+<dl>
+  <dt id="safe-and-recent-requests">Safe / Recent requests (Safe-/Recent-Anfragen)</dt>
+  <dd>Die Einteilung der Anfragen nach dem Alter des zookie im Paper. Safe-Anfragen tragen zookies, die älter als 10 Sekunden sind, und können meist innerhalb der Region bedient werden; Recent-Anfragen tragen neuere zookies und brauchen oft einen regionsübergreifenden Round Trip. Mehr: <a href="../consistency/">Konsistenz</a>, §4.1.</dd>
+  <dt id="shard">shard (Shard)</dt>
+  <dd>Ein Teil einer Datenbank oder eines Index, der getrennt gespeichert und bedient wird. Die Shard-ID eines Tupels ergibt sich meist aus seiner Objekt-ID, bei sehr großen Gruppen aus Objekt-ID und Benutzer. Mehr: <a href="../architecture/">Architektur</a>, §3.1.1, §3.2.4.</dd>
+  <dt id="snapshot-read">snapshot read (Snapshot-Lesevorgang)</dt>
+  <dd>Ein Lesevorgang, der die Datenbank genau zu einem Zeitstempel sieht: jeden Schreibvorgang zu oder vor diesem Zeitpunkt und keinen danach. Zanzibar wertet jeden Check auf einem einzigen Snapshot aus. Spanner definiert ihn als "a read in the past that executes without locking" (einen Lesevorgang in der Vergangenheit, der ohne Sperren ausgeführt wird) (<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner-Paper</a>, §4.1). Mehr: <a href="../consistency/">Konsistenz</a>, §2.2.</dd>
+  <dt id="spanner">Spanner</dt>
+  <dd>Die global verteilte Datenbank von Google. Zanzibar speichert darin Tupel, Namespace-Konfigurationen und das changelog und stützt sich für die Konsistenz auf ihre Zeitstempel. Beschrieben in <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Corbett et al., OSDI 2012</a>. Mehr: <a href="../consistency/">Konsistenz</a>, <a href="../architecture/">Architektur</a>, §2.2, §3.</dd>
+</dl>
+
+## T
+
+<dl>
+  <dt id="tail-latency">tail latency (Tail-Latenz)</dt>
+  <dd>Die Latenz der langsamsten Anfragen, etwa des 99. oder 99,9. Perzentils. Sie ist wichtig, weil eine Seite mit Suchergebnissen Dutzende bis Hunderte von Prüfungen erfordern kann. Siehe Dean und Barroso, <a href="https://research.google/pubs/the-tail-at-scale/">„The Tail at Scale“</a> (CACM, 2013). Mehr: <a href="../architecture/#langsame-spanner-lesevorgänge-werden-gehedgt">Architektur</a>, §1, §3.2.7, §4.2, §4.5.</dd>
+  <dt id="this"><code>_this</code></dt>
+  <dd>Das Blatt einer Umschreibregel, das die Benutzer in gespeicherten Tupeln für dieses Objekt und diese Relation zurückgibt, einschließlich der Usersets, auf die diese Tupel zeigen. Der Standard, wenn eine Relation keine Regel hat. Mehr: <a href="../relation-tuples/#namespace-konfiguration">Relationstupel</a>, §2.3.1.</dd>
+  <dt id="timestamp-quantization">timestamp quantization (Zeitstempel-Quantisierung)</dt>
+  <dd>Auswertungszeitstempel auf einen groben Schritt aufrunden, etwa eine oder zehn Sekunden, sodass viele Anfragen einen Zeitstempel und damit Cache-Einträge teilen. Das schwächt die Konsistenz nicht: Ein zookie setzt nur eine Untergrenze, und ein Spanner-Snapshot-Lesevorgang zu einem zukünftigen Zeitstempel wartet, bis TrueTime ihn überschritten hat (§3.2.5). Mehr: <a href="../architecture/">Architektur</a>, <a href="../consistency/">Konsistenz</a>, §2.2, §3.2.5.</dd>
+  <dt id="truetime">TrueTime</dt>
+  <dd>Der Uhrenmechanismus von Spanner, der jedem Schreibvorgang einen Zeitstempel mit Mikrosekundenauflösung gibt, der die kausale Reihenfolge widerspiegelt. Er macht die Zeitstempel von Zanzibar aussagekräftig. <code>TT.now()</code> gibt ein Intervall zurück, das garantiert die wahre Zeit enthält; siehe das <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner-Paper</a> (OSDI 2012), §3. Mehr: <a href="../consistency/">Konsistenz</a>, §2.2, §3.2.5.</dd>
+  <dt id="tupleset">tupleset (Tupelmenge)</dt>
+  <dd>Ein Selektor für gespeicherte Tupel: ein einzelner Tupelschlüssel oder alle Tupel für eine Objekt-ID oder ein Userset, optional auf eine Relation beschränkt. Verwendet von Read und von <code>tuple_to_userset</code>. Mehr: <a href="../relation-tuples/#read-und-expand">Relationstupel</a>, §2.4.1.</dd>
+  <dt id="tuple-to-userset"><code>tuple_to_userset</code></dt>
+  <dd>Ein Blatt einer Umschreibregel, das einige Tupel des Objekts liest und aus jedem ein Userset berechnet, zum Beispiel „den übergeordneten Ordner des Readme nachschlagen und dessen Betrachter nehmen“. Mehr: <a href="../relation-tuples/#namespace-konfiguration">Relationstupel</a>, §2.3.1.</dd>
+</dl>
+
+## U–W
+
+<dl>
+  <dt id="union">union (Vereinigung)</dt>
+  <dd>Ein Operator einer Umschreibregel: die Benutzer, die in irgendeinem von mehreren Usersets enthalten sind. Alle drei Zweige von <code>viewer</code> in Abbildung 1 des Papers sind durch eine Vereinigung verbunden. Mehr: <a href="../relation-tuples/#namespace-konfiguration">Relationstupel</a>, §2.3.1.</dd>
+  <dt id="user">user (Benutzer)</dt>
+  <dd>Der dritte Teil eines Tupels: entweder eine einzelne Benutzer-ID oder ein Userset. Mehr: <a href="../relation-tuples/#die-grammatik">Relationstupel</a>, §2.1.</dd>
+  <dt id="userset">userset (Userset)</dt>
+  <dd>Ein Paar ⟨<em>object</em>⟩#⟨<em>relation</em>⟩, das für jeden Benutzer mit dieser Relation zu diesem Objekt steht, etwa <code>group:eng#member</code>. Erlaubt es einem Tupel, einer Gruppe Zugriff zu gewähren, und Gruppen, Gruppen zu enthalten. Mehr: <a href="../relation-tuples/#usersets-ein-tupel-das-auf-eine-gruppe-zeigt">Relationstupel</a>, §2.1.</dd>
+  <dt id="userset-rewrite-rule">userset rewrite rule (Userset-Umschreibregel)</dt>
+  <dd>Teil einer Relationskonfiguration: eine Funktion von einer Objekt-ID auf einen Userset-Ausdrucksbaum, gebaut aus <code>_this</code>, <code>computed_userset</code> und <code>tuple_to_userset</code>, kombiniert durch Vereinigung, Schnittmenge und Ausschluss. Mehr: <a href="../relation-tuples/#namespace-konfiguration">Relationstupel</a>, §2.3.1.</dd>
+  <dt id="userset-tree">userset tree (Userset-Baum)</dt>
+  <dd>Das Ergebnis von Expand: Blätter sind Benutzer-IDs oder Usersets, innere Knoten sind Mengenoperatoren. Mehr: <a href="../relation-tuples/#read-und-expand">Relationstupel</a>, §2.4.5.</dd>
+  <dt id="watch">Watch</dt>
+  <dd>Der API-Aufruf, der Tupeländerungen für einen oder mehrere Namespaces in Zeitstempelreihenfolge streamt, beginnend bei einem zookie. Wird verwendet, um sekundäre Indizes wie Leopard aktuell zu halten. Mehr: <a href="../architecture/#der-watch-pfad">Architektur</a>, §2.4.3.</dd>
+  <dt id="watchserver">watchserver</dt>
+  <dd>Der Servertyp, der Watch beantwortet, indem er das changelog fortlaufend liest. Mehr: <a href="../architecture/">Architektur</a>, §3.</dd>
+  <dt id="write">Write</dt>
+  <dd>Der API-Aufruf, der Tupel hinzufügt oder entfernt. Clients, die alle Tupel eines Objekts neu schreiben, verwenden einen Lesevorgang und dann einen Schreibvorgang, der davon abhängt, dass das Lock-Tupel unverändert ist. Mehr: <a href="../architecture/#der-watch-pfad">Architektur</a> (was ein Schreibvorgang berührt), §2.4.2.</dd>
+</dl>
+
+## Z
+
+<dl>
+  <dt id="zookie">zookie</dt>
+  <dd>Ein opakes Token, das einen Zeitstempel kodiert. Ein Client erhält es aus einer Content-Change-Prüfung (auch Read- und Write-Antworten tragen zookies), speichert es mit dem Inhalt und sendet es mit späteren Prüfungen mit, damit diese auf einem mindestens so aktuellen Snapshot ausgewertet werden. Mehr: <a href="../consistency/">Konsistenz</a>, §2.2, §2.4.</dd>
+</dl>
+
+## Quellen
+
+- J. C. Corbett et al., "Spanner: Google's Globally-Distributed Database", OSDI '12, [PDF](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
+- D. Karger et al., "Consistent Hashing and Random Trees", STOC '97, [PDF](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- J. Dean und L. A. Barroso, "The Tail at Scale", CACM 56(2), 2013, [research.google](https://research.google/pubs/the-tail-at-scale/)
+- L. Lamport, "Paxos Made Simple", ACM SIGACT News 32(4), 2001, [PDF](https://lamport.azurewebsites.net/pubs/paxos-simple.pdf)
+- D. K. Gifford, "Information Storage in a Decentralized Computer System", Dissertation, Stanford University, 1981 (Referenz [18] des Papers; keine Online-Kopie geprüft)
+- "Cache stampede", Wikipedia, [en.wikipedia.org](https://en.wikipedia.org/wiki/Cache_stampede) (die Quelle, die das Paper zitiert)
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

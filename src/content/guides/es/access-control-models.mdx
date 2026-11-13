@@ -1,0 +1,265 @@
+---
+title: "ACL, RBAC, ABAC, ReBAC: cuatro formas de decir quién puede hacer qué"
+description: "Una decisión de acceso, “¿puede Chen ver doc:readme?”, modelada como lista de control de acceso, como roles, como reglas sobre atributos y como grafo de relaciones, y el lugar que ocupa Zanzibar entre ellas."
+section: guide
+part: background
+order: 1
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.3.1", "3.2.3", "3.2.4", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Todo sistema de autorización responde al mismo tipo de pregunta: ¿puede este usuario hacer esto con este objeto? El artículo lo plantea como comprobar "that a user has permission to carry out an operation on a digital object" (que un usuario tiene permiso para realizar una operación sobre un objeto digital) (§1). Los cuatro modelos habituales difieren en qué almacenan y qué calculan cuando llega la pregunta.
+
+En 1971, Butler Lampson describió la protección como una matriz: las filas son dominios (en términos actuales, sujetos), las columnas son objetos, y cada celda enumera el acceso que un dominio tiene a un objeto ([Lampson, "Protection"](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)). Ningún sistema real almacena la matriz completa. Una ACL almacena sus columnas, los roles y las reglas sobre atributos calculan sus celdas, y un grafo de relaciones las deriva siguiendo aristas.
+
+Esta página modela una celda de cuatro maneras. El ejemplo de referencia: Anne, Beto y Chen (`user:anne`, `user:beto`, `user:chen`); el documento `doc:readme` en `folder:A`; el grupo `group:eng`. Anne es propietaria del readme, Beto pertenece a eng, los miembros de eng ven el readme y Chen ve la carpeta A. La decisión es:
+
+```text
+Can user:chen view doc:readme?
+```
+
+La respuesta esperada es sí, y solo gracias a la carpeta. Chen no tiene ninguna concesión directa sobre el readme.
+
+## ACL: una lista en el objeto
+
+Una lista de control de acceso asocia a cada objeto una lista de entradas, cada una formada por un principal y un conjunto de derechos. Multics tenía ACL "on segments and directories" (en segmentos y directorios), con entradas formadas por "a principal identifier and a set of permissions bits" (un identificador de principal y un conjunto de bits de permisos) (§5, que cita el artículo de Saltzer en SOSP '73, revisado como [Saltzer 1974](https://dl.acm.org/doi/10.1145/361011.361067)). Sistemas posteriores permitieron que una entrada nombrara un grupo, como hacen las ACL de POSIX (§5).
+
+¿Qué dice la propia lista del readme sobre Chen?
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={500}
+  title="La ACL de doc:readme"
+  desc="Dos listas una junto a otra. A la izquierda, folder:A con una entrada: user:chen · view. A la derecha, doc:readme con tres entradas: user:anne · owner, group:eng · view (discontinua, una entrada de grupo) y user:chen · view. Una flecha discontinua y resaltada con la etiqueta copiada por la app va de la entrada de Chen de la carpeta a la entrada de Chen del readme."
+  nodes={[
+    { id: "fh", x: 130, y: 40, label: "folder:A", kind: "object", mono: true },
+    { id: "fc", x: 130, y: 100, label: "user:chen · view", kind: "object", mono: true, w: 200, on: true },
+    { id: "dh", x: 440, y: 40, label: "doc:readme", kind: "object", mono: true },
+    { id: "da", x: 440, y: 100, label: "user:anne · owner", kind: "object", mono: true, w: 200 },
+    { id: "dg", x: 440, y: 145, label: "group:eng · view", kind: "group", mono: true, w: 200 },
+    { id: "dc", x: 440, y: 190, label: "user:chen · view", kind: "object", mono: true, w: 200, on: true },
+  ]}
+  edges={[
+    { from: "fc", to: "dc", label: "copiada por la app", dashed: true, on: true },
+  ]}
+  caption="Cada objeto lleva su propia lista. La entrada de Chen del readme existe solo porque algo la copió de la carpeta."
+/>
+
+La comprobación en sí es una búsqueda: recorrer la lista del readme buscando a Chen. Obsérvese adónde ha ido la carpeta. La herencia no forma parte del modelo de ACL, así que la entrada tiene que copiarse en el readme, ya sea cuando se crea el documento (VMS "supports ACL inheritance for files created within a directory tree", admite la herencia de ACL para los archivos creados dentro de un árbol de directorios, §5) o por parte de la aplicación. Una vez copiada, la entrada ya no recuerda de dónde procede.
+
+## RBAC: usuarios, roles, permisos
+
+El control de acceso basado en roles pone una capa entre los usuarios y los permisos. En la formulación del NIST, "RBAC controls all access through roles assigned to users. Each role assigns a collection of permissions to users" (RBAC controla todo el acceso mediante roles asignados a los usuarios. Cada rol asigna una colección de permisos a los usuarios) ([Kuhn, Coyne y Weil 2010](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)). Ferraiolo y Kuhn lo propusieron en 1992, y un modelo unificado del NIST se convirtió en ANSI INCITS 359-2004 en 2004 ([proyecto RBAC del NIST](https://csrc.nist.gov/projects/role-based-access-control)).
+
+Los roles son globales, así que una concesión sobre un documento necesita un rol que nombre ese documento. El ejemplo de referencia se convierte en tres roles:
+
+| Usuario | Rol | Permisos que concede el rol |
+| --- | --- | --- |
+| `user:anne` | `readme_owner` | editar `doc:readme`, ver `doc:readme` |
+| `user:beto` | `eng` | ver `doc:readme` |
+| `user:chen` | `folderA_viewer` | ver `folder:A`, ver `doc:readme` (y cualquier otro documento de la carpeta A) |
+
+¿Qué rol da a Chen el permiso de lectura?
+
+<Graph
+  width={620}
+  height={280}
+  minWidth={520}
+  title="Usuarios, roles y permisos"
+  desc="Tres columnas. Izquierda: user:anne, user:beto, user:chen como píldoras. Centro: cajas de rol discontinuas role:readme_owner, role:eng, role:folderA_viewer, con cada usuario asignado al rol de su misma fila. Derecha: los permisos editar doc:readme, ver doc:readme, ver folder:A. readme_owner concede editar y ver el readme; eng concede ver el readme; folderA_viewer concede ver la carpeta A y ver el readme. Resaltado: user:chen hacia role:folderA_viewer hacia ver doc:readme."
+  nodes={[
+    { id: "anne", x: 70, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 70, y: 140, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 70, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "ro", x: 290, y: 50, label: "role:readme_owner", kind: "group", mono: true },
+    { id: "re", x: 290, y: 140, label: "role:eng", kind: "group", mono: true },
+    { id: "rf", x: 290, y: 230, label: "role:folderA_viewer", kind: "group", mono: true, on: true },
+    { id: "pe", x: 520, y: 50, label: "editar doc:readme", kind: "object", mono: true },
+    { id: "pv", x: 520, y: 140, label: "ver doc:readme", kind: "object", mono: true, on: true },
+    { id: "pf", x: 520, y: 230, label: "ver folder:A", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "ro", label: "tiene" },
+    { from: "beto", to: "re", label: "tiene" },
+    { from: "chen", to: "rf", label: "tiene", on: true },
+    { from: "ro", to: "pe", label: "concede" },
+    { from: "ro", to: "pv" },
+    { from: "re", to: "pv", label: "concede" },
+    { from: "rf", to: "pf", label: "concede" },
+    { from: "rf", to: "pv", on: true },
+  ]}
+  caption="Chen tiene role:folderA_viewer, y el conjunto de permisos de ese rol incluye ver doc:readme."
+/>
+
+Obsérvese que la carpeta solo sobrevive como nombre. `folderA_viewer` no está conectado con `folder:A` de ninguna forma que el sistema entienda; alguien tiene que mantener su conjunto de permisos igual a “todo lo que hay en la carpeta A”. Los roles por objeto como `readme_owner` son el patrón que conduce a la explosión de roles, tratada en la tabla siguiente.
+
+## ABAC: un predicado sobre atributos
+
+El control de acceso basado en atributos no almacena ninguna concesión. La NIST SP 800-162 lo define como una metodología en la que la autorización "is determined by evaluating attributes associated with the subject, object, requested operations, and, in some cases, environment against policy, rules, or relationships" (se determina evaluando los atributos asociados al sujeto, al objeto, a las operaciones solicitadas y, en algunos casos, al entorno frente a políticas, reglas o relaciones) ([NIST SP 800-162](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)). La decisión es una función de atributos, evaluada en el momento de la solicitud.
+
+Estas son las tres concesiones del ejemplo de referencia como reglas, en la sintaxis de [Cedar](https://docs.cedarpolicy.com/policies/syntax-policy.html), un lenguaje de políticas que AWS publicó como código abierto en 2023:
+
+```text
+// Anne: the owner may view
+permit (principal, action == Action::"view", resource)
+when { resource.owner == principal };
+
+// Beto: anyone whose team is listed on the document
+permit (principal, action == Action::"view", resource)
+when { resource.viewerTeams.contains(principal.team) };
+
+// Chen: anyone listed as a viewer of the document's folder
+permit (principal, action == Action::"view", resource)
+when { resource.folder.viewers.contains(principal) };
+```
+
+<Callout kind="warn" title="Ilustrativo">
+
+Estas tres políticas siguen la sintaxis documentada de Cedar, pero no se han pasado por el validador de Cedar. Los nombres de los atributos (`owner`, `viewerTeams`, `team`, `folder`, `viewers`) son invención de esta página.
+
+</Callout>
+
+¿Qué atributos lee el motor para decidir la solicitud de Chen?
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={520}
+  title="Los atributos que lee una decisión ABAC"
+  desc="A la izquierda, la solicitud: principal user:chen, acción view, recurso doc:readme. Alimentan una caja amarilla, evaluación de políticas. A la derecha, cuatro cajas verdes de atributos alimentan la misma evaluación: doc:readme.owner = user:anne, doc:readme.viewerTeams = eng, doc:readme.folder = folder:A, folder:A.viewers = user:chen. Las dos últimas están resaltadas. Debajo de la evaluación, la decisión: permit, resaltada."
+  nodes={[
+    { id: "p", x: 85, y: 60, label: "principal\nuser:chen", kind: "subject", mono: true },
+    { id: "a", x: 85, y: 150, label: "action\nview", kind: "object", mono: true },
+    { id: "r", x: 85, y: 240, label: "resource\ndoc:readme", kind: "object", mono: true },
+    { id: "e", x: 290, y: 120, label: "evaluación\nde políticas", kind: "server" },
+    { id: "d", x: 290, y: 250, label: "permit\n(tercera regla)", kind: "object", on: true },
+    { id: "a1", x: 500, y: 40, label: "doc:readme.owner\n= user:anne", kind: "store", mono: true },
+    { id: "a2", x: 500, y: 110, label: "doc:readme.viewerTeams\n= [\"eng\"]", kind: "store", mono: true },
+    { id: "a3", x: 500, y: 180, label: "doc:readme.folder\n= folder:A", kind: "store", mono: true, on: true },
+    { id: "a4", x: 500, y: 250, label: "folder:A.viewers\n= [user:chen]", kind: "store", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "e" },
+    { from: "a", to: "e" },
+    { from: "r", to: "e" },
+    { from: "a1", to: "e" },
+    { from: "a2", to: "e" },
+    { from: "a3", to: "e", on: true },
+    { from: "a4", to: "e", on: true },
+    { from: "e", to: "d", label: "decide", on: true },
+  ]}
+  caption="Las reglas se almacenan una sola vez; los datos que comprueban residen como atributos de usuarios, documentos y carpetas."
+/>
+
+Obsérvense los dos atributos resaltados. `doc:readme.folder` y `folder:A.viewers` son relaciones almacenadas como valores de atributos, y la regla sigue una para llegar a la otra. Las reglas siguen siendo cortas, pero los datos se han trasladado a atributos, y nada fuera de las reglas dice qué atributos importan para qué decisión.
+
+## ReBAC: un grafo de relaciones
+
+El control de acceso basado en relaciones decide a partir de las relaciones entre quien solicita y el recurso. Fong atribuye a Carrie Gates la acuñación del término (su artículo de taller de 2007 no se ha consultado para esta página), y el modelo de Philip Fong de 2011 basa las decisiones "on the relationship between the resource owner and the resource accessor" (en la relación entre el propietario del recurso y quien accede al recurso) ([Fong 2011](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)). Fong subraya que las relaciones binarias se componen, como en los amigos de los amigos, mientras que un rol es un predicado unario que ofrece poco más allá de las combinaciones booleanas.
+
+Zanzibar almacena cada relación como una tupla de relación, `object#relation@user` (§2.1), y la configuración de un espacio de nombres dice cómo se combinan las relaciones. La Figura 1 del artículo codifica exactamente este ejemplo: los propietarios son editores, los editores son lectores y "viewers of the parent folder are also viewers of the document" (los lectores de la carpeta padre también son lectores del documento). El artículo no usa la palabra ReBAC.
+
+¿Cómo llega a Chen un grafo de tuplas almacenadas?
+
+<Graph
+  width={620}
+  height={280}
+  minWidth={520}
+  title="La Tabla 1 ampliada con la carpeta, con el camino de Chen resaltado"
+  desc="Tres usuarios a la izquierda. user:anne tiene una flecha con la etiqueta owner hacia doc:readme. user:beto tiene una flecha con la etiqueta member hacia el userset discontinuo group:eng#member, que tiene una flecha con la etiqueta viewer hacia doc:readme. user:chen tiene una flecha con la etiqueta viewer hacia folder:A, que tiene una flecha con la etiqueta parent hacia doc:readme. Resaltados: user:chen, la arista viewer, folder:A, la arista parent y doc:readme, además de una arista discontinua y resaltada de user:chen a doc:readme con la etiqueta viewer (calculada)."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 240, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 240, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+    { from: "chen", to: "doc", label: "viewer (calculada)", dashed: true, on: true, labelOffset: -14 },
+  ]}
+  caption="Las aristas continuas son tuplas almacenadas. La arista discontinua no se almacena: Check la calcula a partir de la regla de parent de la configuración del espacio de nombres."
+/>
+
+Obsérvese que aquí la carpeta sigue siendo una carpeta. El readme apunta a `folder:A` con una tupla `parent`, y la regla convierte “lector de la carpeta padre” en “lector del readme” en el momento de la comprobación. El recorrido paso a paso está en la [página de tuplas de relación](../relation-tuples/).
+
+## El mismo ejemplo, celda a celda
+
+| | ACL | RBAC | ABAC | ReBAC (Zanzibar) |
+| --- | --- | --- | --- | --- |
+| Qué se almacena | La lista del readme: Anne (owner), `group:eng` (view), Chen (view, copiada de la carpeta A) | Tres asignaciones de roles y los conjuntos de permisos de tres roles | Tres reglas, más atributos de los usuarios, del readme y de la carpeta A | Cinco tuplas (owner, miembro de eng, lector eng, parent, lector de la carpeta) y una configuración de espacio de nombres |
+| Quién puede ver el readme | Leer la lista y expandir `group:eng`: Anne, Beto, Chen | Todo el que tenga un rol que conceda “ver `doc:readme`”: Anne, Beto, Chen | No está almacenado en ninguna parte: evaluar las reglas para cada usuario. Anne, Beto, Chen | Expand de `doc:readme#viewer` (§2.4.5): Anne, Beto, Chen |
+| Beto deja eng | Quitar a Beto del grupo; la lista del readme no se toca | Quitar la asignación de Beto a `eng` | Cambiar `user:beto.team` | Eliminar una tupla, `group:eng#member@user:beto` |
+| El readme pasa de la carpeta A a la carpeta B | Quitar las entradas copiadas de A y copiar las de B, en el readme y en todo lo demás que se haya movido | Sacar “ver `doc:readme`” de `folderA_viewer` y añadirlo a un rol `folderB_viewer` | Cambiar `doc:readme.folder`; las reglas siguen igual | Sustituir una tupla `parent`: `doc:readme#parent@folder:A#...` pasa a ser `@folder:B#...` |
+| Qué resulta difícil | La herencia y los grupos son añadidos; “¿qué puede ver Chen?” obliga a recorrer la lista de cada objeto | La explosión de roles: "thousands of separate roles" (miles de roles distintos), y n condiciones booleanas pueden requerir 2ⁿ roles ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)); los roles por objeto como `readme_owner` lo empeoran | La auditoría: ABAC "is easy to set up, but analyzing or changing user permissions can be problematic" (es fácil de configurar, pero analizar o cambiar los permisos de los usuarios puede ser problemático) ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)). “Attribute sprawl” (proliferación de atributos) es la forma abreviada que usa la industria para el mismo problema, no un término del NIST | El recorrido del grafo: "Recursive pointer chasing … has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups" (la persecución recursiva de punteros … tiene dificultades para mantener una latencia baja con grupos profundamente anidados o con un gran número de grupos hijos) (§3.2.4). SpiceDB limita la profundidad a [50 saltos](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth) por defecto, y `resolveNodeLimit` de OpenFGA a [25](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
+
+Obsérvense las dos filas centrales. Que Beto deje eng es un único cambio en todos los modelos, porque todos los modelos de esta página tienen alguna forma de grupo. El traslado de carpeta es donde se separan: ACL y RBAC copiaron el significado de la carpeta en las concesiones del readme, así que tienen que reescribir esas concesiones; ABAC y ReBAC conservaron la carpeta como dato, así que cambia un solo valor. ReBAC mantiene además “¿quién puede ver?” respondible a partir de datos almacenados, cosa que la versión de ABAC basada solo en reglas no puede.
+
+## Dónde se sitúa Zanzibar
+
+Zanzibar es un sistema ReBAC: las tuplas de relación son las aristas, y las reglas de reescritura de usersets (§2.3.1) dicen cómo se combinan las aristas. Su modelo de datos admite "permissions, users, groups, and inheritance" (permisos, usuarios, grupos y herencia) tal como se encuentran en Multics, UNIX, las ACL de POSIX y VMS (§5), y trata un grupo como un objeto más, lo que "allows us to unify the concepts of ACLs and groups" (nos permite unificar los conceptos de ACL y de grupo) (§2.1).
+
+RBAC encaja por encima. El artículo dice que los roles "are similar to Zanzibar relations" (son similares a las relaciones de Zanzibar) y que "A number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language" (varios clientes de Zanzibar han implementado políticas RBAC sobre el lenguaje de configuración de espacios de nombres de Zanzibar) (§5). No dice cómo; una forma es hacer que un rol sea un objeto cuya relación `member` sea un userset.
+
+¿Qué aspecto tiene el rol de Chen en tuplas?
+
+<Graph
+  width={620}
+  height={210}
+  minWidth={520}
+  title="Un rol como userset en Zanzibar"
+  desc="user:chen tiene una flecha con la etiqueta member hacia el userset discontinuo role:folderA_viewer#member. Ese userset tiene una flecha con la etiqueta viewer hacia folder:A y otra flecha con la etiqueta viewer hacia doc:readme. El camino de Chen a doc:readme a través del rol está resaltado."
+  nodes={[
+    { id: "chen", x: 70, y: 105, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "role", x: 290, y: 105, label: "role:folderA_viewer#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 530, y: 45, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 530, y: 165, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "role", label: "member", on: true },
+    { from: "role", to: "folder", label: "viewer" },
+    { from: "role", to: "doc", label: "viewer", on: true },
+  ]}
+  caption="Tres tuplas: role:folderA_viewer#member@user:chen, folder:A#viewer@role:folderA_viewer#member, doc:readme#viewer@role:folderA_viewer#member. Una ilustración, no procede del artículo."
+/>
+
+Obsérvese que el rol tiene la misma forma que `group:eng`: un userset. En Zanzibar, la segunda arista `viewer` es innecesaria, porque la regla de parent ya da el readme a los lectores de la carpeta; basta con que el rol sea lector de la carpeta.
+
+ABAC es la parte que el artículo no cubre. Las condiciones sobre la solicitud, como la hora del día o la red, no son relaciones entre objetos almacenados. Varios sistemas de estilo Zanzibar las añaden: SpiceDB tiene caveats, condiciones escritas en CEL ([documentación de esquemas de SpiceDB](https://authzed.com/docs/spicedb/concepts/schema)), OpenFGA tiene [condiciones](https://openfga.dev/docs/modeling/conditions), y el esquema de Permify tiene `attribute` y `rule` ([documentación de Permify](https://fusionauth.io/permify-docs/getting-started/modeling)). Cedar va en la dirección contraria: un lenguaje de atributos con `in` para la pertenencia a jerarquías ([sintaxis de Cedar](https://docs.cedarpolicy.com/policies/syntax-policy.html)).
+
+<Callout kind="note" title="Los sistemas reales mezclan modelos">
+
+Pocos sistemas desplegados responden a un solo modelo. Cloud IAM de Google, que asigna usuarios a roles, "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (está construido como una capa sobre el sistema de almacenamiento y evaluación de ACL de Zanzibar) (§5). Una combinación que admiten los sistemas de estilo Zanzibar citados es un grafo de relaciones para la compartición y la jerarquía, roles como relaciones con nombre dentro de él y unas pocas condiciones sobre atributos para el contexto. Esto es un resumen de esta página, no una afirmación del artículo.
+
+</Callout>
+
+<Callout kind="paper" title="En el artículo">
+
+El planteamiento del problema: §1. Tuplas y usersets: §2.1. Reglas de reescritura: §2.3.1. Multics, UNIX, ACL de POSIX, VMS, RBAC y sistemas IAM: §5, Trabajos relacionados. La persecución de punteros y su coste: §3.2.3 y §3.2.4.
+
+</Callout>
+
+## Fuentes
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- B. W. Lampson, "Protection", 1971; reimpreso en ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
+- J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
+- D. R. Kuhn, E. J. Coyne, T. R. Weil, "Adding Attributes to Role-Based Access Control", IEEE Computer 43(6), 2010, [PDF](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)
+- NIST, proyecto Role Based Access Control, [csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
+- NIST SP 800-162, Guide to Attribute Based Access Control, [csrc.nist.gov/pubs/sp/800/162/upd2/final](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)
+- Philip W. L. Fong, "Relationship-Based Access Control: Protection Model and Policy Language", CODASPY '11, [PDF](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)
+- Sintaxis de políticas de Cedar, [docs.cedarpolicy.com/policies/syntax-policy.html](https://docs.cedarpolicy.com/policies/syntax-policy.html)
+- Recursión y profundidad máxima en SpiceDB, [authzed.com/docs/spicedb/modeling/recursion-and-max-depth](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)
+- Lenguaje de esquemas de SpiceDB (documentación del proveedor), [authzed.com/docs/spicedb/concepts/schema](https://authzed.com/docs/spicedb/concepts/schema)
+- Configuración de OpenFGA, [openfga.dev/docs/getting-started/setup-openfga/configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)
+- Condiciones de OpenFGA, [openfga.dev/docs/modeling/conditions](https://openfga.dev/docs/modeling/conditions)
+- Modelado en Permify, [fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)

@@ -1,0 +1,180 @@
+---
+title: "Topaz"
+description: "Open Policy Agent 정책과 내장 데이터베이스 안의 Zanzibar 스타일 디렉터리를 결합한 오픈 소스 인가기로, 2025년 Aserto가 사업을 접은 뒤 메인테이너들이 유지하고 있다."
+section: ecosystem
+order: 5
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4"]
+product:
+  name: Topaz
+  maintainer: Former Aserto maintainers (Aserto wound down in 2025)
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/aserto-dev/topaz
+  docs: https://www.topaz.sh/docs/intro
+  status: 활발한 오픈 소스
+  latest: v0.33.27 (2026-11-10)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+
+Topaz는 Go로 작성된 인가 서비스다. Topaz는 "uses the Open Policy Agent (OPA) as its decision engine, and provides a built-in directory that is inspired by the Google Zanzibar data model"(Open Policy Agent(OPA)를 결정 엔진으로 사용하며, Google Zanzibar 데이터 모델에서 영감을 받은 내장 디렉터리를 제공한다)([README](https://github.com/aserto-dev/topaz)). 결정은 Rego 정책이 내린다. 정책은 주체와 객체 사이에 관계나 권한이 성립하는지 디렉터리에 물을 수 있으며, 이 부분이 Zanzibar와 닮았다. 디렉터리 데이터는 "modeled and stored locally in an embedded database"(내장 데이터베이스에 로컬로 모델링되고 저장된다)(같은 README).
+
+Topaz는 Aserto가 만들었다. 2025-04-27에 Aserto는 "sunsetting the Aserto SaaS control plane and will shut it down by May 31, 2025"(Aserto SaaS 컨트롤 플레인을 단계적으로 종료하며 2025년 5월 31일까지 중단할 것)이고, "wind down Aserto as a commercial entity"(Aserto를 영리 법인으로서 정리할 것)이며, "we have a set of maintainers that will continue to support Topaz"(Topaz를 계속 지원할 메인테이너들이 있다)라고 발표했다([Aserto 블로그](https://www.aserto.com/blog/the-final-chapter-for-aserto), 벤더 작성). 이후에도 릴리스는 계속되었다. 2026-11-13 기준으로 기본 브랜치의 최근 커밋 30개는 모두 한 명의 작성자, 사업 정리 글에도 서명한 Gert Drapers의 것이다([커밋](https://github.com/aserto-dev/topaz/commits/main)).
+
+## 논문과 Topaz 나란히 보기
+
+| 논문 | Topaz |
+| --- | --- |
+| 네임스페이스 설정 (§2.3) | 매니페스트의 `types` 아래 객체 타입. 매니페스트는 `model: version: 3`을 가진 YAML 파일이다([manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)) |
+| 관계 튜플 `object#relation@user` (§2.1) | 관계 레코드: `object_type`, `object_id`, `relation`, `subject_type`, `subject_id`, 선택적인 `subject_relation` |
+| `_this` | 관계의 저장된 레코드. 관계는 `viewer: user \| group#member`처럼 받는 주체 타입을 나열한다 |
+| `computed_userset` | 권한 안에서 같은 타입의 다른 관계나 권한의 이름을 쓰는 것 |
+| `tuple_to_userset` | 화살표. `parent->can_read`처럼 |
+| 합집합, 교집합, 차집합 | `\|`, `&`, `-` |
+| zookie (§2.2, §2.4) | 문서화된 것 없음 |
+| Check (§2.4.4) | 디렉터리의 `Reader.Check`와 `Checks`. 정책 결정은 `Authorizer.Is`로([reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)) |
+| Read (§2.4.1) | `Reader.GetRelation`, `GetRelations` |
+| Write (§2.4.2) | `Writer.SetRelation`, `DeleteRelation`([writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto)). 대량 로드는 `Importer.Import`로([importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)) |
+| Watch (§2.4.3) | 디렉터리 API에 없음 |
+| Expand (§2.4.5) | Expand 호출 없음. 가장 가까운 것은 `Reader.GetGraph`("get object relationship graph", 객체 관계 그래프 가져오기) |
+| Leopard (§3.2.4) | 문서화된 대응물 없음 |
+| Spanner (§3.1) | 내장 BoltDB 파일([architecture](https://www.topaz.sh/docs/architecture)) |
+
+## Topaz 매니페스트로 쓴 예제
+
+논문의 그림 1은 소유자를 편집자로, 편집자를 열람자로, 상위 폴더의 열람자를 문서의 열람자로 만든다(§2.3.1). Topaz 매니페스트는 저장된 레코드를 담는 `relations`와, 관계와 다른 권한으로부터 계산되는 `permissions`를 분리한다.
+
+```yaml
+model:
+  version: 3
+
+types:
+  user: {}
+
+  group:
+    relations:
+      member: user
+
+  folder:
+    relations:
+      viewer: user | group#member
+    permissions:
+      can_read: viewer
+
+  doc:
+    relations:
+      parent: folder
+      owner: user
+      editor: user | group#member
+      viewer: user | group#member
+    permissions:
+      can_write: owner | editor
+      can_read: viewer | can_write | parent->can_read
+```
+
+`group#member`는 "everyone with the `member` relation to a specified `group`"(지정된 `group`에 대해 `member` 관계를 가진 모든 사람)에게 관계를 부여하며, 화살표는 "allows a permission to be granted to subjects who have a specified relation or permission with another object"(다른 객체와 지정된 관계나 권한을 가진 주체에게 권한을 부여할 수 있게 한다)([manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)). 이름은 소문자여야 하며 최대 64자다.
+
+<Callout title="문서와 대조했으며 실행하지 않음">
+이 매니페스트는 2026-11-13 기준으로 문서화된 문법, 즉 [manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)와 메인테이너들의 Google Drive 스타일 샘플 [assets/v34/gdrive/manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml)을 따른다. 이 샘플도 타입 이름 `doc`을 쓴다. Topaz에 로드해 보지는 않았다.
+</Callout>
+
+다음은 예제의 관계 다섯 개를 메인테이너들의 샘플 데이터([gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl))와 같은 JSON lines 형식으로 쓴 것이다.
+
+```json
+{"object_type":"doc","object_id":"readme","relation":"owner","subject_type":"user","subject_id":"anne"}
+{"object_type":"group","object_id":"eng","relation":"member","subject_type":"user","subject_id":"beto"}
+{"object_type":"doc","object_id":"readme","relation":"viewer","subject_type":"group","subject_id":"eng","subject_relation":"member"}
+{"object_type":"doc","object_id":"readme","relation":"parent","subject_type":"folder","subject_id":"A"}
+{"object_type":"folder","object_id":"A","relation":"viewer","subject_type":"user","subject_id":"chen"}
+```
+
+어느 레코드와 어느 권한 표현식이 각 사람의 readme에 대한 `can_read`를 결정하는가?
+
+<Graph
+  width={600}
+  height={260}
+  title="Topaz 관계로 쓴 예제"
+  desc="관계 다섯 개. user anne은 doc readme의 owner다. user beto는 group eng의 member다. group eng#member는 doc readme의 viewer다. folder A는 doc readme의 parent다. user chen은 folder A의 viewer다. Chen에서 folder A를 거치는 경로가 강조되어 있다. 이는 화살표 parent->can_read로 해석된다."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer (#member)", dashed: true },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Anne: owner → can_write → can_read. Beto: group#member 주체 관계. Chen: parent->can_read. 점선: 단일 사용자가 아니라 주체 관계."
+/>
+
+디렉터리가 `Reader.Check`를 통해 이 질문에 혼자 답한다는 점에 주목하라. Topaz가 그 위에 더하는 것이 정책 계층이다. Rego 규칙은 디렉터리를 호출하여 그 답을 요청의 속성과 결합할 수 있다.
+
+## 아키텍처
+
+결정은 어디에서 실행되고, 관계 데이터는 어디에 있는가?
+
+<Graph
+  width={620}
+  height={280}
+  title="문서에 기술된 Topaz 구성 요소"
+  desc="여러분의 앱이 REST나 gRPC로 인가기의 is, query, decisiontree API를 호출한다. 인가기는 OPA 정책을 평가하며, 정책은 ds.check 같은 내장 함수로 디렉터리를 호출한다. 디렉터리는 객체와 관계를 BoltDB 파일에 저장한다. 데이터를 로드하는 쪽은 디렉터리의 Writer나 Importer API로 관계를 쓴다. 인가기는 모든 결정에 대해 결정 로그를 기록한다."
+  nodes={[
+    { id: "app", x: 95, y: 60, label: "여러분의 앱", kind: "client" },
+    { id: "loader", x: 85, y: 220, label: "데이터 작성자\n(여러분의 코드나 CLI)", kind: "client" },
+    { id: "authz", x: 320, y: 60, label: "인가기\nOPA 정책", kind: "server" },
+    { id: "dir", x: 320, y: 220, label: "디렉터리", kind: "server" },
+    { id: "logs", x: 545, y: 60, label: "결정 로그", kind: "store" },
+    { id: "bolt", x: 545, y: 220, label: "BoltDB 파일", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "authz", label: "is / query" },
+    { from: "authz", to: "dir", label: "ds.check" },
+    { from: "loader", to: "dir", label: "SetRelation\nImport", labelOffset: -20 },
+    { from: "dir", to: "bolt" },
+    { from: "authz", to: "logs" },
+  ]}
+  caption="노랑: Topaz 구성 요소. 초록: 저장소. 파랑: 호출자. Topaz 인스턴스 하나가 앱 옆에서 사이드카나 마이크로서비스로 실행된다."
+/>
+
+- "The Authorizer exposes three APIs to the calling application"(인가기는 호출하는 애플리케이션에 세 가지 API를 제공한다). `authz/is`, `authz/query`, `authz/decisiontree`이며, 각각 "a POST or gRPC API"(POST 또는 gRPC API)다([architecture](https://www.topaz.sh/docs/architecture)).
+- 정책은 `ds.check`, `ds.check_relation`, `ds.check_permission`을 포함한 OPA 내장 함수로 디렉터리에 접근한다(같은 페이지).
+- "The directory is implemented as a BoltDB instance"(디렉터리는 BoltDB 인스턴스로 구현된다)(같은 페이지). "Directory objects are loaded on-demand, in contrast to `data.json` files"(디렉터리 객체는 `data.json` 파일과 달리 필요할 때 로드된다). `data.json` 파일은 정책과 함께 로드된다.
+- "The authorizer captures and stores decision logs for every decision that it evaluates"(인가기는 평가하는 모든 결정에 대해 결정 로그를 수집하고 저장한다)(같은 페이지).
+- Topaz는 "as a sidecar or a microservice in your cloud"(여러분의 클라우드에서 사이드카나 마이크로서비스로) 배포할 수 있다([intro](https://www.topaz.sh/docs/intro)).
+
+## 일관성
+
+논문의 zookie는 클라이언트가 "at a consistent snapshot no earlier than the given zookie"(주어진 zookie보다 이르지 않은 일관된 스냅샷에서) 검사를 요청할 수 있게 한다(§2.4.4). Topaz는 그에 비교할 만한 것을 문서화하지 않는다. manifest reference와 architecture 페이지는 일관성에 대해 아무것도 말하지 않으며, 디렉터리의 Reader와 Writer 메시지에는 토큰이나 스냅샷 필드가 없다([reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto)). 검사는 그것이 실행되는 Topaz 인스턴스의 BoltDB 파일을 읽는다. 여러 인스턴스가 데이터를 어떻게 공유하거나 복사하는지는 여기서 확인한 페이지들에 기술되어 있지 않다.
+
+## 논문과의 차이
+
+- **정책이 먼저다.** 결정 API는 Rego 정책을 평가하는 `Is`이며, Zanzibar 스타일의 검사는 정책이 사용할 수 있는 입력 중 하나다. 논문에서는 유저셋에 대한 Check가 곧 결정이다(§2.4.4).
+- **로컬 내장 저장소.** 전 세계에 복제되는 Spanner(§3.1) 대신 인스턴스마다 BoltDB 파일 하나.
+- **zookie, Watch, Leopard 없음.** 어느 것도 문서화되어 있지 않다.
+- **와일드카드.** `viewer: user | user:*`는 ID가 `*`인 주체에 대한 관계를 허용한다([manifest reference](https://www.topaz.sh/docs/directory/manifest-reference)).
+- **결정 로그.** 모든 결정이 감사를 위해 기록되며, 논문은 Zanzibar에 대해 이를 기술하지 않는다.
+
+## 현황
+
+- 첫 릴리스 v0.20.3은 2022-10-25, 최신 v0.33.27은 2026-11-10, 기본 브랜치의 마지막 커밋은 2026-11-10, 스타 약 1.4k([releases](https://github.com/aserto-dev/topaz/releases), GitHub API, 2026-11-13).
+- Aserto는 2025-04-27에 사업 정리와 2025-05-31까지의 SaaS 컨트롤 플레인 종료를 발표했으며, 메인테이너들이 Topaz를 이어 간다([Aserto 블로그](https://www.aserto.com/blog/the-final-chapter-for-aserto)). 저장소는 여전히 `aserto-dev` 조직 아래에 있다.
+
+## 출처
+
+- Topaz repository and README: [github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
+- Topaz docs, introduction: [topaz.sh/docs/intro](https://www.topaz.sh/docs/intro)
+- Architecture: [topaz.sh/docs/architecture](https://www.topaz.sh/docs/architecture)
+- Manifest reference: [topaz.sh/docs/directory/manifest-reference](https://www.topaz.sh/docs/directory/manifest-reference)
+- Sample manifest and relations: [manifest.yaml](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/manifest.yaml), [gdrive_relations.jsonl](https://github.com/aserto-dev/topaz/blob/main/assets/v34/gdrive/gdrive_relations.jsonl)
+- Directory API: [reader.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto), [writer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/writer/v3/writer.proto), [importer.proto](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/importer/v3/importer.proto)
+- Recent commits: [github.com/aserto-dev/topaz/commits/main](https://github.com/aserto-dev/topaz/commits/main)
+- Authorizer API: [authorizer.proto](https://github.com/aserto-dev/go-authorizer/blob/main/proto/aserto/authorizer/v2/authorizer.proto)
+- Aserto wind-down: [aserto.com/blog/the-final-chapter-for-aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto)

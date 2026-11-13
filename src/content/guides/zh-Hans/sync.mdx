@@ -1,0 +1,273 @@
+---
+title: "让元组与你的数据保持同步"
+description: "为什么论文从不讨论双写，当应用数据库与授权服务不一致时会出什么问题，以及用来让二者保持同步的模式。"
+section: guide
+part: practice
+order: 9
+checked: "2026-11-13"
+paper: ["1", "2.2", "2.4.2", "2.4.3", "2.4.4", "3.1.2"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+授权服务只知道别人告诉过它的事情。当 Anne 共享 `doc:readme`，或把 Beto 从 `group:eng` 中移除时，这一事实通常首先出现在应用自己的数据库里，然后必须以元组的形式到达授权服务。两个系统，两次写入，没有共享的事务。本页解释论文为何几乎不提这个问题、两次写入会怎样失败，以及用来让二者保持同步的模式。
+
+## 论文为何可以略去这一点
+
+论文把 Zanzibar 描述为 "a system for storing permissions and performing authorization checks based on the stored permissions"（一个用于存储权限并基于所存储的权限执行授权检查的系统）（§1），并把 "unified ACL storage and an RPC-based API"（统一的 ACL 存储和基于 RPC 的 API）列为 "a philosophy also core to Zanzibar’s design"（同样是 Zanzibar 设计核心的一种理念）（§5）。ACL 和组存放在 Zanzibar 中。客户端应用把*内容*保存在自己的存储中，而它存储的与授权有关的唯一东西是 zookie。
+
+论文的协议经过设计，使唯一一次跨越两侧的写入在客户端一侧是原子的："The client stores the zookie with the content change in an atomic write to the client storage"（客户端在对客户端存储的一次原子写入中，将 zookie 与内容变更一起存储）（§2.2）。生成 zookie 的那次检查是一次读取；"the content-change check does not need to be evaluated in the same transaction as the application content modification"（内容变更检查无需与应用内容修改在同一事务中进行评估）（§2.2）。在 Zanzibar 内部，元组及其变更日志条目属于同一个事务："Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction"（每次 Zanzibar 写入都在单个事务中同时提交到元组存储和变更日志分片）（§3.1.2），因此 Watch 不会漏掉任何已提交的写入。
+
+论文没有说明 Google 的应用是否也保留了诸如“谁拥有这个文档”之类事实的自有副本，也没有说明它们会如何协调两份副本。论文没有讨论这种情况。
+
+大多数采用者是从另一个起点出发的。所有者是 `documents` 表上的一列；团队成员关系是一张关联表；计费席位存放在另一个服务中。于是同一个事实存在两份，对它的每次修改都是一次*双写*。
+
+## 双写如何失败
+
+AuthZed 关于这一主题的文章直言："The dual-write problem presents itself in all distributed systems"（双写问题存在于所有分布式系统中）（[AuthZed, The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。两次写入的任何一种顺序本身都不安全，因为进程可能在两次写入之间停止。每种顺序下会发生什么？
+
+<Frames>
+
+<Swimlane
+  lanes={["应用", "应用数据库", "授权服务"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="时间"
+  title="先写数据库，元组写入丢失"
+  desc="Anne 把 Beto 从组 eng 中移除。应用把这一变更提交到其数据库。在删除授权服务中的元组之前，应用崩溃了。元组仍然存在，因此之后的检查允许 Beto 查看 readme，尽管应用自己的数据显示他已不再是成员。"
+  events={[
+    { lane: 0, t: 0, label: "Anne 把 Beto\n从 eng 中移除", kind: "note" },
+    { lane: 1, t: 1, label: "删除成员行，\nCOMMIT", kind: "write" },
+    { lane: 0, t: 2, label: "删除元组前\n崩溃", kind: "bad" },
+    { lane: 2, t: 3, label: "eng member\nbeto：仍然存在", kind: "bad" },
+    { lane: 2, t: 4, label: "Beto 查看\nreadme：允许", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1] },
+    { from: [0, 2], to: [2, 3], label: "从未发出", dashed: true },
+  ]}
+  caption="丢失的撤销会导致失效开放（fail open），而应用中没有任何地方能显示出来。"
+/>
+
+<Swimlane
+  lanes={["应用", "应用数据库", "授权服务"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="时间"
+  title="先写元组，数据库回滚"
+  desc="Anne 让 Beto 成为 readme 的编辑者。应用开启一个数据库事务并插入一条共享行，然后向授权服务写入 editor 元组，接着在提交前崩溃。数据库回滚，因此应用显示没有共享，但授权服务允许 Beto 编辑。"
+  events={[
+    { lane: 0, t: 0, label: "Anne 让 Beto\n成为编辑者", kind: "note" },
+    { lane: 1, t: 1, label: "BEGIN，插入\n共享行", kind: "write" },
+    { lane: 2, t: 2, label: "写入 readme\neditor beto", kind: "write" },
+    { lane: 0, t: 3, label: "COMMIT 前\n崩溃", kind: "bad" },
+    { lane: 1, t: 4, label: "已回滚：\n没有共享行", kind: "bad" },
+    { lane: 2, t: 4, label: "Beto 可以编辑", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1] },
+    { from: [1, 1], to: [2, 2] },
+  ]}
+  caption="两个系统不一致；这里的授权只存在于 UI 无法显示的地方。"
+/>
+
+</Frames>
+
+注意，左边一帧对安全性是危险的，右边一帧则损害信任：Beto 要么保留了本应失去的访问权，要么持有一项谁都看不到、因而无法撤销的访问权。右边一帧正是 AuthZed 详细讲解的情形："we've written to SpiceDB but we haven't committed the transaction to our database, and now SpiceDB and our database disagree about the state of the world"（我们已经写入了 SpiceDB，但还没有把事务提交到我们的数据库，于是 SpiceDB 和我们的数据库对世界的状态意见不一）（[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。在请求处理程序中重试并不能堵住任何一个缺口，因为崩溃可能发生在重试之前。
+
+## 可选方案
+
+AuthZed 的文章列出了这些选择：什么都不做、带外一致性检查、让授权服务成为唯一事实来源、事件溯源/CQRS、持久化执行环境，以及事务性发件箱（transactional outbox）（[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。什么都不做 "*is* an option that may be viable in the right context"（*确实*是一个在合适场景下可能可行的选项）；带外检查是指 "you can check that the two systems agree on a periodic basis"（你可以定期检查两个系统是否一致），它能发现偏差，但不能防止偏差。下面三种方案要么从结构上消除了这个时间窗口，要么能可靠地把它关闭。
+
+### 以授权服务为唯一事实来源
+
+每条关系只存储一次，存在授权服务中，别的地方都不存。这就是论文中的安排。AuthZed："make a single write to SpiceDB and avoid the dual-write problem entirely"（只向 SpiceDB 写入一次，从而完全避免双写问题）（[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。
+
+代价是应用无法再像查询自己的数据那样查询这些数据：如果所有权只存在于 SpiceDB 中，那么基于它的用户界面 "wouldn't be able to filter, sort, or paginate that table as easily"（就无法那么容易地对该表进行过滤、排序或分页），因为 SpiceDB "isn't a general-purpose database"（不是通用数据库）。于是[列出用户能看到的内容](../listing/)中的列表问题，就会出现在每个显示这种关系的界面上。Oso 为其自身产品主张相反的方向，让你 "apply your application data to authorization decisions without synchronizing it"（无需同步就把应用数据用于授权决策）（[Oso, Launching Local Authorization](https://www.osohq.com/post/local-authorization)，厂商文章），它通过把数据留在应用数据库中而不是迁出，来避免同步。
+
+### 事务性发件箱与中继
+
+保留应用数据库作为唯一事实来源，并把第二次写入变成持久的而非即时的。在业务变更所在的同一事务中，向一张*发件箱*表插入一行，描述该元组变更。一个独立的*中继*读取发件箱，把变更应用到授权服务，并不断重试直到成功。该模式的一般形式是："first store the message in the database as part of the transaction that updates the business entities"（首先把消息作为更新业务实体的事务的一部分存入数据库）（[Chris Richardson, Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)）。
+
+当授权服务短暂不可用时，中继会怎么做？
+
+<Swimlane
+  lanes={["应用", "应用数据库", "中继", "授权服务"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="时间"
+  title="事务性发件箱与中继"
+  desc="Anne 把 Beto 从组 eng 中移除。应用在一个数据库事务中删除成员行并插入一条发件箱行。中继读取发件箱行并发送元组删除；第一次尝试失败，于是重试。第二次尝试成功，中继把发件箱行标记为已完成。在此之前，授权服务仍然允许 Beto 进入。"
+  events={[
+    { lane: 0, t: 0, label: "Anne 把 Beto\n从 eng 中移除", kind: "note" },
+    { lane: 1, t: 1, label: "一个事务：成员行\n+ 发件箱行", kind: "write" },
+    { lane: 2, t: 2, label: "读取下一条\n发件箱行", kind: "read" },
+    { lane: 3, t: 2, label: "Beto 仍被\n允许", kind: "bad" },
+    { lane: 2, t: 3, label: "删除失败：\n重试", kind: "bad" },
+    { lane: 3, t: 4, label: "元组已删除", kind: "good" },
+    { lane: 1, t: 5, label: "发件箱行\n标记为完成", kind: "write" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "原子" },
+    { from: [1, 1], to: [2, 2] },
+    { from: [2, 3], to: [3, 4], label: "重试" },
+    { from: [3, 4], to: [1, 5], label: "确认" },
+  ]}
+  caption="没有任何东西丢失，但变更到达授权服务的时间晚于数据库。"
+/>
+
+注意右侧的红框：发件箱保证变更*会到达*，而不保证它*立即*到达。在提交与中继成功之间，旧的访问权仍然有效。中继还必须容忍重复，因为用该模式自己的话说，"The Message relay might publish a message more than once"（消息中继可能会多次发布同一条消息）（[Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)）；AuthZed 指出了 "SpiceDB allowing for idempotent writes with its TOUCH operation"（SpiceDB 通过其 TOUCH 操作支持幂等写入），也指出了顺序问题："As long as this process is effectively single-threaded and retries operations until they succeed"（只要这个过程实际上是单线程的，并且会重试操作直到成功）（[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。如果在较早的创建之前应用了删除，就会留下错误的状态。
+
+### 变更数据捕获
+
+与其轮询发件箱，不如读取数据库自身的提交日志。例如 [Debezium](https://debezium.io/documentation/reference/stable/connectors/postgresql.html) 使用 PostgreSQL 逻辑解码：在初始快照之后，它 "continuously captures row-level changes that insert, update, and delete database content and that were committed to a PostgreSQL database"（持续捕获已提交到 PostgreSQL 数据库的、插入、更新和删除数据库内容的行级变更），并把它们流式发送到 Kafka 主题。AuthZed 把它描述为发件箱模式最常用的工具之一："It watches changes in an outbox table and submits them as events to Kafka"（它监视发件箱表中的变更，并把它们作为事件提交到 Kafka）（[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)）。
+
+一次变更从提交到成为元组，途经哪些地方？
+
+<Graph
+  width={640}
+  height={250}
+  title="变更数据捕获进入授权服务"
+  desc="应用在一个事务中把业务行和一条发件箱行提交到其数据库。Debezium 从预写日志中读取已提交的变更，并发布到一个 Kafka 主题。消费者读取该主题，把每个事件转换为一次元组写入或删除，并应用到授权服务。连接器重启后可能出现重复，因此消费者的写入必须是幂等的。"
+  nodes={[
+    { id: "app", x: 70, y: 50, label: "应用", kind: "client" },
+    { id: "db", x: 250, y: 50, label: "应用数据库\n数据行 + 发件箱", kind: "store" },
+    { id: "dbz", x: 470, y: 50, label: "Debezium\n（读取 WAL）", kind: "server", on: true },
+    { id: "kafka", x: 470, y: 185, label: "Kafka 主题", kind: "store", on: true },
+    { id: "cons", x: 250, y: 185, label: "消费者：\n事件 → 元组", kind: "server" },
+    { id: "authz", x: 70, y: 185, label: "授权服务", kind: "server" },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "一个事务" },
+    { from: "db", to: "dbz", label: "已提交的\n变更", on: true },
+    { from: "dbz", to: "kafka", label: "发布", on: true },
+    { from: "kafka", to: "cons", label: "消费" },
+    { from: "cons", to: "authz", label: "TOUCH /\nDELETE" },
+  ]}
+  minWidth={520}
+  caption="每一跳都会增加延迟；只有已提交的变更才会进入流水线，因此回滚的事务永远不会变成元组。"
+/>
+
+注意第一跳：由于 Debezium 读取的是*已提交的*变更，上文右侧那种失败不会发生。但重复仍然可能出现。Debezium 的 PostgreSQL 文档说 "while it is recovering from the fault, it's possible that the connector might emit some duplicate change events"（在从故障中恢复时，连接器可能会发出一些重复的变更事件），并说 "consumers should always anticipate some duplicate events"（消费者应始终预料到会有一些重复事件）（[Debezium PostgreSQL connector](https://debezium.io/documentation/reference/stable/connectors/postgresql.html)）。它的发件箱事件路由器是“发件箱加 CDC”组合的打包形式："An outbox pattern implementation avoids inconsistencies between a service's internal state (as typically persisted in its database) and state in events consumed by services that need the same data"（发件箱模式的实现可以避免服务的内部状态（通常持久化在其数据库中）与需要相同数据的服务所消费的事件中的状态之间出现不一致）（[Debezium, Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html)）。
+
+## Watch 驱动索引，但它不是队列
+
+上面的模式把变更*送入*授权服务。Watch（§2.4.3）则把变更*送出*："Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API."（有些客户端为 Zanzibar 中的关系元组维护二级索引。它们可以借助我们的 Watch API 来实现。）一个响应 "in ascending timestamp order"（按时间戳升序）包含截至某个*心跳 zookie* 的变更，"the client can use … to resume watching where the previous watch response left off"（客户端可以使用它……从上一次 Watch 响应结束的位置继续监听）（§2.4.3）。Leopard 的增量索引器是论文自己的消费者（§3.2.4）。
+
+恢复位置由客户端掌握，而服务器只在一段时间内保留历史。SpiceDB 的文档："Historical changes can only be requested until the configured garbage collection window on the underlying datastore. This is typically 24 hours, but may differ based on the datastore used"（历史变更只能在底层数据存储所配置的垃圾回收窗口内请求。该窗口通常为 24 小时，但可能因所用的数据存储而异）（[SpiceDB, Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)）。一个 SpiceDB issue 说明了后果："the Watch API is non-durable; if you want to write to a durable queue, you have to take the messages coming from the Watch API and put them somewhere"（Watch API 不是持久的；如果想写入持久队列，就必须把来自 Watch API 的消息取出并放到某个地方）（[spicedb#2015](https://github.com/authzed/spicedb/issues/2015)，于 2026-10-29 以 not planned 关闭）。仍未关闭的 issue [spicedb#2285](https://github.com/authzed/spicedb/issues/2285) 补充说，默认行为 "starts watching from the HEAD revision which leaves gaps of updates that may have not been seen"（从 HEAD 修订版本开始监听，这会留下可能未被看到的更新空缺）。
+
+如果一个索引的消费者停机时间超过了这个窗口，会发生什么？
+
+<Swimlane
+  lanes={["授权服务", "索引器", "索引"]}
+  laneWidth={150}
+  rowHeight={64}
+  timeLabel="时间"
+  title="恢复 Watch，以及丢失位置"
+  desc="索引器应用一批变更，并把流令牌 t50 与索引行一起保存。它断开连接，然后带着 t50 重新连接，收到之后的变更。后来它停机的时间超过了数据存储的垃圾回收窗口；t50 已过期，因此它无法恢复，必须通过一次全量读取重建索引。"
+  events={[
+    { lane: 0, t: 0, label: "截至令牌 t50\n的变更", kind: "write", mono: true },
+    { lane: 1, t: 0, label: "应用一批", kind: "read" },
+    { lane: 2, t: 0, label: "数据行 + t50，\n一个事务", kind: "write", mono: true },
+    { lane: 1, t: 1, label: "已断开", kind: "note" },
+    { lane: 1, t: 2, label: "从 t50 开始 Watch", kind: "read", mono: true },
+    { lane: 0, t: 2, label: "t50 之后的\n变更", kind: "good" },
+    { lane: 1, t: 3, label: "停机时间超过\nGC 窗口", kind: "bad" },
+    { lane: 0, t: 4, label: "t50 已过期", kind: "bad", mono: true },
+    { lane: 2, t: 5, label: "通过全量读取\n重建", kind: "write" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 0], label: "保存" },
+    { from: [1, 2], to: [0, 2], label: "恢复" },
+    { from: [1, 3], to: [0, 4], label: "无法恢复", dashed: true },
+  ]}
+  caption="把令牌与它所覆盖的数据行保存在同一个事务中，并在历史丢失时保留一条重建路径。"
+/>
+
+注意索引泳道的第二行：令牌与它所产生的数据行存储在一起。如果索引器先保存令牌再崩溃，它就会跳过变更；如果它应用了数据行而在保存令牌之前崩溃，它就会重新应用这些行，而只有当索引写入是幂等的时这才无害。要挺过长时间的停机，就像该 issue 所说，把流复制到一个你控制的持久队列中，或者做好重建的准备。SpiceDB 的恢复字段是 `ChangesThrough`：文档建议 "in a loop, sending in the last received ZedToken from `ChangesThrough` if the call disconnects"（在循环中调用 Watch，如果调用断开，就传入从 `ChangesThrough` 最后收到的 ZedToken）（[Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)）。
+
+## zookie 与各方案
+
+zookie 协议对客户端有两点要求：在保存内容时请求一个 zookie，并把它与内容存储在一起（§2.2、§2.4.4）。SpiceDB 的文档对 ZedToken 给出了同样的建议：把它们 "alongside the newly updated content in the application database"（与新更新的内容一起存储在应用数据库中），并在资源被创建或删除、其内容改变、对它的访问被添加或移除时更新令牌（[SpiceDB, Consistency](https://authzed.com/docs/spicedb/concepts/consistency)）。内容变更检查本身没有双写问题：它是一次读取，而令牌与内容在同一事务中进入应用数据库。
+
+各方案的区别在于该令牌能够保证什么。
+
+| 方案 | ACL 变更何时进入授权服务 | 已存储的令牌覆盖什么 |
+| --- | --- | --- |
+| 以授权服务为唯一事实来源 | 写入返回时，在告知用户之前 | 全部，与论文一致：写入的令牌，或之后一次内容变更检查的令牌，至少与该 ACL 变更一样新 |
+| 发件箱与中继 | 中继成功时，在数据库提交之后 | 只覆盖中继已经应用的变更。在此之前进行的内容变更检查看到的是旧的 ACL |
+| 变更数据捕获 | 在日志被读取、发布和消费之后 | 与发件箱相同，但延迟的跳数更多 |
+| 由 Watch 馈送的索引 | 早已在其中；延迟在索引一侧 | 不能直接覆盖任何东西：zookie 是不透明的，因此索引无法判断自己是否与某个给定令牌一样新。用该令牌重新检查，或者比较索引自己保存的位置 |
+
+对于发件箱和 CDC 这两行，论文的保证比看上去要弱。§2.2 中的例 B 依赖于 ACL 变更（B1）在内容变更（B2）被检查之前已经进入 Zanzibar。中间有一个中继时，Anne 可以移除 Beto，一秒后保存新内容，并从一次在中继应用该移除之前运行的内容变更检查中得到一个 zookie。对于 Zanzibar 当时拥有的数据而言，这个 zookie 是正确的；只是那份数据落后了。有两种缓解办法，都不出自上述来源，也都未在此测试：让撤销直接经过授权服务，其次再记录到数据库中（把左侧那种失败模式当作一种可见的“仍在列表中但被拒绝”状态来接受）；或者让中继把它收到的令牌写回受影响的行，使之后的检查携带该令牌。
+
+论文的不透明规则是有意为之：zookie 是不透明的，"to discourage our clients from choosing arbitrary timestamps and to allow future extensions"（是为了避免客户端选择任意时间戳，并为未来的扩展留有余地）（§2.4）。其代价体现在最后一行：客户端无法比较两个 zookie 来判断哪个更新。
+
+## 安全地重写一个对象的元组：锁元组
+
+同步作业常常想替换一个对象的全部元组以匹配数据库，例如把 readme 的查看者设置为与共享表完全一致。两个这样的作业，或者一个作业与一次用户编辑，可能会发生竞争。论文的答案是借助*锁元组*的乐观并发控制（§2.4.2）：
+
+<Callout kind="paper" title="§2.4.2，读-改-写">
+
+1. Read all relation tuples of an object, including a per-object "lock" tuple.（读取一个对象的所有关系元组，包括每个对象一个的 “lock” 元组。）
+2. Generate the tuples to write or delete. Send the writes, along with a touch on the lock tuple, to Zanzibar, with the condition that the writes will be committed only if the lock tuple has not been modified since the read.（生成要写入或删除的元组。将这些写入连同对锁元组的一次 touch 操作发送给 Zanzibar，条件是仅当锁元组自读取以来未被修改时才提交这些写入。）
+3. If the write condition is not met, go back to step 1.（如果写入条件不满足，回到第 1 步。）
+
+</Callout>
+
+"The lock tuple is just a regular relation tuple used by clients to detect write races"（锁元组只是客户端用来检测写入竞争的一个普通关系元组）（§2.4.2）。当两个同步作业同时重写 readme 的元组时，会发生什么？
+
+<Swimlane
+  lanes={["同步作业 1", "同步作业 2", "Zanzibar"]}
+  laneWidth={150}
+  rowHeight={64}
+  timeLabel="时间"
+  title="借助锁元组的乐观并发控制"
+  desc="两个同步作业都在同一版本上读取 doc:readme 的所有元组，包括锁元组。作业 1 发送它的写入以及对锁元组的一次 touch，条件是锁未改变；Zanzibar 提交，锁随之改变。作业 2 以同样的条件发送它的写入；锁已经改变，因此 Zanzibar 拒绝这些写入，作业 2 回到第 1 步重新读取。"
+  events={[
+    { lane: 0, t: 0, label: "读取 readme\n元组 + 锁", kind: "read" },
+    { lane: 2, t: 0, label: "锁处于\n版本 7", kind: "note" },
+    { lane: 1, t: 1, label: "读取 readme\n元组 + 锁", kind: "read" },
+    { lane: 0, t: 2, label: "写入 + touch，\n若锁未改变", kind: "write" },
+    { lane: 2, t: 2, label: "提交；\n锁已改变", kind: "good" },
+    { lane: 1, t: 3, label: "写入 + touch，\n若锁未改变", kind: "write" },
+    { lane: 2, t: 3, label: "锁已改变：\n拒绝", kind: "bad" },
+    { lane: 1, t: 4, label: "回到第 1 步：\n重新读取", kind: "read" },
+  ]}
+  arrows={[
+    { from: [0, 2], to: [2, 2] },
+    { from: [1, 3], to: [2, 3] },
+    { from: [2, 3], to: [1, 4], label: "重试" },
+  ]}
+  caption="两个作业在计算期间都不持有锁；条件写入在提交时检测到竞争。"
+/>
+
+注意，作业 1 工作时作业 2 并没有被阻塞；它只在尝试提交时才得知冲突，然后基于新数据重新计算。这很适合同步作业，因为它们总是可以根据数据库重新计算。
+
+<Callout kind="note" title="一种改编做法，未见于文档">
+
+SpiceDB 的 `WriteRelationships` 接受 `optional_preconditions`，并且 "if any preconditions fail, the entire transaction will be reverted"（任何前置条件不满足时，整个事务都会回滚）；前置条件是针对某个关系过滤器的 `MUST_MATCH` 或 `MUST_NOT_MATCH`（[SpiceDB `permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)）。模仿论文中锁元组的一种方法是使用 `doc:readme#lock@version:7` 这样的关系，对它设置 `MUST_MATCH` 前置条件，并在同一次写入中删除版本 7、创建版本 8。这一构造是本站自己的；它不在 SpiceDB 的文档中，也没有实际运行过。
+
+</Callout>
+
+<Callout kind="paper" title="论文出处">
+
+Zanzibar 作为权限的存储：§1、§5。zookie 协议与客户端原子写入：§2.2。Write 与锁元组：§2.4.2。Watch 与心跳 zookie：§2.4.3。内容变更检查：§2.4.4。元组与变更日志在同一事务中：§3.1.2。术语：[锁元组](../glossary/#lock-tuple)、[Watch](../glossary/#watch)、[心跳 zookie](../glossary/#heartbeat-zookie)、[内容变更检查](../glossary/#content-change-check)、[zookie](../glossary/#zookie)。
+
+</Callout>
+
+## 来源
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §1, §2.2, §2.4, §2.4.2, §2.4.3, §2.4.4, §3.1.2, §3.2.4, §5.
+- AuthZed（厂商），[The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem)，2025-01-02。
+- AuthZed（厂商），[Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch) 和 [Consistency](https://authzed.com/docs/spicedb/concepts/consistency)，SpiceDB 文档。
+- AuthZed，[Add external support for streaming relationships into and out of SpiceDB](https://github.com/authzed/spicedb/issues/2015)，spicedb issue #2015，2024-08-07 提出，2026-10-29 以 not planned 关闭。
+- AuthZed，[Watching Relationship Changes More Ergonomically](https://github.com/authzed/spicedb/issues/2285)，spicedb issue #2285，2025-03-19 提出，截至 2026-11-13 仍未关闭。
+- AuthZed，[`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)，authzed/api。
+- Chris Richardson，[Pattern: Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)，microservices.io。
+- Debezium，[Debezium connector for PostgreSQL](https://debezium.io/documentation/reference/stable/connectors/postgresql.html) 和 [Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html)。
+- Oso（厂商），[Launching Local Authorization](https://www.osohq.com/post/local-authorization)，2024-04-16。

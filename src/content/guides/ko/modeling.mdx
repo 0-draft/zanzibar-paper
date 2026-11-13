@@ -1,0 +1,645 @@
+---
+title: "모델링 패턴: 재작성 규칙에서 실제 권한까지"
+description: "흔한 인가 요구 사항 여덟 가지를 각각 튜플로, 가능한 경우 논문의 네임스페이스 설정 표기법의 규칙으로, 그리고 SpiceDB와 OpenFGA의 스키마 언어로 작성한다."
+section: guide
+part: practice
+order: 10
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4.2", "3.2.3", "5", "6"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+논문은 데이터 모델과 설정 언어를 기술하지만, 실제로 풀어 쓴 정책은 그림 1 하나뿐이다. 결론은 그 이상을 주장한다. "simple yet flexible data model and configuration language support a variety of access control policies from both consumer and enterprise applications"(단순하면서도 유연한 데이터 모델과 설정 언어가 소비자용과 기업용 애플리케이션 모두의 다양한 접근 제어 정책을 지원한다)(§6). 관련 연구 절은 다루는 패턴을 열거한다. "Zanzibar’s data model supports permissions, users, groups, and inheritance"(Zanzibar의 데이터 모델은 권한, 사용자, 그룹, 상속을 지원한다)이며, 이는 Multics, UNIX, POSIX ACL, VMS에서 볼 수 있는 것이다. 그리고 "a number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language"(여러 Zanzibar 클라이언트가 Zanzibar의 네임스페이스 설정 언어 위에 RBAC 정책을 구현했다)(§5).
+
+이 페이지는 실무에서 자주 나오는 요구 사항 여덟 가지를 풀어 쓴다. 각 절에는 그 패턴이 답하는 질문, 튜플, 논문이 표현할 수 있는 경우 그림 1의 표기법으로 쓴 규칙, 같은 규칙을 SpiceDB의 스키마 언어와 OpenFGA의 DSL로 쓴 것, 그리고 답을 결정하는 경로를 강조한 튜플 그래프가 있다. 패턴 목록은 OpenFGA의 [모델링 가이드](https://openfga.dev/docs/modeling)를 따른다. 표기법은 [튜플 페이지](../relation-tuples/)에서 설명한다.
+
+예제: Anne, Beto, Chen(`user:anne`, `user:beto`, `user:chen`), `folder:A`에 있는 문서 `doc:readme`, 그룹 `group:eng`. Anne은 readme를 소유하고, Beto는 eng에 속하며, eng 멤버는 readme를 열람하고, Chen은 폴더 A를 열람한다.
+
+<Callout kind="note" title="이 페이지의 스키마를 확인한 방법">
+
+논문의 표기법은 그림 1에서 복사했다. 그림 1은 `union`만 사용한다. 논문은 교집합과 차집합을 언급하지만(§2.3.1) 그것을 어떻게 쓰는지는 보여 주지 않으므로, 이를 사용하는 두 블록은 유추로 작성했으며 그렇다고 밝혀 두었다. SpiceDB 스키마는 AuthZed의 [스키마 문서](https://authzed.com/docs/spicedb/concepts/schema)와 모델링 페이지에 나오는 구문만 사용한다. OpenFGA 모델은 OpenFGA의 [설정 언어 페이지](https://openfga.dev/docs/configuration-language)에 나열된 DSL 키워드(`or`, `and`, `but not`, `from`, 그리고 `[user, user:*, team#member]` 같은 타입 제약)만 사용한다. 각 블록은 그 패턴에 필요한 타입만 보여 준다. 모두 2026-11-13에 문서와 대조했으며, 검증기, `zed`, OpenFGA CLI, 어느 쪽 Playground로도 실행하지 않았다.
+
+</Callout>
+
+## 역할과 권한
+
+질문: Anne은 readme를 편집할 수 있는가, 그리고 Beto는? *역할*은 부여하는 것(owner, editor, viewer)이다. *권한*은 검사하는 것(edit, view)이다. 역할을 부여하고 권한을 검사하면, 역할이 바뀌어도 검사는 안정적으로 유지된다.
+
+튜플:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+```
+
+논문의 표기법에서 역할은 저장된 튜플을 가진 관계이고, 권한은 규칙에 `_this`가 없는 관계이므로 누구도 거기에 직접 튜플을 쓸 수 없다. 필요한 것은 `union`과 `computed_userset`뿐이며, 둘 다 그림 1에 있다.
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+relation { name: "editor" }
+relation { name: "viewer" }
+
+relation {
+ name: "edit"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "owner" } }
+   child { computed_userset { relation: "editor" } }
+} } }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+} } }
+```
+
+그림 1은 같은 일을 다르게 한다. `_this`와 더 큰 역할을 같은 관계에 넣는다("모든 소유자는 편집자이고, 모든 편집자는 열람자다"). 두 형태 모두 재작성 규칙이다. 위의 형태는 부여에 쓰는 이름과 검사에 쓰는 이름을 분리한다.
+
+SpiceDB는 문법에서 두 종류를 구분한다. `relation` 줄은 저장될 수 있는 것이고, `permission` 줄은 계산되는 것이다. 문서는 "relations should be named as nouns"(관계는 명사로 이름 지어야 한다), "permissions should be named as verbs or nouns"(권한은 동사나 명사로 이름 지어야 한다)라고 말한다([스키마 문서](https://authzed.com/docs/spicedb/concepts/schema)).
+
+```text
+definition user {}
+
+definition group {
+    relation member: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*SpiceDB 스키마. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+OpenFGA에는 관계가 한 종류뿐이다. 대괄호 안에 타입 제약이 없는 관계에는 직접 쓸 수 없다. OpenFGA의 [역할과 권한 가이드](https://openfga.dev/docs/modeling/roles-and-permissions)는 그런 관계(`booking_viewer`, `booking_adder`)를 권한으로 사용하고, 다른 가이드들은 그 이름에 `can_` 접두사를 붙인다.
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+Anne의 `edit`는 어디에서 오는가?
+
+<Graph
+  width={600}
+  height={220}
+  minWidth={500}
+  title="역할과 권한: Anne의 edit"
+  desc="user:anne에서 doc:readme#owner로 저장된 owner 간선이 간다. 재작성이라는 점선 화살표가 doc:readme#owner에서 점선 상자 doc:readme#edit로, 또 하나가 edit에서 점선 상자 doc:readme#view로 간다. Anne에서 owner를 거쳐 edit에 이르는 경로가 강조되어 있다. user:beto는 그룹을 통해 doc:readme#viewer에 도달하고, viewer에서는 view로만 점선 화살표가 간다."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 170, label: "user:beto", kind: "subject", mono: true },
+    { id: "owner", x: 300, y: 50, label: "doc:readme#owner", kind: "object", mono: true, on: true },
+    { id: "viewer", x: 300, y: 170, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "edit", x: 510, y: 50, label: "doc:readme#edit", kind: "group", mono: true, on: true },
+    { id: "view", x: 510, y: 170, label: "doc:readme#view", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "owner", label: "튜플", on: true },
+    { from: "beto", to: "viewer", label: "group:eng 경유", dashed: true },
+    { from: "owner", to: "edit", label: "재작성", dashed: true, on: true },
+    { from: "viewer", to: "view", label: "재작성", dashed: true },
+    { from: "edit", to: "view", label: "재작성", dashed: true },
+  ]}
+  caption="실선 화살표는 저장된 튜플이고, 점선 화살표와 상자는 재작성 규칙이 계산한 것이다. Anne은 소유자이므로 편집할 수 있다. Beto는 view에는 도달하지만 edit에는 도달하지 않는다."
+/>
+
+`edit`와 `view`에는 튜플이 없다는 점에 주목하라. 새 역할, 예를 들어 `commenter`를 추가하는 것은 관계 하나와 권한 규칙의 자식 하나를 추가하는 일이며, 기존 튜플은 바뀌지 않는다.
+
+### 관계는 몇 개나 되는가
+
+이 방식에 대한 흔한 비판은 이름에 관한 것이다. Oso의 블로그 글 "Google Zanzibar Isn't Flexible"(Oso는 경쟁 인가 제품을 판매한다)에서 Greg Sarjeant는 "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`"(ReBAC에 관한 문헌에는 `can_delete`나 `can_archive` 같은 “관계”가 넘쳐난다)라고 쓰고, 이를 "essentially the same thing as creating a relation for every authorized action"(인가되는 모든 동작마다 관계를 만드는 것과 본질적으로 같다)이라고 부르며, 이것이 "an indication that relations are the wrong abstraction for authorization"(관계가 인가에 맞지 않는 추상화라는 징후)이라고 결론짓는다([Oso, 2024-11-01, 2025-11-07 갱신](https://www.osohq.com/post/google-zanzibar-isnt-flexible)).
+
+개수는 실제로 늘어난다. 애플리케이션이 검사하는 모든 동작에는 스키마의 이름이 필요하다. 재작성 규칙이 적게 유지하는 것은 저장된 튜플의 수와, 누군가가 쓰기를 하는 관계의 수다. 위의 스키마에서 튜플을 가진 관계는 셋(`owner`, `editor`, `viewer`)이고 권한은 그것들의 순수 함수이므로, `can_archive`를 추가하면 스키마를 한 번 고칠 뿐 튜플은 건드리지 않는다. 논문 자신이 재작성을 도입한 동기도 같다. 파생된 관계를 객체마다 튜플로 저장하는 것은 "would be wasteful and make it hard to make modifications across all objects"(낭비이며 모든 객체에 걸친 수정을 어렵게 만든다)(§2.3.1). 스키마의 권한 이름이 비용인지 문서인지는 Oso와 Zanzibar 계열 제품들이 서로 의견을 달리하는 지점이며, 이 페이지는 그 문제를 결론짓지 않는다.
+
+## 부모-자식 상속
+
+질문: 폴더 A를 열람하는 Chen은 그 안의 readme를 열람할 수 있는가? 컨테이너로부터의 상속은 `tuple_to_userset` 리프다. 객체의 `parent` 튜플을 읽은 다음, 각 부모에 대해 관계를 묻는다.
+
+튜플:
+
+```text
+doc:readme#parent@folder:A#...
+folder:A#viewer@user:chen
+```
+
+논문의 그림 1에는 이 규칙이 이미 `viewer`의 셋째 자식으로 들어 있다. 이전 절의 `view` 권한에 추가하면 다음과 같다.
+
+```text
+relation { name: "parent" }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+SpiceDB에서는 화살표 `parent->view`가 `parent` 관계를 따라가서, 찾은 것에 대해 `view`를 묻는다([스키마 문서](https://authzed.com/docs/spicedb/concepts/schema)).
+
+```text
+definition folder {
+    relation parent: folder
+    relation viewer: user | group#member
+    permission view = viewer + parent->view
+}
+
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+}
+```
+
+*SpiceDB 스키마. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+OpenFGA에서는 같은 것을 `X from Y`로 쓴다. [부모-자식 가이드](https://openfga.dev/docs/modeling/parent-child)는 이를 사용하여 폴더의 편집자를 그 문서들의 편집자로 만든다.
+
+```text
+type folder
+  relations
+    define parent: [folder]
+    define viewer: [user, group#member] or viewer from parent
+
+type doc
+  relations
+    define parent: [folder]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+두 제품 버전 모두 `folder`에도 `folder`를 가리키는 `parent`를 두므로, 폴더는 그 위의 폴더로부터 상속받고 사슬은 튜플이 만드는 만큼 깊어진다. 논문의 그림 1은 문서 쪽만 보여 준다.
+
+Chen의 접근을 결정하는 튜플은 무엇인가?
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="부모-자식: Chen은 폴더 A를 통해 readme를 열람한다"
+  desc="user:chen에서 folder:A로 viewer 간선이 가고, folder:A에서 doc:readme로 parent 간선이 간다. 두 간선과 세 노드가 모두 강조되어 있다. user:anne에서 doc:readme로 가는 owner 간선은 강조되지 않았다."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 150, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "folder", x: 300, y: 150, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 515, y: 100, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Chen과 readme를 함께 지정하는 튜플은 없다. parent 튜플이 readme에 대한 질문을 폴더 A에 대한 질문으로 바꾼다."
+/>
+
+readme를 다른 폴더로 옮기는 것은 튜플 변경 하나(`parent` 튜플 하나를 삭제하고 다른 하나를 쓰기)이며, 상속된 모든 부여가 그에 따라 움직인다는 점에 주목하라. 이는 논문의 new enemy 예 A가 다루는 바로 그 이동이다. "document ACLs inherit from folder ACLs"(문서의 ACL은 폴더의 ACL을 상속한다)(§2.2)이므로 ACL 변경과 이동의 순서가 중요하다. [일관성](../consistency/)을 보라.
+
+## 그룹과 중첩 그룹
+
+질문: Beto는 하위 팀에 속해 있다. eng에 대한 부여가 Beto에게 닿는가? 이 변형은 예제에 가상의 하위 팀 `group:sre`를 추가하며, Beto는 sre에 속하고 sre는 eng 안에 있다.
+
+튜플:
+
+```text
+group:sre#member@user:beto
+group:eng#member@group:sre#member
+doc:readme#viewer@group:eng#member
+```
+
+논문에서 그룹에는 재작성 규칙이 필요 없다. `member`는 일반 관계이며, 튜플의 사용자가 유저셋일 수 있으므로 "a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership"(⟨*userset*⟩을 통해 ACL이 그룹을 참조할 수 있으며, 따라서 중첩된 그룹 멤버십을 표현할 수 있다)(§2.1).
+
+```text
+name: "group"
+
+relation { name: "member" }
+```
+
+논문의 설정은 관계가 어떤 종류의 사용자를 받는지에 대해 아무것도 말하지 않는다. 두 제품은 이를 스키마에 요구한다. 중첩은 `group#member`가 허용된 주체로 나열된 곳에서만 작동한다.
+
+```text
+definition group {
+    relation member: user | group#member
+}
+```
+
+*SpiceDB 스키마. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+```text
+type group
+  relations
+    define member: [user, group#member]
+```
+
+*OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+부여는 어떻게 Beto에게 닿는가?
+
+<Graph
+  width={600}
+  height={210}
+  minWidth={480}
+  title="중첩 그룹: Beto는 sre와 eng를 거쳐 readme에 도달한다"
+  desc="user:beto에서 점선 유저셋 group:sre#member로 member 간선이 간다. group:sre#member에서 점선 유저셋 group:eng#member로 member 간선이 간다. group:eng#member에서 doc:readme로 viewer 간선이 간다. 사슬 전체가 강조되어 있다."
+  nodes={[
+    { id: "beto", x: 80, y: 50, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "sre", x: 310, y: 50, label: "group:sre#member", kind: "group", mono: true, on: true },
+    { id: "eng", x: 310, y: 160, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "doc", x: 525, y: 160, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "sre", label: "member", on: true },
+    { from: "sre", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+  ]}
+  caption="튜플 세 개, 홉 세 개. Check는 Beto를 찾을 때까지 readme에서 바깥쪽으로 유저셋을 따라간다."
+/>
+
+sre가 eng에 합류했을 때 문서의 튜플은 바뀌지 않았다는 점에 주목하라. 논문이 그룹과 ACL을 하나의 개념으로 다루는 이유가 이것이며, 깊거나 넓은 그룹을 포인터 추적으로 검사하면 느린 이유이기도 하다. 그에 대한 논문의 답은 [Leopard 인덱스](../leopard/)다(§3.2.4).
+
+## 차단 목록(차집합)
+
+질문: eng 멤버는 readme를 열람할 수 있지만 한 사람은 예외다. 이 변형에서 Beto는 readme에 대해 차단되어 있다. 차집합은 한 집합에서 다른 집합을 제거한다.
+
+튜플:
+
+```text
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+doc:readme#blocked@user:beto
+```
+
+논문은 차집합을 연산자로(§2.3.1), 그리고 Expand의 유저셋 트리의 노드로(§2.4.5) 들지만, 그림 1은 그것을 어떻게 쓰는지 보여 주지 않는다. 아래 블록은 그림 1의 모양을 그대로 가져와 `union` 자리에 `exclusion`을 넣은 것이다. 키워드, 그리고 첫째 자식이 기준이고 둘째 자식이 빼는 대상이라는 규칙은 이 페이지의 가정이며 논문의 문법이 아니다.
+
+```text
+relation { name: "blocked" }
+
+relation {
+ name: "can_view"
+ userset_rewrite {
+  exclusion {
+   child { computed_userset { relation: "view" } }
+   child { computed_userset { relation: "blocked" } }
+} } }
+```
+
+SpiceDB는 차집합을 `-`로 쓴다([스키마 문서](https://authzed.com/docs/spicedb/concepts/schema)). 차단을 반영한 권한을 `view` 위에 정의하면 표현식에 괄호가 필요 없다.
+
+```text
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+    relation blocked: user
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+    permission can_view = view - blocked
+}
+```
+
+*SpiceDB 스키마. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+OpenFGA는 이를 `but not`(JSON 형식에서는 `difference`)으로 쓴다. 그 [차단 목록 가이드](https://openfga.dev/docs/modeling/blocklists)는 팀이 편집할 수 있는 문서에 대해 팀의 멤버 한 명이 편집하지 못하도록 차단한다.
+
+```text
+type doc
+  relations
+    define parent: [folder]
+    define blocked: [user]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: (viewer or can_edit) but not blocked
+```
+
+*OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다(설정 언어 페이지는 연산자를 묶는 괄호를 허용한다). 검증기는 실행하지 않았다.*
+
+어느 튜플이 결정하는가?
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="차단 목록: Beto가 제외된다"
+  desc="user:beto에서 점선 유저셋 group:eng#member로 member 간선이 가고, 거기서 doc:readme로 viewer 간선이 간다. 별도로 user:beto에서 doc:readme로 곧장 blocked 간선이 간다. blocked 간선이 강조되어 있으며 답을 결정한다. 답은 아니요다."
+  nodes={[
+    { id: "beto", x: 80, y: 150, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 45, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 520, y: 150, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "beto", to: "doc", label: "blocked", on: true },
+  ]}
+  caption="Beto는 (eng를 통해) view에 속하고 blocked에도 속한다. view에서 blocked를 뺀 집합에는 Beto가 없으므로 can_view는 아니요라고 답한다."
+/>
+
+문서에 이르는 경로 하나로는 더 이상 충분하지 않다는 점에 주목하라. 차집합은 양쪽을 모두 봐야 한다. Zanzibar는 "when the outcome of one node determines the result of a subtree"(한 노드의 결과가 하위 트리의 결과를 결정할 때)에만 하위 트리의 나머지를 취소한다(§3.2.3). 합집합은 예 하나로 결정되지만, 차집합에서는 기준 쪽의 예가 빼는 쪽이 알려지기 전까지 아무것도 결정하지 않는다. 무엇이 차단되는지에도 주목하라. `can_view`는 `view` 전체에서 빼므로, 차단된 소유자도 `can_view`를 잃는다.
+
+## 공개 접근(와일드카드)
+
+질문: 공개 문서는 아무나 열람할 수 있는가? 논문은 자신의 표기법으로 답하지 않는다. ⟨*user*⟩는 "⟨*user_id*⟩ | ⟨*userset*⟩"이고 사용자 ID는 "is an integer"(정수다)(§2.1). 모든 사용자를 뜻하는 값은 없으며, 논문은 공개 객체를 다루지 않는다. 논문의 모델 안에서 가장 가까운 구성은 모든 사용자를 포함하는 그룹이며, 이는 사용자마다 튜플 하나가 필요하다. Google이 공개 공유를 어떻게 처리하는지는 기술되어 있지 않다.
+
+두 제품은 스키마가 나열한 곳에서만 허용되는 *와일드카드* 주체 `user:*`를 추가한다. 튜플은 다음과 같다.
+
+```text
+doc:readme#viewer@user:*
+```
+
+```text
+definition doc {
+    relation viewer: user | user:* | group#member
+    permission view = viewer
+}
+```
+
+*SpiceDB 스키마. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+```text
+type doc
+  relations
+    define viewer: [user, user:*, group#member]
+```
+
+*OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+두 프로젝트 모두 이에 대해 경고한다. AuthZed: "Be **very careful** with wildcard support in your schema!"(스키마의 와일드카드 지원에 **매우 주의**하라!), "**Only** grant it to read permissions, unless you intend to allow for universal writing"(누구나 쓸 수 있게 할 의도가 아니라면 읽기 권한에**만** 부여하라)([스키마 문서](https://authzed.com/docs/spicedb/concepts/schema)). OpenFGA: "type-bound public access is not a wildcard or a regex expression"(타입에 묶인 공개 접근은 와일드카드나 정규 표현식이 아니다). `user:*`는 사용자 자리에만 올 수 있으며, 객체 자리(`document:*`)나 유저셋 안(`org:*#member`)에는 올 수 없다([공개 접근 가이드](https://openfga.dev/docs/modeling/public-access)).
+
+## 다중 제한(교집합)
+
+질문: 문서의 팀 멤버이기도 한 소유자만 그 문서를 게시할 수 있다. Anne은 readme를 게시할 수 있는가? 교집합은 사용자가 모든 자식에 속할 것을 요구한다.
+
+이 변형은 readme에서 `group:eng`로 가는 `team` 관계를 추가한다. 튜플:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#team@group:eng#...
+group:eng#member@user:beto
+```
+
+차집합과 마찬가지로 논문은 교집합을 언급하지만(§2.3.1) 그것을 쓴 모습은 보여 주지 않는다. 이 블록은 그림 1의 모양을 가져온 것이며, `intersection` 키워드는 가정이다.
+
+```text
+relation { name: "team" }
+
+relation {
+ name: "publish"
+ userset_rewrite {
+  intersection {
+   child { computed_userset { relation: "owner" } }
+   child { tuple_to_userset {
+     tupleset { relation: "team" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # the doc's team
+       relation: "member"
+   } } }
+} } }
+```
+
+SpiceDB는 교집합을 `&`로 쓴다.
+
+```text
+definition doc {
+    relation owner: user
+    relation team: group
+    permission publish = owner & team->member
+}
+```
+
+*SpiceDB 스키마. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+OpenFGA는 이를 `and`로 쓴다. 그 [다중 제한 가이드](https://openfga.dev/docs/modeling/multiple-restrictions)는 같은 모양, 즉 소유 조직의 멤버이기도 한 작성자로서의 `can_delete`를 만든다.
+
+```text
+type doc
+  relations
+    define owner: [user]
+    define team: [group]
+    define can_publish: owner and member from team
+```
+
+*OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+Anne은 왜 거부되는가?
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="교집합: Anne은 소유자이지만 팀에 없다"
+  desc="user:anne에서 doc:readme로 강조된 owner 간선이 간다. group:eng에서 doc:readme로 team 간선이 간다. user:beto에서 group:eng로 member 간선이 간다. 강조된 메모는 group:eng#member@user:anne 튜플이 없다고 말한다. 교집합의 자식 하나는 충족되고 다른 하나는 충족되지 않으므로 답은 아니요다."
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 185, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 185, label: "group:eng", kind: "object", mono: true },
+    { id: "doc", x: 520, y: 115, label: "doc:readme", kind: "object", mono: true, on: true },
+    { id: "miss", x: 230, y: 112, label: "튜플 없음\ngroup:eng#member@user:anne", kind: "note", on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "team" },
+  ]}
+  caption="publish = owner ∩ (team → member). Anne은 첫째 집합에는 속하지만 둘째 집합에는 속하지 않으므로 답은 아니요다. Beto는 둘째 집합에 속하지만 첫째 집합에는 속하지 않는다."
+/>
+
+결정적인 사실이 누락된 튜플이라는 점에 주목하라. `group:eng#member@user:anne`을 추가하면 문서를 건드리지 않고도 답이 예가 된다.
+
+## 사용자 정의 역할
+
+질문: 관리자가 실행 시간에 새 역할 "reviewer"를 정의하고 그 역할에 readme 열람 권한을 준다. 그 역할을 가진 Chen은 readme를 열람할 수 있는가? 스키마에 고정된 역할(owner, editor)은 스키마가 바뀔 때에만 바뀐다. 사용자 정의 역할은 데이터다.
+
+OpenFGA의 [사용자 정의 역할 가이드](https://openfga.dev/docs/modeling/custom-roles)는 이를 별도의 타입으로 모델링한다. "because our roles are going to be dynamic and might change frequently"(역할이 동적이고 자주 바뀔 수 있기 때문)다. 사용자는 `role` 객체에 `assignee`로 관계되고, 역할의 담당자는 유저셋으로서 관계를 부여받는다(`role:media-manager#assignee`가 `asset-category:logos`의 `editor`). AuthZed의 [사용자 정의 역할 글](https://authzed.com/blog/user-defined-roles)(2021-10-27)도 `role#member`로 같은 일을 한다.
+
+튜플(변형: Chen은 폴더에 대한 부여 대신 역할을 가진다):
+
+```text
+role:reviewer#assignee@user:chen
+doc:readme#viewer@role:reviewer#assignee
+doc:readme#editor@role:maintainer#assignee
+```
+
+논문에서 이는 네임스페이스 이름만 다른 그룹 패턴이다. `role`은 일반 관계 하나를 가진 네임스페이스이고, readme의 `viewer`는 그것을 가리키는 유저셋을 저장한다. 규칙은 바뀌지 않는다.
+
+```text
+name: "role"
+
+relation { name: "assignee" }
+```
+
+```text
+definition role {
+    relation assignee: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member | role#assignee
+    relation viewer: user | group#member | role#assignee
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*SpiceDB 스키마. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+```text
+type role
+  relations
+    define assignee: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member, role#assignee]
+    define viewer: [user, group#member, role#assignee]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
+
+실행 시간에 만든 역할은 어떻게 접근을 부여하는가?
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="사용자 정의 역할: Chen은 reviewer 역할을 통해 열람한다"
+  desc="user:chen에서 점선 유저셋 role:reviewer#assignee로 강조된 assignee 간선이 가고, 거기서 doc:readme로 강조된 viewer 간선이 간다. 두 번째 점선 유저셋 role:maintainer#assignee에서 doc:readme로 editor 간선이 가며, 멤버는 없다."
+  nodes={[
+    { id: "chen", x: 80, y: 70, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "rev", x: 300, y: 70, label: "role:reviewer#assignee", kind: "group", mono: true, on: true },
+    { id: "mnt", x: 300, y: 180, label: "role:maintainer#assignee", kind: "group", mono: true },
+    { id: "doc", x: 525, y: 125, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "rev", label: "assignee", on: true },
+    { from: "rev", to: "doc", label: "viewer", on: true },
+    { from: "mnt", to: "doc", label: "editor" },
+  ]}
+  caption="역할을 만들고, Chen을 할당하고, readme에 대해 역할에 부여하는 것은 튜플 쓰기 세 번이다. 스키마는 바뀌지 않는다."
+/>
+
+역할의 부여는 객체별이라는 점에 주목하라. "이 저장소 어디서든 이슈를 만들고 삭제할 수 있다"를 뜻해야 하는 역할은 그 권한 집합도 데이터로 저장해야 한다. AuthZed의 [접근 제어 관리 페이지](https://authzed.com/docs/spicedb/modeling/access-control-management)는 그 더 세밀한 패턴을 보여 준다. 권한마다 와일드카드 관계 하나를 가진 `role` 정의(`relation create_issue: user:*`), 역할을 피부여자와 묶는 `role_grant` 객체, 그리고 `permission create_issue = role->create_issue & grantee` 형태의 권한이다. 그 대가는 권한마다 스키마 관계 하나이며, 이는 위의 이름 문제를 다시 불러온다.
+
+## 소유권 이전
+
+질문: Anne이 readme를 Beto에게 넘긴다. 이후 Beto는 소유자여야 하고 Anne은 소유자가 아니어야 하며, 둘 다 소유자이거나 둘 다 아닌 순간이 있어서는 안 된다. 이것은 스키마 패턴이 아니다. 세 표기법 중 어느 것도 "소유자는 정확히 한 명"을 선언할 수 없으며, 여기서 인용한 스키마 문서에는 카디널리티 제약이 나오지 않는다. 이것은 쓰기 패턴이다.
+
+튜플 변경:
+
+```text
+delete  doc:readme#owner@user:anne
+write   doc:readme#owner@user:beto
+```
+
+논문의 Write API가 이를 다룬다. 클라이언트는 "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control"(낙관적 동시성 제어를 사용하는 읽기-수정-쓰기 과정을 통해 객체와 관련된 모든 튜플을 수정할 수도 있다). 객체별 "락" 튜플을 포함하여 객체의 튜플을 읽고, 쓰기를 "along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read"(락 튜플에 대한 touch와 함께 … 읽기 이후 락 튜플이 수정되지 않은 경우에만 쓰기가 커밋된다는 조건으로) 보내고, 그렇지 않으면 재시도한다(§2.4.2). 락 튜플은 동시에 일어나는 두 이전이 모두 성공하는 것을 막는다.
+
+- **SpiceDB.** `WriteRelationships`는 "atomically writes and/or deletes a set of specified relationships"(지정된 관계 집합을 원자적으로 쓰거나 삭제하며), "if any preconditions fail, the entire transaction will be reverted"(전제 조건 중 하나라도 실패하면 트랜잭션 전체가 되돌려진다)([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). `doc:readme#owner@user:anne`에 대한 `MUST_MATCH` 전제 조건이 논문의 락 튜플 역할을 한다. Anne이 더 이상 소유자가 아니면 이전은 실패한다.
+- **OpenFGA.** "You can combine both writes and deletes in a single transactional API request"(하나의 트랜잭션 API 요청에서 쓰기와 삭제를 함께 할 수 있으며), "all operations in the request will either succeed together or fail together"(요청의 모든 작업은 함께 성공하거나 함께 실패한다). 요청당 튜플은 최대 100개다([update tuples](https://openfga.dev/docs/getting-started/update-tuples)). 같은 페이지는 이미 존재하는 튜플을 쓰면 "would normally cause the whole request to fail"(보통 요청 전체가 실패한다)이라고 하며, "deleting tuples that might not exist"(존재하지 않을 수 있는 튜플을 삭제하는 경우)를 위해 `on_missing: "ignore"`를 제공한다(OpenFGA v1.10.0 이상). 이는 존재하지 않는 튜플의 삭제가 기본적으로 요청을 실패시킨다는 것을 시사하며, 그렇다면 삭제가 락 튜플처럼 작동한다. 그 페이지는 이 기본값을 명시적으로 말하지 않으며, 여기서 실행해 보지도 않았다.
+
+무엇이 바뀌는가?
+
+<Frames min="16rem">
+
+<Graph
+  width={320}
+  height={150}
+  title="이전 전의 소유권"
+  desc="user:anne에서 doc:readme로 강조된 owner 간선이 간다. user:beto에는 간선이 없다."
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner", on: true }]}
+  caption="전: Anne에 대한 owner 튜플 하나."
+/>
+
+<Graph
+  width={320}
+  height={150}
+  title="이전 후의 소유권"
+  desc="user:beto에서 doc:readme로 강조된 owner 간선이 간다. user:anne에는 간선이 없다."
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "beto", to: "doc", label: "owner", on: true }]}
+  caption="후: Beto에 대한 owner 튜플 하나. 두 변경은 함께 커밋되거나 전혀 커밋되지 않는다."
+/>
+
+</Frames>
+
+소유권에서 파생되는 모든 것(`edit`, `view`)이 튜플 하나와 함께 움직인다는 점에 주목하라. Anne은 직접적인 `viewer` 튜플이나 그룹처럼 다른 경로로 가진 접근은 유지한다. Anne의 모든 접근을 제거해야 하는 이전이라면 그 튜플들도 삭제해야 한다.
+
+<Callout kind="paper" title="논문에서">
+
+튜플과 유저셋: §2.1. 재작성 규칙, 세 가지 리프와 연산자: §2.3.1과 그림 1. 락 튜플을 이용한 Write: §2.4.2. 합집합, 교집합, 차집합을 가진 Expand의 유저셋 트리: §2.4.5. 논문이 지원한다고 말하는 패턴(권한, 사용자, 그룹, 상속, RBAC): §5. 용어는 [용어집](../glossary/)에 모아 두었다.
+
+</Callout>
+
+## 출처
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- OpenFGA modeling guides: [roles and permissions](https://openfga.dev/docs/modeling/roles-and-permissions), [parent-child](https://openfga.dev/docs/modeling/parent-child), [blocklists](https://openfga.dev/docs/modeling/blocklists), [public access](https://openfga.dev/docs/modeling/public-access), [multiple restrictions](https://openfga.dev/docs/modeling/multiple-restrictions), [custom roles](https://openfga.dev/docs/modeling/custom-roles)
+- OpenFGA, [configuration language](https://openfga.dev/docs/configuration-language)
+- OpenFGA, [update tuples](https://openfga.dev/docs/getting-started/update-tuples)
+- AuthZed, [SpiceDB schema docs](https://authzed.com/docs/spicedb/concepts/schema)
+- AuthZed, [access-control management](https://authzed.com/docs/spicedb/modeling/access-control-management)
+- AuthZed, [User Defined Roles](https://authzed.com/blog/user-defined-roles), 2021-10-27
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- Greg Sarjeant, [Google Zanzibar Isn't Flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible), Oso, 2024-11-01 (updated 2025-11-07)

@@ -1,0 +1,645 @@
+---
+title: "Padrões de modelagem: das regras de reescrita a permissões reais"
+description: "Oito requisitos comuns de autorização, cada um escrito como tuplas, como regra na notação de configuração de namespace do artigo quando possível, e nas linguagens de schema do SpiceDB e do OpenFGA."
+section: guide
+part: practice
+order: 10
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4.2", "3.2.3", "5", "6"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+O artigo descreve seu modelo de dados e sua linguagem de configuração, mas apresenta apenas uma política completa, a Figura 1. Sua conclusão afirma mais: "simple yet flexible data model and configuration language support a variety of access control policies from both consumer and enterprise applications" (o modelo de dados e a linguagem de configuração, simples porém flexíveis, suportam uma variedade de políticas de controle de acesso de aplicações tanto de consumo quanto corporativas) (§6). A seção de trabalhos relacionados nomeia os padrões que ele cobre: "Zanzibar’s data model supports permissions, users, groups, and inheritance" (o modelo de dados do Zanzibar suporta permissões, usuários, grupos e herança), como encontrados no Multics, no UNIX, nas ACLs POSIX e no VMS, e "a number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language" (vários clientes do Zanzibar implementaram políticas RBAC sobre a linguagem de configuração de namespace do Zanzibar) (§5).
+
+Esta página descreve oito requisitos que surgem na prática. Cada seção apresenta a pergunta que o padrão responde, as tuplas, a regra na notação da Figura 1 do artigo quando o artigo consegue expressá-la, a mesma regra na linguagem de schema do SpiceDB e na DSL do OpenFGA, e um grafo das tuplas com o caminho que decide a resposta destacado. A lista de padrões segue os [guias de modelagem](https://openfga.dev/docs/modeling) do OpenFGA; a [página sobre tuplas](../relation-tuples/) explica a notação.
+
+O exemplo recorrente: Anne, Beto e Chen (`user:anne`, `user:beto`, `user:chen`); o documento `doc:readme` em `folder:A`; o grupo `group:eng`. Anne é dona do readme, Beto está em eng, os membros de eng visualizam o readme e Chen visualiza a pasta A.
+
+<Callout kind="note" title="Como os schemas desta página foram verificados">
+
+A notação do artigo foi copiada da Figura 1. A Figura 1 usa apenas `union`; o artigo nomeia interseção e exclusão (§2.3.1), mas não mostra como elas são escritas, de modo que os dois blocos que as usam foram escritos por analogia e indicam isso. Os schemas do SpiceDB usam apenas construções mostradas na [documentação de schema](https://authzed.com/docs/spicedb/concepts/schema) e nas páginas de modelagem da AuthZed; os modelos do OpenFGA usam apenas palavras-chave da DSL listadas na [página da linguagem de configuração](https://openfga.dev/docs/configuration-language) do OpenFGA (`or`, `and`, `but not`, `from`, restrições de tipo como `[user, user:*, team#member]`). Cada bloco mostra apenas os tipos de que o padrão precisa. Todos foram conferidos com a documentação em 2026-11-13; nenhum foi submetido a um validador, ao `zed`, à CLI do OpenFGA ou a qualquer um dos Playgrounds.
+
+</Callout>
+
+## Papéis e permissões
+
+A pergunta: Anne pode editar o readme, e Beto pode? Um *papel* (role) é algo que se concede (owner, editor, viewer). Uma *permissão* é algo que se verifica (edit, view). Conceder papéis e verificar permissões mantém as verificações estáveis quando os papéis mudam.
+
+Tuplas:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+```
+
+Na notação do artigo, papéis são relações com tuplas armazenadas, e permissões são relações cuja regra não tem `_this`, de modo que ninguém pode escrever uma tupla diretamente nelas. Apenas `union` e `computed_userset` são necessários, ambos da Figura 1:
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+relation { name: "editor" }
+relation { name: "viewer" }
+
+relation {
+ name: "edit"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "owner" } }
+   child { computed_userset { relation: "editor" } }
+} } }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+} } }
+```
+
+A Figura 1 faz o mesmo trabalho de outra forma: ela coloca `_this` e o papel maior na mesma relação ("All owners are editors, and all editors are viewers", todos os donos são editores, e todos os editores são visualizadores). As duas formas são regras de reescrita; a de cima mantém separados os nomes que se concedem e os nomes que se verificam.
+
+O SpiceDB separa os dois tipos na sintaxe: as linhas `relation` são o que pode ser armazenado, as linhas `permission` são calculadas. Sua documentação diz "relations should be named as nouns" (relações devem ser nomeadas como substantivos) e "permissions should be named as verbs or nouns" (permissões devem ser nomeadas como verbos ou substantivos) ([documentação de schema](https://authzed.com/docs/spicedb/concepts/schema)).
+
+```text
+definition user {}
+
+definition group {
+    relation member: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*Schema do SpiceDB; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+O OpenFGA tem um único tipo de relação. Uma relação sem restrição de tipo entre colchetes não pode ser escrita diretamente; o [guia de papéis e permissões](https://openfga.dev/docs/modeling/roles-and-permissions) do OpenFGA usa tais relações (`booking_viewer`, `booking_adder`) como permissões, e seus outros guias as prefixam com `can_`.
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*DSL do OpenFGA; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+De onde vem o `edit` de Anne?
+
+<Graph
+  width={600}
+  height={220}
+  minWidth={500}
+  title="Papéis e permissões: o edit de Anne"
+  desc="user:anne tem uma aresta owner armazenada para doc:readme#owner. Uma seta tracejada rotulada reescrita vai de doc:readme#owner até a caixa tracejada doc:readme#edit, e outra vai de edit até a caixa tracejada doc:readme#view. O caminho de Anne por owner até edit está destacado. user:beto chega a doc:readme#viewer por meio do grupo, e viewer tem uma seta tracejada apenas para view."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 170, label: "user:beto", kind: "subject", mono: true },
+    { id: "owner", x: 300, y: 50, label: "doc:readme#owner", kind: "object", mono: true, on: true },
+    { id: "viewer", x: 300, y: 170, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "edit", x: 510, y: 50, label: "doc:readme#edit", kind: "group", mono: true, on: true },
+    { id: "view", x: 510, y: 170, label: "doc:readme#view", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "owner", label: "tupla", on: true },
+    { from: "beto", to: "viewer", label: "via group:eng", dashed: true },
+    { from: "owner", to: "edit", label: "reescrita", dashed: true, on: true },
+    { from: "viewer", to: "view", label: "reescrita", dashed: true },
+    { from: "edit", to: "view", label: "reescrita", dashed: true },
+  ]}
+  caption="Setas contínuas são tuplas armazenadas; setas e caixas tracejadas são calculadas por regras de reescrita. Anne edita porque é dona; Beto chega a view, mas não a edit."
+/>
+
+Observe que `edit` e `view` não contêm tuplas. Adicionar um novo papel, por exemplo `commenter`, significa uma nova relação e mais um filho nas regras de permissão; nenhuma tupla existente muda.
+
+### Quantas relações
+
+Uma crítica frequente a esse estilo diz respeito aos nomes. No post de blog da Oso "Google Zanzibar Isn't Flexible" (a Oso vende um produto de autorização concorrente), Greg Sarjeant escreve que "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`" (a literatura sobre ReBAC está repleta de "relações" como `can_delete` e `can_archive`), chama isso de "essentially the same thing as creating a relation for every authorized action" (essencialmente a mesma coisa que criar uma relação para cada ação autorizada) e conclui que é "an indication that relations are the wrong abstraction for authorization" (um indício de que relações são a abstração errada para autorização) ([Oso, 2024-11-01, atualizado em 2025-11-07](https://www.osohq.com/post/google-zanzibar-isnt-flexible)).
+
+A contagem de fato cresce: toda ação que a aplicação verifica precisa de um nome no schema. O que as regras de reescrita mantêm pequeno é o número de tuplas armazenadas e o número de relações em que alguém escreve. Nos schemas acima, três relações contêm tuplas (`owner`, `editor`, `viewer`) e as permissões são funções puras delas, de modo que adicionar `can_archive` altera o schema uma vez e nenhuma tupla. A própria motivação do artigo para as reescritas é a mesma: armazenar uma relação derivada como uma tupla para cada objeto "would be wasteful and make it hard to make modifications across all objects" (seria um desperdício e dificultaria fazer modificações em todos os objetos) (§2.3.1). Se nomes de permissão no schema são um custo ou uma documentação é o ponto em que a Oso e os produtos no estilo Zanzibar discordam; esta página não resolve essa questão.
+
+## Herança pai-filho
+
+A pergunta: Chen, que visualiza a pasta A, pode visualizar o readme dentro dela? A herança a partir de um contêiner é a folha `tuple_to_userset`: ler as tuplas `parent` do objeto e, em seguida, consultar uma relação em cada pai.
+
+Tuplas:
+
+```text
+doc:readme#parent@folder:A#...
+folder:A#viewer@user:chen
+```
+
+A Figura 1 do artigo já contém essa regra como o terceiro filho de `viewer`. Acrescentada à permissão `view` da seção anterior:
+
+```text
+relation { name: "parent" }
+
+relation {
+ name: "view"
+ userset_rewrite {
+  union {
+   child { computed_userset { relation: "viewer" } }
+   child { computed_userset { relation: "edit" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+No SpiceDB, a seta `parent->view` segue a relação `parent` e consulta `view` no que encontra ([documentação de schema](https://authzed.com/docs/spicedb/concepts/schema)):
+
+```text
+definition folder {
+    relation parent: folder
+    relation viewer: user | group#member
+    permission view = viewer + parent->view
+}
+
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+}
+```
+
+*Schema do SpiceDB; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+No OpenFGA, o mesmo é `X from Y`; o [guia pai-filho](https://openfga.dev/docs/modeling/parent-child) o usa para tornar os editores de uma pasta editores de seus documentos.
+
+```text
+type folder
+  relations
+    define parent: [folder]
+    define viewer: [user, group#member] or viewer from parent
+
+type doc
+  relations
+    define parent: [folder]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*DSL do OpenFGA; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+As duas versões dos produtos também dão a `folder` um `parent` que aponta para `folder`, de modo que uma pasta herda da pasta acima dela e a cadeia é tão profunda quanto as tuplas a tornam. A Figura 1 do artigo mostra apenas o lado do documento.
+
+Quais tuplas decidem o acesso de Chen?
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="Pai-filho: Chen visualiza o readme por meio da pasta A"
+  desc="user:chen tem uma aresta viewer para folder:A; folder:A tem uma aresta parent para doc:readme. As duas arestas e os três nós estão destacados. user:anne tem uma aresta owner para doc:readme que não está destacada."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 150, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "folder", x: 300, y: 150, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 515, y: 100, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Nenhuma tupla menciona Chen e o readme juntos. A tupla parent transforma a pergunta sobre o readme em uma pergunta sobre a pasta A."
+/>
+
+Observe que mover o readme para outra pasta é uma única alteração de tupla (apagar uma tupla `parent`, escrever outra), e todas as concessões herdadas acompanham a mudança. É o mesmo movimento de que trata o Exemplo A do problema do “novo inimigo” no artigo: "document ACLs inherit from folder ACLs" (as ACLs dos documentos herdam das ACLs da pasta) (§2.2), de modo que a ordem das alterações de ACL e das movimentações importa; veja [consistência](../consistency/).
+
+## Grupos e grupos aninhados
+
+A pergunta: Beto está em uma subequipe; uma concessão a eng chega até ele? Esta variante do exemplo recorrente acrescenta uma subequipe hipotética `group:sre`, com Beto em sre e sre dentro de eng.
+
+Tuplas:
+
+```text
+group:sre#member@user:beto
+group:eng#member@group:sre#member
+doc:readme#viewer@group:eng#member
+```
+
+Um grupo não precisa de regra de reescrita no artigo. `member` é uma relação simples e, como o usuário de uma tupla pode ser um userset, "a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership" (um ⟨*userset*⟩ permite que ACLs se refiram a grupos e, assim, possibilita representar associações a grupos aninhados) (§2.1):
+
+```text
+name: "group"
+
+relation { name: "member" }
+```
+
+As configurações do artigo nada dizem sobre quais tipos de usuário uma relação aceita. Os dois produtos exigem isso no schema: o aninhamento só funciona onde `group#member` está listado como sujeito permitido.
+
+```text
+definition group {
+    relation member: user | group#member
+}
+```
+
+*Schema do SpiceDB; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+```text
+type group
+  relations
+    define member: [user, group#member]
+```
+
+*DSL do OpenFGA; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+Como a concessão chega a Beto?
+
+<Graph
+  width={600}
+  height={210}
+  minWidth={480}
+  title="Grupos aninhados: Beto chega ao readme por meio de sre e eng"
+  desc="user:beto tem uma aresta member para o userset tracejado group:sre#member. group:sre#member tem uma aresta member para o userset tracejado group:eng#member. group:eng#member tem uma aresta viewer para doc:readme. Toda a cadeia está destacada."
+  nodes={[
+    { id: "beto", x: 80, y: 50, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "sre", x: 310, y: 50, label: "group:sre#member", kind: "group", mono: true, on: true },
+    { id: "eng", x: 310, y: 160, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "doc", x: 525, y: 160, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "sre", label: "member", on: true },
+    { from: "sre", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+  ]}
+  caption="Três tuplas, três saltos. O Check segue os usersets a partir do readme para fora até encontrar Beto."
+/>
+
+Observe que as tuplas do documento não mudaram quando sre entrou em eng. É por isso que o artigo trata grupos e ACLs como um único conceito, e também por isso que grupos profundos ou largos são lentos de verificar por pointer chasing; a resposta do artigo é o [índice Leopard](../leopard/) (§3.2.4).
+
+## Listas de bloqueio (exclusão)
+
+A pergunta: os membros de eng podem visualizar o readme, exceto uma pessoa. Nesta variante, Beto está bloqueado no readme. A exclusão remove um conjunto de outro.
+
+Tuplas:
+
+```text
+doc:readme#viewer@group:eng#member
+group:eng#member@user:beto
+doc:readme#blocked@user:beto
+```
+
+O artigo lista a exclusão como operador (§2.3.1) e como nó na árvore de userset do Expand (§2.4.5), mas a Figura 1 não mostra como ela é escrita. O bloco abaixo copia a forma da Figura 1 com `exclusion` no lugar de `union`; a palavra-chave e a regra de que o primeiro filho é a base e o segundo é subtraído são uma suposição desta página, não a sintaxe do artigo.
+
+```text
+relation { name: "blocked" }
+
+relation {
+ name: "can_view"
+ userset_rewrite {
+  exclusion {
+   child { computed_userset { relation: "view" } }
+   child { computed_userset { relation: "blocked" } }
+} } }
+```
+
+O SpiceDB escreve a exclusão como `-` ([documentação de schema](https://authzed.com/docs/spicedb/concepts/schema)). Definir a permissão com bloqueio sobre `view` mantém a expressão livre de parênteses:
+
+```text
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+    relation blocked: user
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+    permission can_view = view - blocked
+}
+```
+
+*Schema do SpiceDB; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+O OpenFGA a escreve como `but not` (`difference` em sua forma JSON); seu [guia de listas de bloqueio](https://openfga.dev/docs/modeling/blocklists) bloqueia um membro de uma equipe de editar um documento que a equipe pode editar.
+
+```text
+type doc
+  relations
+    define parent: [folder]
+    define blocked: [user]
+    define owner: [user]
+    define editor: [user, group#member]
+    define viewer: [user, group#member] or viewer from parent
+    define can_edit: owner or editor
+    define can_view: (viewer or can_edit) but not blocked
+```
+
+*DSL do OpenFGA; segue a sintaxe documentada em 2026-11-13 (a página da linguagem de configuração permite parênteses para agrupar operadores); nenhum validador foi executado.*
+
+Qual tupla decide?
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="Lista de bloqueio: Beto é excluído"
+  desc="user:beto tem uma aresta member para o userset tracejado group:eng#member, que tem uma aresta viewer para doc:readme. Separadamente, user:beto tem uma aresta blocked direta para doc:readme. A aresta blocked está destacada e decide a resposta: não."
+  nodes={[
+    { id: "beto", x: 80, y: 150, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 45, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 520, y: 150, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "beto", to: "doc", label: "blocked", on: true },
+  ]}
+  caption="Beto está em view (por meio de eng) e em blocked. view menos blocked não o contém, então can_view responde não."
+/>
+
+Observe que um caminho até o documento já não basta: a exclusão precisa olhar os dois lados. O Zanzibar cancela o restante de uma subárvore apenas "when the outcome of one node determines the result of a subtree" (quando o resultado de um nó determina o resultado de uma subárvore) (§3.2.3). Um sim decide uma união; em uma exclusão, um sim no lado da base nada decide até que o lado subtraído seja conhecido. Observe também o que fica bloqueado: como `can_view` subtrai de todo o `view`, um dono bloqueado também perde `can_view`.
+
+## Acesso público (curingas)
+
+A pergunta: qualquer pessoa pode visualizar um documento público? O artigo não tem resposta em sua notação. Um ⟨*user*⟩ é "⟨*user_id*⟩ | ⟨*userset*⟩" e um ID de usuário "is an integer" (é um inteiro) (§2.1); não há valor que signifique todos os usuários, e o artigo não discute objetos públicos. Dentro do modelo do artigo, a construção mais próxima é um grupo que contém todos os usuários, o que exige uma tupla por usuário; não se descreve como o Google lida com o compartilhamento público.
+
+Os dois produtos acrescentam um sujeito *curinga* (wildcard), `user:*`, permitido apenas onde o schema o lista. A tupla:
+
+```text
+doc:readme#viewer@user:*
+```
+
+```text
+definition doc {
+    relation viewer: user | user:* | group#member
+    permission view = viewer
+}
+```
+
+*Schema do SpiceDB; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+```text
+type doc
+  relations
+    define viewer: [user, user:*, group#member]
+```
+
+*DSL do OpenFGA; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+Os dois projetos alertam sobre isso. AuthZed: "Be **very careful** with wildcard support in your schema!" (tenha **muito cuidado** com o suporte a curingas no seu schema!) e "**Only** grant it to read permissions, unless you intend to allow for universal writing" (conceda-o **apenas** a permissões de leitura, a menos que pretenda permitir escrita universal) ([documentação de schema](https://authzed.com/docs/spicedb/concepts/schema)). OpenFGA: "type-bound public access is not a wildcard or a regex expression" (o acesso público vinculado a tipo não é um curinga nem uma expressão regular); `user:*` só pode aparecer como usuário, não como objeto (`document:*`) nem dentro de um userset (`org:*#member`) ([guia de acesso público](https://openfga.dev/docs/modeling/public-access)).
+
+## Múltiplas restrições (interseção)
+
+A pergunta: apenas donos que também são membros da equipe do documento podem publicá-lo. Anne pode publicar o readme? A interseção exige que um usuário esteja em todos os filhos.
+
+Esta variante acrescenta uma relação `team` do readme para `group:eng`. Tuplas:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#team@group:eng#...
+group:eng#member@user:beto
+```
+
+Assim como a exclusão, o artigo nomeia a interseção (§2.3.1), mas não mostra como ela é escrita. Este bloco copia a forma da Figura 1; a palavra-chave `intersection` é uma suposição:
+
+```text
+relation { name: "team" }
+
+relation {
+ name: "publish"
+ userset_rewrite {
+  intersection {
+   child { computed_userset { relation: "owner" } }
+   child { tuple_to_userset {
+     tupleset { relation: "team" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # the doc's team
+       relation: "member"
+   } } }
+} } }
+```
+
+O SpiceDB escreve a interseção como `&`:
+
+```text
+definition doc {
+    relation owner: user
+    relation team: group
+    permission publish = owner & team->member
+}
+```
+
+*Schema do SpiceDB; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+O OpenFGA a escreve como `and`; seu [guia de múltiplas restrições](https://openfga.dev/docs/modeling/multiple-restrictions) constrói a mesma forma, `can_delete` como escritores que também são membros da organização proprietária.
+
+```text
+type doc
+  relations
+    define owner: [user]
+    define team: [group]
+    define can_publish: owner and member from team
+```
+
+*DSL do OpenFGA; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+Por que Anne é recusada?
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="Interseção: Anne é dona, mas não está na equipe"
+  desc="user:anne tem uma aresta owner destacada para doc:readme. group:eng tem uma aresta team para doc:readme. user:beto tem uma aresta member para group:eng. Uma nota destacada diz que não existe a tupla group:eng#member@user:anne. Um filho da interseção é satisfeito e o outro não, então a resposta é não."
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 185, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 185, label: "group:eng", kind: "object", mono: true },
+    { id: "doc", x: 520, y: 115, label: "doc:readme", kind: "object", mono: true, on: true },
+    { id: "miss", x: 230, y: 112, label: "sem a tupla\ngroup:eng#member@user:anne", kind: "note", on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "team" },
+  ]}
+  caption="publish = owner ∩ (team → member). Anne está no primeiro conjunto, não no segundo, então a resposta é não. Beto está no segundo, não no primeiro."
+/>
+
+Observe que o fato decisivo é uma tupla ausente. Acrescentar `group:eng#member@user:anne` tornaria a resposta sim sem tocar no documento.
+
+## Papéis personalizados
+
+A pergunta: um administrador define um novo papel, "reviewer", em tempo de execução e lhe dá acesso de visualização ao readme. Chen, que detém o papel, pode visualizá-lo? Papéis fixados no schema (owner, editor) só mudam quando o schema muda; papéis personalizados são dados.
+
+O [guia de papéis personalizados](https://openfga.dev/docs/modeling/custom-roles) do OpenFGA os modela como um tipo separado "because our roles are going to be dynamic and might change frequently" (porque nossos papéis serão dinâmicos e podem mudar com frequência): os usuários são relacionados a um objeto `role` como `assignee`, e os assignees do papel recebem relações como um userset (`role:media-manager#assignee` como `editor` de `asset-category:logos`). O [post sobre papéis definidos pelo usuário](https://authzed.com/blog/user-defined-roles) da AuthZed (2021-10-27) faz o mesmo com `role#member`.
+
+Tuplas (uma variante: Chen detém um papel em vez de uma concessão na pasta):
+
+```text
+role:reviewer#assignee@user:chen
+doc:readme#viewer@role:reviewer#assignee
+doc:readme#editor@role:maintainer#assignee
+```
+
+No artigo, este é o padrão de grupos com outro nome de namespace: `role` é um namespace com uma relação simples, e o `viewer` do readme armazena um userset que aponta para ele. Nenhuma regra muda:
+
+```text
+name: "role"
+
+relation { name: "assignee" }
+```
+
+```text
+definition role {
+    relation assignee: user
+}
+
+definition doc {
+    relation owner: user
+    relation editor: user | group#member | role#assignee
+    relation viewer: user | group#member | role#assignee
+
+    permission edit = owner + editor
+    permission view = viewer + edit
+}
+```
+
+*Schema do SpiceDB; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+```text
+type role
+  relations
+    define assignee: [user]
+
+type doc
+  relations
+    define owner: [user]
+    define editor: [user, group#member, role#assignee]
+    define viewer: [user, group#member, role#assignee]
+    define can_edit: owner or editor
+    define can_view: viewer or can_edit
+```
+
+*DSL do OpenFGA; segue a sintaxe documentada em 2026-11-13; nenhum validador foi executado.*
+
+Como um papel criado em tempo de execução concede acesso?
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={480}
+  title="Papéis personalizados: Chen visualiza por meio do papel reviewer"
+  desc="user:chen tem uma aresta assignee destacada para o userset tracejado role:reviewer#assignee, que tem uma aresta viewer destacada para doc:readme. Um segundo userset tracejado, role:maintainer#assignee, tem uma aresta editor para doc:readme e nenhum membro."
+  nodes={[
+    { id: "chen", x: 80, y: 70, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "rev", x: 300, y: 70, label: "role:reviewer#assignee", kind: "group", mono: true, on: true },
+    { id: "mnt", x: 300, y: 180, label: "role:maintainer#assignee", kind: "group", mono: true },
+    { id: "doc", x: 525, y: 125, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "rev", label: "assignee", on: true },
+    { from: "rev", to: "doc", label: "viewer", on: true },
+    { from: "mnt", to: "doc", label: "editor" },
+  ]}
+  caption="Criar o papel, atribuí-lo a Chen e concedê-lo no readme são três escritas de tuplas; o schema não muda."
+/>
+
+Observe que as concessões do papel são por objeto. Um papel que deva significar "pode criar e apagar issues em qualquer lugar deste repositório" também precisa ter seu conjunto de permissões armazenado como dados. A [página de gerenciamento de controle de acesso](https://authzed.com/docs/spicedb/modeling/access-control-management) da AuthZed mostra esse padrão mais refinado: uma definição `role` com uma relação curinga por permissão (`relation create_issue: user:*`), um objeto `role_grant` que liga um papel a quem o recebe, e permissões da forma `permission create_issue = role->create_issue & grantee`. O preço é uma relação de schema por permissão, o que traz de volta a questão dos nomes discutida acima.
+
+## Transferência de propriedade
+
+A pergunta: Anne transfere o readme para Beto. Depois disso, Beto deve ser o dono e Anne não, sem nenhum momento em que ambos ou nenhum sejam donos. Este não é um padrão de schema: nenhuma das três notações consegue declarar "exatamente um dono", e a documentação de schema citada aqui não mostra nenhuma restrição de cardinalidade. É um padrão de escrita.
+
+A alteração de tuplas:
+
+```text
+delete  doc:readme#owner@user:anne
+write   doc:readme#owner@user:beto
+```
+
+A API Write do artigo cobre isso. Os clientes "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control" (também podem modificar todas as tuplas relacionadas a um objeto por meio de um processo de leitura-modificação-escrita com controle de concorrência otimista): ler as tuplas do objeto, incluindo uma tupla de "lock" por objeto, enviar as escritas "along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read" (junto com um toque na tupla de lock … com a condição de que as escritas só sejam confirmadas se a tupla de lock não tiver sido modificada desde a leitura) e, caso contrário, tentar novamente (§2.4.2). A tupla de lock impede que duas transferências simultâneas sejam ambas bem-sucedidas.
+
+- **SpiceDB.** `WriteRelationships` "atomically writes and/or deletes a set of specified relationships" (escreve e/ou apaga atomicamente um conjunto de relacionamentos especificados), e "if any preconditions fail, the entire transaction will be reverted" (se alguma pré-condição falhar, a transação inteira será revertida) ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). Uma pré-condição `MUST_MATCH` sobre `doc:readme#owner@user:anne` faz o papel da tupla de lock do artigo: a transferência falha se Anne já não for a dona.
+- **OpenFGA.** "You can combine both writes and deletes in a single transactional API request" (é possível combinar escritas e exclusões em uma única requisição transacional à API), e "all operations in the request will either succeed together or fail together" (todas as operações da requisição terão sucesso juntas ou falharão juntas), até 100 tuplas por requisição ([update tuples](https://openfga.dev/docs/getting-started/update-tuples)). A mesma página diz que escrever uma tupla que já existe "would normally cause the whole request to fail" (normalmente faria a requisição inteira falhar) e oferece `on_missing: "ignore"` para "deleting tuples that might not exist" (apagar tuplas que talvez não existam) (OpenFGA v1.10.0 e posteriores). Isso implica que apagar uma tupla inexistente faz a requisição falhar por padrão, o que faria a exclusão agir como a tupla de lock; a página não afirma esse padrão explicitamente, e isso não foi executado aqui.
+
+O que muda?
+
+<Frames min="16rem">
+
+<Graph
+  width={320}
+  height={150}
+  title="Propriedade antes da transferência"
+  desc="user:anne tem uma aresta owner destacada para doc:readme. user:beto não tem aresta."
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner", on: true }]}
+  caption="Antes: uma tupla owner, para Anne."
+/>
+
+<Graph
+  width={320}
+  height={150}
+  title="Propriedade depois da transferência"
+  desc="user:beto tem uma aresta owner destacada para doc:readme. user:anne não tem aresta."
+  nodes={[
+    { id: "anne", x: 70, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 70, y: 115, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "doc", x: 250, y: 78, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "beto", to: "doc", label: "owner", on: true }]}
+  caption="Depois: uma tupla owner, para Beto. As duas alterações são confirmadas juntas ou nenhuma é."
+/>
+
+</Frames>
+
+Observe que tudo o que deriva da propriedade (`edit`, `view`) acompanha essa única tupla. Anne mantém qualquer acesso que tenha por outros caminhos, como uma tupla `viewer` direta ou um grupo; uma transferência que deva remover todo o acesso de Anne precisa apagar também essas tuplas.
+
+<Callout kind="paper" title="No artigo">
+
+Tuplas e usersets: §2.1. Regras de reescrita, as três folhas e os operadores: §2.3.1 e Figura 1. Write com uma tupla de lock: §2.4.2. A árvore de userset do Expand com união, interseção e exclusão: §2.4.5. Padrões que o artigo diz suportar (permissões, usuários, grupos, herança, RBAC): §5. Os termos estão reunidos no [glossário](../glossary/).
+
+</Callout>
+
+## Fontes
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- Guias de modelagem do OpenFGA: [roles and permissions](https://openfga.dev/docs/modeling/roles-and-permissions), [parent-child](https://openfga.dev/docs/modeling/parent-child), [blocklists](https://openfga.dev/docs/modeling/blocklists), [public access](https://openfga.dev/docs/modeling/public-access), [multiple restrictions](https://openfga.dev/docs/modeling/multiple-restrictions), [custom roles](https://openfga.dev/docs/modeling/custom-roles)
+- OpenFGA, [configuration language](https://openfga.dev/docs/configuration-language)
+- OpenFGA, [update tuples](https://openfga.dev/docs/getting-started/update-tuples)
+- AuthZed, [documentação de schema do SpiceDB](https://authzed.com/docs/spicedb/concepts/schema)
+- AuthZed, [access-control management](https://authzed.com/docs/spicedb/modeling/access-control-management)
+- AuthZed, [User Defined Roles](https://authzed.com/blog/user-defined-roles), 2021-10-27
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- Greg Sarjeant, [Google Zanzibar Isn't Flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible), Oso, 2024-11-01 (atualizado em 2025-11-07)

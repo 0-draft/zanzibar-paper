@@ -1,0 +1,137 @@
+---
+title: "公司内部系统"
+description: "Airbnb 的 Himeji 和 Carta 的 AuthZ，两个基于 Zanzibar 论文构建的公司内部授权系统，按其工程师在 2021 年的描述介绍。"
+section: ecosystem
+order: 7
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "3.1", "3.2.4"]
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+有些公司没有采用现成产品：它们读了论文，构建了自己的服务。有两家在 2021 年发表了详细的介绍，即 Airbnb（Himeji）和 Carta（AuthZ）。这两个系统在各自公司之外都无法获得，因此这里的一切都来自其工程师所写的内容，没有比那些文章更新的信息。
+
+<Callout title="这些文章是如何阅读的">
+这些文章发布在 Medium 上，而 Medium 对本站的检查程序返回了 HTTP 403。其全文于 2026-11-13 通过这两个专栏的 Medium RSS 源阅读（[Airbnb Engineering 源](https://medium.com/feed/airbnb-engineering/tagged/authorization)、[Building Carta 源](https://medium.com/feed/building-carta/tagged/authorization)），这些源包含相同的文章。Himeji 的事实与 [InfoQ 的报道](https://www.infoq.com/news/2021/05/airbnb-himeji)（2021-05-12）交叉核对过。存在一段与 Himeji 主要作者的对谈录像（[Authorization in Software](https://www.youtube.com/watch?v=TXZFi6Opbkk)），但未被使用：录像及其说明都无法读取。
+</Callout>
+
+## Airbnb Himeji
+
+"Himeji: A Scalable Centralized System for Authorization at Airbnb"，作者 Alan Yao，合作者 Dipak Pawar、Blair Wu 和 Abhishek Parmar，发布于 2021-04-20（[文章](https://medium.com/airbnb-engineering/himeji-a-scalable-centralized-system-for-authorization-at-airbnb-341664924574)）。Airbnb 已从 Rails 单体应用迁移到服务架构，希望在数据层进行授权检查；文章称 Himeji 为 "a centralized authorization system based on Zanzibar, which is called from the data layer"（一个基于 Zanzibar、由数据层调用的集中式授权系统）。它 "exposes a check API for data services to perform authorization checks"（提供一个 check API，供数据服务执行授权检查）。
+
+### 模型
+
+- "Similar to Zanzibar, the basic unit of storage for Himeji is a tuple in the form entity # relation @ principal."（与 Zanzibar 类似，Himeji 的基本存储单元是形如 entity # relation @ principal 的元组。）实体是三元组 "(entity type : entity id : entity part)"（(实体类型 : 实体 id : 实体部分)）。
+- 文章中的示例元组："LISTING : 10 # OWNER @ User(123)"。按照这种记法，Anne 拥有 readme 可写作 `DOC : readme # OWNER @ User(anne)`；这一行只是示意，并非出自文章。
+- 规则用 "a YAML-based configuration language that allows for the resolution of permissions checks via set algebra"（一种基于 YAML、可通过集合代数解析权限检查的配置语言）编写。文章的示例把房源的 `WRITE` 检查解析为 `WRITE` 与 `OWNER` 的并集，把 `READ` 解析为 `READ` 与 `WRITE` 的并集：即论文中的同心关系（§2.3.1，图 1）。
+- *引用元组*把两个实体联系起来而不指明关系；要沿着哪个关系前进由配置决定。"Where this approach differs from Zanzibar is that such a tuple does not contain a relation."（这种做法与 Zanzibar 的不同之处在于，这样的元组不包含关系。）由于两个实体类型之间的关系很少变化，文章说这样存储的元组约为 N 个而不是 N×M 个。
+- Himeji 在写入时扇出："Instead of fanning out at read time, we write all permissions data when resources are mutated"（我们不在读取时扇出，而是在资源变更时写入所有权限数据），"given our read-heavy workload"（鉴于我们以读取为主的工作负载）。
+
+### 架构
+
+一次检查如何穿过 Himeji？
+
+<Graph
+  width={620}
+  height={280}
+  title="Himeji 的三层结构（依据 Airbnb 的文章）"
+  desc="数据服务调用编排层的 check API。编排层按照配置获取数据，并通过一致性哈希把每次查找路由到一个缓存分片。每个缓存分片都有副本，每个可用区一个实例，未命中时从数据层加载。数据层是逻辑分片的 Amazon Aurora 数据库；数据库发布的变更会使缓存分片失效。"
+  nodes={[
+    { id: "svc", x: 90, y: 60, label: "数据服务", kind: "client" },
+    { id: "orch", x: 310, y: 60, label: "编排层", kind: "server" },
+    { id: "cache", x: 310, y: 215, label: "缓存分片\n每个可用区 1 个副本", kind: "server" },
+    { id: "db", x: 535, y: 215, label: "Amazon Aurora\n分片", kind: "store" },
+  ]}
+  edges={[
+    { from: "svc", to: "orch", label: "check" },
+    { from: "orch", to: "cache", label: "一致性哈希" },
+    { from: "cache", to: "db", label: "未命中时加载" },
+    { from: "db", to: "orch", label: "变更触发失效", dashed: true, labelOffset: 12 },
+  ]}
+  caption="黄色：Himeji 服务器。绿色：存储。蓝色：调用方。虚线：失效事件，画到 Himeji 层，因为文章没有详细展示其路径。"
+/>
+
+注意文章称之为最重要改动的拆分：Himeji 将 "Separate the request orchestration tier from the caching tier"（把请求编排层与缓存层分开），从而可以在不重启缓存的情况下修改编排代码。其余内容来自文章：
+
+- 缓存层 "sharded and replicated (one instance per AZ per shard)"（分片并复制（每个分片在每个可用区一个实例））；"Each shard is assigned a set of data to own via consistent hashing"（每个分片通过一致性哈希被分配一组归其所有的数据）；"We target a ~98% hit rate on the cache."（我们把缓存命中率的目标定为约 98%。）
+- 缓存分片 "based on published mutations from the databases"（根据数据库发布的变更）失效。InfoQ 指出该变更数据捕获工具是 Airbnb 的 SpinalTap，通过 Apache Kafka 发布（[InfoQ](https://www.infoq.com/news/2021/05/airbnb-himeji)）；文章则链接到另一篇文章，而没有直接点名。
+- 存储："Use Amazon Aurora for database storage as part of our cloud journey, which differs from Zanzibar's usage of Spanner."（作为我们上云历程的一部分，使用 Amazon Aurora 作为数据库存储，这与 Zanzibar 使用 Spanner 不同。）
+- "We implement the same reliability (hedging, tiered caching) and load shedding features as Zanzibar for availability."（为了可用性，我们实现了与 Zanzibar 相同的可靠性（对冲、分层缓存）和负载削减功能。）论文在 §3.2.5 到 §3.2.7 中描述了这些功能。
+- 在生产环境运行约一年后报告的结果：可用性约 99.999%，P50 1.8 毫秒，P95 7 毫秒，P99 12 毫秒，吞吐量从 2020 年 3 月的 0 增长到 2021 年 3 月的每秒 85 万个实体。InfoQ 报道了相同的可用性、P99 和吞吐量数字。
+
+文章没有描述一致性令牌。在所读的来源中，没有说明 Himeji 是否有类似 zookie 的东西。
+
+## Carta AuthZ
+
+Carta 的 Aaron Tainter 发表了两篇文章："AuthZ: Carta's highly scalable permissions system"，发布于 2021-06-11（[第一篇](https://medium.com/building-carta/authz-cartas-highly-scalable-permissions-system-782a7f2c840f)）；以及 "User authorization in less than 10 milliseconds"，发布于 2021-09-03（[第二篇](https://medium.com/building-carta/user-authorization-in-less-than-10-milliseconds-f20d277fec47)）。第二篇称该系统为 "AuthZ, based on Google's Zanzibar"（基于 Google Zanzibar 的 AuthZ）。
+
+### 模型与 API
+
+- "A RelationTuple is a tuple consisting of an actor, relation, and object."（RelationTuple 是由行为者、关系和对象组成的元组。）Anne 拥有 readme 就是一个 RelationTuple。第二篇把一次检查写作 `AuthZ.Check("Employee:1", "View", "Grade:X")`。
+- "Consumers combine RelationTuples using a domain-specific language."（使用方用一种领域特定语言组合 RelationTuple。）文章没有展示这种语言。
+- "We introduced namespaces to separate domain-level permissions."（我们引入了命名空间来分隔领域级权限。）一个服务只能写入它拥有写权限的命名空间；否则 "AuthZ rejects the update and throws an error"（AuthZ 拒绝该更新并抛出错误）。这些命名空间是团队之间的访问边界，而不是论文中按对象类型划分的配置（§2.3）。
+- 起初 "There were only three endpoints"（只有三个端点）：Add、Remove 和 Check。为某个行为者列出资源的查询 API 是后来才加入的。
+- 批量变更用 Mustache 语言写成模板，"AuthZ injects data into"（AuthZ 向其中注入数据），然后执行 "a bulk update event"（一次批量更新事件）。
+
+### 索引与 ticket
+
+AuthZ 通过预先计算的索引而不是遍历图来回答检查："Traversing the graph is expensive, so AuthZ maintains a custom secondary index."（遍历图的代价很高，因此 AuthZ 维护了一个自定义的二级索引。）该索引维护两种集合：Actor Index Set（"the direct connections from actor leaf nodes"，来自行为者叶节点的直接连接）和 Object Index Set（"the direct and indirect connections to each object node"，到每个对象节点的直接和间接连接）。第二篇补充道："(Google's Zanzibar paper calls them Group2Group and Member2Group)"（（Google 的 Zanzibar 论文称之为 Group2Group 和 Member2Group）），即 Leopard 的两种集合类型（§3.2.4）。
+
+索引是异步构建的，因此使用方需要一种方法来得知自己的变更已经生效。这就是 *ticket* 的作用："During an update, AuthZ issues a Ticket (synonymous with a Zookie in Zanzibar) to the consumer."（在更新期间，AuthZ 向使用方签发一个 Ticket（等同于 Zanzibar 中的 Zookie）。）"A Ticket is an opaque token which represents the time at which the change was committed to AuthZ."（Ticket 是一个不透明的令牌，表示变更提交到 AuthZ 的时间。）
+
+当使用方在索引追上之前带着 ticket 进行检查时，会发生什么？
+
+<Swimlane
+  lanes={["使用方", "AuthZ", "索引 worker"]}
+  timeLabel="时间"
+  title="Carta AuthZ 的 ticket"
+  desc="使用方添加一个 RelationTuple。AuthZ 提交它并返回一个 ticket。worker 开始构建索引变更。使用方带着 ticket 进行检查，而此时仍有提交时间戳不晚于该 ticket 的 RelationTuple 尚未处理，因此 AuthZ 拒绝该请求。worker 的结果合并进索引之后，使用方重试，并从更新后的索引得到答案。"
+  events={[
+    { lane: 0, t: 0, label: "添加\nRelationTuple", kind: "write" },
+    { lane: 1, t: 0, label: "提交，\n签发 Ticket", kind: "write" },
+    { lane: 2, t: 1, label: "构建索引\n变更", kind: "note" },
+    { lane: 0, t: 1, label: "Check\n+ Ticket", kind: "read" },
+    { lane: 1, t: 1, label: "有未处理元组\n≤ ticket：拒绝", kind: "bad" },
+    { lane: 2, t: 2, label: "合并进\n索引", kind: "write" },
+    { lane: 0, t: 3, label: "重试 Check\n+ Ticket", kind: "read" },
+    { lane: 1, t: 3, label: "从更新后的\n索引作答", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 1], dashed: true },
+    { from: [0, 1], to: [1, 1] },
+    { from: [0, 3], to: [1, 3] },
+  ]}
+  caption="AuthZ 选择拒绝而不是等待；使用方重试。论文中的 Check 则是在不早于 zookie 的快照上进行评估（§2.4.4）。"
+/>
+
+注意 ticket 在哪里被检查："AuthZ rejects requests when there are RelationTuples with commit timestamps less than or equal to the ticket provided by the consumer"（当存在提交时间戳小于或等于使用方所提供 ticket 的 RelationTuple 时，AuthZ 拒绝请求），使用方 "can try again later"（可以稍后重试）。第二篇中的更多细节：
+
+- "Several concurrent workers build the custom index asynchronously to keep API calls fast for our consumers."（多个并发的 worker 异步构建自定义索引，以便为使用方保持 API 调用的快速。）变更 "take a few hundred milliseconds to propagate through the system"（需要几百毫秒才能在系统中传播）。
+- "AuthZ spawns three workers to build index changes for each commit."（AuthZ 为每次提交派生三个 worker 来构建索引变更。）结果暂存在中间存储中，并在 "when all commits before a timestamp have finished processing"（某个时间戳之前的所有提交都处理完毕时）合并进索引。
+- "AuthZ stores consumer-created RelationTuples in a datastore"（AuthZ 把使用方创建的 RelationTuple 存储在一个数据存储中），并且 "AuthZ maintains the full changelog of commit events in secondary storage"（AuthZ 在二级存储中维护提交事件的完整变更日志），与论文的变更日志类似（§3.1.2）。文章没有点名所用的数据库产品。
+- "Including network latency, the median permission check takes about 7 milliseconds. At the 95th percentile, we check permissions in 12 milliseconds."（包括网络延迟在内，权限检查的中位数约为 7 毫秒。在第 95 百分位，我们在 12 毫秒内完成权限检查。）
+
+## 对照
+
+在此所读的文章没有说明的地方，单元格中写作“未说明”。
+
+| 论文中 | Airbnb Himeji（2021） | Carta AuthZ（2021） |
+| --- | --- | --- |
+| 元组 `object#relation@user`（§2.1） | `entity # relation @ principal`，外加不含关系的引用元组 | RelationTuple：行为者、关系、对象 |
+| 带重写的命名空间配置（§2.3.1） | YAML 配置，集合代数 | 一种领域特定语言（未展示） |
+| zookie（§2.2） | 未说明 | Ticket，"synonymous with a Zookie"（等同于 Zookie） |
+| Leopard（§3.2.4） | 未说明；改为写入时扇出 | Actor 与 Object Index Set，由 worker 构建 |
+| 缓存（§3.2.5） | 分片、复制的内存缓存，目标命中率约 98% | 未说明 |
+| Spanner（§3.1） | Amazon Aurora | 未说明 |
+| 报告的延迟 | P95 7 毫秒，P99 12 毫秒 | 中位数 7 毫秒，P95 12 毫秒 |
+
+## 来源
+
+- Airbnb，"Himeji: A Scalable Centralized System for Authorization at Airbnb"（2021-04-20）：[medium.com/airbnb-engineering/…341664924574](https://medium.com/airbnb-engineering/himeji-a-scalable-centralized-system-for-authorization-at-airbnb-341664924574)，通过 [Airbnb Engineering 授权主题源](https://medium.com/feed/airbnb-engineering/tagged/authorization)阅读
+- InfoQ，"Airbnb Builds Himeji - a Scalable Centralized Authorization System"（2021-05-12）：[infoq.com/news/2021/05/airbnb-himeji](https://www.infoq.com/news/2021/05/airbnb-himeji)
+- Carta，"AuthZ: Carta's highly scalable permissions system"（2021-06-11）：[medium.com/building-carta/…782a7f2c840f](https://medium.com/building-carta/authz-cartas-highly-scalable-permissions-system-782a7f2c840f)
+- Carta，"User authorization in less than 10 milliseconds"（2021-09-03）：[medium.com/building-carta/…f20d277fec47](https://medium.com/building-carta/user-authorization-in-less-than-10-milliseconds-f20d277fec47)，两篇均通过 [Building Carta 授权主题源](https://medium.com/feed/building-carta/tagged/authorization)阅读
+- Authorization in Software，与 Alan Yao 的对谈（未使用）：[youtube.com/watch?v=TXZFi6Opbkk](https://www.youtube.com/watch?v=TXZFi6Opbkk)

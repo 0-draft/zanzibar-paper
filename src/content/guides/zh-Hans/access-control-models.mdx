@@ -1,0 +1,265 @@
+---
+title: "ACL、RBAC、ABAC、ReBAC：描述谁能做什么的四种方式"
+description: "同一个访问决策“Chen 能否查看 doc:readme？”，分别用访问控制列表、角色、属性规则和关系图来建模，以及 Zanzibar 在其中所处的位置。"
+section: guide
+part: background
+order: 1
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.3.1", "3.2.3", "3.2.4", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+每个授权系统回答的都是同一类问题：这个用户能否对这个对象做这件事？论文把它表述为检查 "that a user has permission to carry out an operation on a digital object"（用户有权对某个数字对象执行某项操作）（§1）。四种常见模型的区别在于它们存储什么，以及在问题到来时计算什么。
+
+1971 年，Butler Lampson 把保护描述为一个矩阵：行是域（用今天的话说就是主体），列是对象，每个单元格列出一个域对一个对象所具有的访问权（[Lampson, "Protection"](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)）。没有任何实际系统存储整个矩阵。ACL 存储它的列，角色和属性规则计算它的单元格，关系图则通过沿边前进推导出单元格。
+
+本页用四种方式为同一个单元格建模。贯穿示例：Anne、Beto 和 Chen（`user:anne`、`user:beto`、`user:chen`）；位于 `folder:A` 中的文档 `doc:readme`；组 `group:eng`。Anne 拥有 readme，Beto 属于 eng，eng 的成员可以查看 readme，Chen 可以查看文件夹 A。要作出的决策是：
+
+```text
+Can user:chen view doc:readme?
+```
+
+预期答案是“是”，而且仅仅是因为文件夹。Chen 在 readme 上没有直接授权。
+
+## ACL：对象上的列表
+
+访问控制列表为每个对象附上一份条目列表，每个条目是一个主体和一组权限。Multics 拥有 "on segments and directories"（作用于段和目录）的 ACL，其条目由 "a principal identifier and a set of permissions bits"（一个主体标识符和一组权限位）组成（§5，引用 Saltzer 在 SOSP '73 上的论文，其修订版为 [Saltzer 1974](https://dl.acm.org/doi/10.1145/361011.361067)）。后来的系统允许条目指名一个组，POSIX ACL 就是如此（§5）。
+
+readme 自己的列表关于 Chen 说了什么？
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={500}
+  title="doc:readme 的 ACL"
+  desc="两份并排的列表。左边是 folder:A，有一个条目：user:chen · view。右边是 doc:readme，有三个条目：user:anne · owner、group:eng · view（虚线，组条目）和 user:chen · view。一条标有“由应用复制”的高亮虚线箭头，从文件夹的 Chen 条目指向 readme 的 Chen 条目。"
+  nodes={[
+    { id: "fh", x: 130, y: 40, label: "folder:A", kind: "object", mono: true },
+    { id: "fc", x: 130, y: 100, label: "user:chen · view", kind: "object", mono: true, w: 200, on: true },
+    { id: "dh", x: 440, y: 40, label: "doc:readme", kind: "object", mono: true },
+    { id: "da", x: 440, y: 100, label: "user:anne · owner", kind: "object", mono: true, w: 200 },
+    { id: "dg", x: 440, y: 145, label: "group:eng · view", kind: "group", mono: true, w: 200 },
+    { id: "dc", x: 440, y: 190, label: "user:chen · view", kind: "object", mono: true, w: 200, on: true },
+  ]}
+  edges={[
+    { from: "fc", to: "dc", label: "由应用复制", dashed: true, on: true },
+  ]}
+  caption="每个对象带有自己的列表。readme 上的 Chen 条目之所以存在，只是因为有某个东西把它从文件夹复制了过来。"
+/>
+
+检查本身就是一次查找：在 readme 的列表中寻找 Chen。注意文件夹去了哪里。继承不属于 ACL 模型，因此该条目必须被复制到 readme 上，要么在文档创建时复制（VMS "supports ACL inheritance for files created within a directory tree"，支持对在目录树中创建的文件进行 ACL 继承，§5），要么由应用复制。一旦复制，条目就不再记得自己来自哪里。
+
+## RBAC：用户、角色、权限
+
+基于角色的访问控制在用户和权限之间加了一层。用 NIST 的话说，"RBAC controls all access through roles assigned to users. Each role assigns a collection of permissions to users"（RBAC 通过分配给用户的角色控制所有访问。每个角色把一组权限分配给用户）（[Kuhn、Coyne 和 Weil 2010](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)）。Ferraiolo 和 Kuhn 于 1992 年提出了它，一个统一的 NIST 模型于 2004 年成为 ANSI INCITS 359-2004（[NIST RBAC 项目](https://csrc.nist.gov/projects/role-based-access-control)）。
+
+角色是全局的，因此在单个文档上的授权需要一个指名该文档的角色。贯穿示例变成三个角色：
+
+| 用户 | 角色 | 该角色授予的权限 |
+| --- | --- | --- |
+| `user:anne` | `readme_owner` | 编辑 `doc:readme`，查看 `doc:readme` |
+| `user:beto` | `eng` | 查看 `doc:readme` |
+| `user:chen` | `folderA_viewer` | 查看 `folder:A`，查看 `doc:readme`（以及文件夹 A 中的所有其他文档） |
+
+是哪个角色给了 Chen 查看权限？
+
+<Graph
+  width={620}
+  height={280}
+  minWidth={520}
+  title="用户、角色与权限"
+  desc="三列。左列：胶囊形的 user:anne、user:beto、user:chen。中列：虚线角色框 role:readme_owner、role:eng、role:folderA_viewer，每个用户被分配到同一行的角色。右列：权限 edit doc:readme、view doc:readme、view folder:A。readme_owner 授予 readme 上的编辑和查看；eng 授予 readme 上的查看；folderA_viewer 授予文件夹 A 上的查看和 readme 上的查看。高亮：user:chen 到 role:folderA_viewer 到 view doc:readme。"
+  nodes={[
+    { id: "anne", x: 70, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 70, y: 140, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 70, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "ro", x: 290, y: 50, label: "role:readme_owner", kind: "group", mono: true },
+    { id: "re", x: 290, y: 140, label: "role:eng", kind: "group", mono: true },
+    { id: "rf", x: 290, y: 230, label: "role:folderA_viewer", kind: "group", mono: true, on: true },
+    { id: "pe", x: 520, y: 50, label: "edit doc:readme", kind: "object", mono: true },
+    { id: "pv", x: 520, y: 140, label: "view doc:readme", kind: "object", mono: true, on: true },
+    { id: "pf", x: 520, y: 230, label: "view folder:A", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "ro", label: "持有" },
+    { from: "beto", to: "re", label: "持有" },
+    { from: "chen", to: "rf", label: "持有", on: true },
+    { from: "ro", to: "pe", label: "授予" },
+    { from: "ro", to: "pv" },
+    { from: "re", to: "pv", label: "授予" },
+    { from: "rf", to: "pf", label: "授予" },
+    { from: "rf", to: "pv", on: true },
+  ]}
+  caption="Chen 持有 role:folderA_viewer，而该角色的权限集合列出了 view doc:readme。"
+/>
+
+注意，文件夹只以名称的形式保留下来。`folderA_viewer` 与 `folder:A` 之间没有任何系统能理解的联系；必须有人让它的权限集合始终等于“文件夹 A 中的一切”。像 `readme_owner` 这样按对象设立的角色，正是导致角色爆炸的模式，下表会讨论这一点。
+
+## ABAC：基于属性的谓词
+
+基于属性的访问控制根本不存储授权。NIST SP 800-162 把它定义为这样一种方法：授权 "is determined by evaluating attributes associated with the subject, object, requested operations, and, in some cases, environment against policy, rules, or relationships"（通过依据策略、规则或关系，评估与主体、对象、所请求的操作以及某些情况下的环境相关联的属性来确定）（[NIST SP 800-162](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)）。决策是属性的函数，在请求时求值。
+
+下面是贯穿示例的三项授权写成的规则，采用 [Cedar](https://docs.cedarpolicy.com/policies/syntax-policy.html) 的语法；Cedar 是 AWS 于 2023 年开源的一种策略语言：
+
+```text
+// Anne: the owner may view
+permit (principal, action == Action::"view", resource)
+when { resource.owner == principal };
+
+// Beto: anyone whose team is listed on the document
+permit (principal, action == Action::"view", resource)
+when { resource.viewerTeams.contains(principal.team) };
+
+// Chen: anyone listed as a viewer of the document's folder
+permit (principal, action == Action::"view", resource)
+when { resource.folder.viewers.contains(principal) };
+```
+
+<Callout kind="warn" title="仅作示意">
+
+这三条策略遵循 Cedar 的文档语法，但没有经过 Cedar 验证器检查。属性名称（`owner`、`viewerTeams`、`team`、`folder`、`viewers`）是本页自拟的。
+
+</Callout>
+
+引擎读取哪些属性来决定 Chen 的请求？
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={520}
+  title="一次 ABAC 决策所读取的属性"
+  desc="左边是请求：主体 user:chen、操作 view、资源 doc:readme。它们输入一个黄色框，即策略评估。右边四个绿色属性框也输入同一评估：doc:readme.owner = user:anne、doc:readme.viewerTeams = eng、doc:readme.folder = folder:A、folder:A.viewers = user:chen。后两个被高亮。评估下方是决策：permit，被高亮。"
+  nodes={[
+    { id: "p", x: 85, y: 60, label: "principal\nuser:chen", kind: "subject", mono: true },
+    { id: "a", x: 85, y: 150, label: "action\nview", kind: "object", mono: true },
+    { id: "r", x: 85, y: 240, label: "resource\ndoc:readme", kind: "object", mono: true },
+    { id: "e", x: 290, y: 120, label: "策略\n评估", kind: "server" },
+    { id: "d", x: 290, y: 250, label: "permit\n（第三条规则）", kind: "object", on: true },
+    { id: "a1", x: 500, y: 40, label: "doc:readme.owner\n= user:anne", kind: "store", mono: true },
+    { id: "a2", x: 500, y: 110, label: "doc:readme.viewerTeams\n= [\"eng\"]", kind: "store", mono: true },
+    { id: "a3", x: 500, y: 180, label: "doc:readme.folder\n= folder:A", kind: "store", mono: true, on: true },
+    { id: "a4", x: 500, y: 250, label: "folder:A.viewers\n= [user:chen]", kind: "store", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "e" },
+    { from: "a", to: "e" },
+    { from: "r", to: "e" },
+    { from: "a1", to: "e" },
+    { from: "a2", to: "e" },
+    { from: "a3", to: "e", on: true },
+    { from: "a4", to: "e", on: true },
+    { from: "e", to: "d", label: "决定", on: true },
+  ]}
+  caption="规则只存储一次；它们所检验的事实作为属性存放在用户、文档和文件夹上。"
+/>
+
+注意这两个高亮的属性。`doc:readme.folder` 和 `folder:A.viewers` 是以属性值形式存储的关系，规则沿着其中一个到达另一个。规则保持简短，但数据转移到了属性中，而除了规则本身之外，没有任何地方说明哪些属性对哪个决策有影响。
+
+## ReBAC：关系图
+
+基于关系的访问控制根据请求者与资源之间的关系作出决策。Fong 认为这一术语由 Carrie Gates 提出（她 2007 年的研讨会论文本页未核对），而 Philip Fong 2011 年的模型把决策建立在 "on the relationship between the resource owner and the resource accessor"（资源所有者与资源访问者之间的关系上）（[Fong 2011](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)）。Fong 强调二元关系可以组合，例如朋友的朋友，而角色是一元谓词，除了布尔组合之外提供不了多少东西。
+
+Zanzibar 把每条关系存储为一个关系元组 `object#relation@user`（§2.1），由命名空间配置说明关系如何组合。论文的图 1 编码的正是这个示例：所有者是编辑者，编辑者是查看者，并且 "viewers of the parent folder are also viewers of the document"（父文件夹的查看者也是该文档的查看者）。论文没有使用 ReBAC 这个词。
+
+已存储元组构成的图如何到达 Chen？
+
+<Graph
+  width={620}
+  height={280}
+  minWidth={520}
+  title="加入文件夹后的表 1，Chen 的路径被高亮"
+  desc="左侧是三个用户。user:anne 有一条标有 owner 的箭头指向 doc:readme。user:beto 有一条标有 member 的箭头指向虚线用户集 group:eng#member，后者有一条标有 viewer 的箭头指向 doc:readme。user:chen 有一条标有 viewer 的箭头指向 folder:A，后者有一条标有 parent 的箭头指向 doc:readme。高亮部分：user:chen、viewer 边、folder:A、parent 边和 doc:readme，以及一条从 user:chen 到 doc:readme、标有“viewer（计算得出）”的高亮虚线边。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 240, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 240, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+    { from: "chen", to: "doc", label: "viewer（计算得出）", dashed: true, on: true, labelOffset: -14 },
+  ]}
+  caption="实线边是已存储的元组。虚线边不被存储：Check 根据命名空间配置中的 parent 规则把它计算出来。"
+/>
+
+注意，在这里文件夹仍然是文件夹。readme 用一个 `parent` 元组指向 `folder:A`，规则在检查时把“父文件夹的查看者”变成“readme 的查看者”。逐步的遍历过程见[关系元组页面](../relation-tuples/)。
+
+## 同一示例，逐格对比
+
+| | ACL | RBAC | ABAC | ReBAC（Zanzibar） |
+| --- | --- | --- | --- | --- |
+| 存储什么 | readme 的列表：Anne（owner）、`group:eng`（view）、Chen（view，复制自文件夹 A） | 三个角色分配和三个角色的权限集合 | 三条规则，外加用户、readme 和文件夹 A 上的属性 | 五个元组（owner、eng 成员、eng 查看者、parent、文件夹查看者）和一个命名空间配置 |
+| 谁能查看 readme | 读取列表并展开 `group:eng`：Anne、Beto、Chen | 持有授予“查看 `doc:readme`”的角色的所有人：Anne、Beto、Chen | 没有存储在任何地方：对每个用户评估规则。Anne、Beto、Chen | Expand `doc:readme#viewer`（§2.4.5）：Anne、Beto、Chen |
+| Beto 离开 eng | 把 Beto 从组中移除；readme 的列表不变 | 移除 Beto 对 `eng` 的分配 | 修改 `user:beto.team` | 删除一个元组 `group:eng#member@user:beto` |
+| readme 从文件夹 A 移到文件夹 B | 移除从 A 复制来的条目并复制 B 的条目，readme 以及所有其他被移动的东西都要这样做 | 从 `folderA_viewer` 中取出“查看 `doc:readme`”，加入一个 `folderB_viewer` 角色 | 修改 `doc:readme.folder`；规则不变 | 替换一个 `parent` 元组：`doc:readme#parent@folder:A#...` 变为 `@folder:B#...` |
+| 难点 | 继承和组是附加功能；“Chen 能看到什么？”意味着扫描每个对象的列表 | 角色爆炸："thousands of separate roles"（成千上万个独立的角色），n 个布尔条件可能需要 2ⁿ 个角色（[Kuhn 等人](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)）；像 `readme_owner` 这样按对象设立的角色使情况更糟 | 审计：ABAC "is easy to set up, but analyzing or changing user permissions can be problematic"（易于搭建，但分析或修改用户权限可能会有问题）（[Kuhn 等人](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)）。“属性蔓延”（attribute sprawl）是业界对同一问题的简称，而非 NIST 术语 | 图遍历："Recursive pointer chasing … has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups"（递归的指针追逐……对于深度嵌套或拥有大量子组的组难以保持低延迟）（§3.2.4）。SpiceDB 默认把深度限制在 [50 跳](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)，OpenFGA 的 `resolveNodeLimit` 为 [25](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
+
+注意中间两行。Beto 离开 eng 在每种模型中都只是一处改动，因为这里的每种模型都有某种形式的组。文件夹移动才是它们分道扬镳之处：ACL 和 RBAC 把文件夹的含义复制进了 readme 的授权，因此必须重写这些授权；ABAC 和 ReBAC 把文件夹保留为数据，因此只需改变一个值。ReBAC 还让“谁能查看？”可以根据存储的数据来回答，而只有规则的 ABAC 版本做不到这一点。
+
+## Zanzibar 的位置
+
+Zanzibar 是一个 ReBAC 系统：关系元组是边，用户集重写规则（§2.3.1）说明边如何组合。它的数据模型支持 Multics、UNIX、POSIX ACL 和 VMS 中的 "permissions, users, groups, and inheritance"（权限、用户、组和继承）（§5），并把组当作另一个普通对象，这 "allows us to unify the concepts of ACLs and groups"（使我们能够统一 ACL 与组的概念）（§2.1）。
+
+RBAC 可以构建在其之上。论文说角色 "are similar to Zanzibar relations"（与 Zanzibar 的关系相似），并说 "A number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language"（若干 Zanzibar 客户端已在 Zanzibar 的命名空间配置语言之上实现了 RBAC 策略）（§5）。论文没有说明如何实现；一种方式是把角色做成一个对象，其 `member` 关系是一个用户集。
+
+Chen 的角色用元组表示是什么样子？
+
+<Graph
+  width={620}
+  height={210}
+  minWidth={520}
+  title="Zanzibar 中作为用户集的角色"
+  desc="user:chen 有一条标有 member 的箭头指向虚线用户集 role:folderA_viewer#member。该用户集有一条标有 viewer 的箭头指向 folder:A，另一条标有 viewer 的箭头指向 doc:readme。从 Chen 经由角色到 doc:readme 的路径被高亮。"
+  nodes={[
+    { id: "chen", x: 70, y: 105, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "role", x: 290, y: 105, label: "role:folderA_viewer#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 530, y: 45, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 530, y: 165, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "role", label: "member", on: true },
+    { from: "role", to: "folder", label: "viewer" },
+    { from: "role", to: "doc", label: "viewer", on: true },
+  ]}
+  caption="三个元组：role:folderA_viewer#member@user:chen、folder:A#viewer@role:folderA_viewer#member、doc:readme#viewer@role:folderA_viewer#member。仅作示意，并非出自论文。"
+/>
+
+注意，角色与 `group:eng` 的形状相同：都是用户集。在 Zanzibar 中，第二条 `viewer` 边是不必要的，因为 parent 规则已经让文件夹的查看者可以查看 readme；角色只需要是文件夹的查看者。
+
+ABAC 是论文没有涵盖的部分。关于请求的条件，例如一天中的时间或网络，并不是已存储对象之间的关系。若干 Zanzibar 风格的系统加入了这些条件：SpiceDB 有 caveat，即用 CEL 编写的条件（[SpiceDB schema 文档](https://authzed.com/docs/spicedb/concepts/schema)），OpenFGA 有[条件](https://openfga.dev/docs/modeling/conditions)，Permify 的 schema 有 `attribute` 和 `rule`（[Permify 文档](https://fusionauth.io/permify-docs/getting-started/modeling)）。Cedar 走的是另一条路：一种带有 `in`（用于层级成员关系）的属性语言（[Cedar 语法](https://docs.cedarpolicy.com/policies/syntax-policy.html)）。
+
+<Callout kind="note" title="实际系统会混合多种模型">
+
+很少有已部署的系统只采用一种模型。Google 的 Cloud IAM 把用户分配给角色，它 "is built as a layer on top of Zanzibar’s ACL storage and evaluation system"（构建为 Zanzibar 的 ACL 存储与评估系统之上的一层）（§5）。上述 Zanzibar 风格系统所支持的一种组合是：用关系图表达共享和层级，把角色作为其中的具名关系，再加上少量属性条件来表达上下文。这是本页的总结，而非论文中的说法。
+
+</Callout>
+
+<Callout kind="paper" title="论文出处">
+
+问题陈述：§1。元组与用户集：§2.1。重写规则：§2.3.1。Multics、UNIX、POSIX ACL、VMS、RBAC 与 IAM 系统：§5 相关工作。指针追逐及其代价：§3.2.3 和 §3.2.4。
+
+</Callout>
+
+## 来源
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- B. W. Lampson, "Protection", 1971; reprinted in ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
+- J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
+- D. R. Kuhn, E. J. Coyne, T. R. Weil, "Adding Attributes to Role-Based Access Control", IEEE Computer 43(6), 2010, [PDF](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)
+- NIST，Role Based Access Control 项目，[csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
+- NIST SP 800-162, Guide to Attribute Based Access Control, [csrc.nist.gov/pubs/sp/800/162/upd2/final](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)
+- Philip W. L. Fong, "Relationship-Based Access Control: Protection Model and Policy Language", CODASPY '11, [PDF](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)
+- Cedar 策略语法，[docs.cedarpolicy.com/policies/syntax-policy.html](https://docs.cedarpolicy.com/policies/syntax-policy.html)
+- SpiceDB recursion and max depth，[authzed.com/docs/spicedb/modeling/recursion-and-max-depth](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)
+- SpiceDB schema 语言（厂商文档），[authzed.com/docs/spicedb/concepts/schema](https://authzed.com/docs/spicedb/concepts/schema)
+- OpenFGA 配置，[openfga.dev/docs/getting-started/setup-openfga/configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)
+- OpenFGA 条件，[openfga.dev/docs/modeling/conditions](https://openfga.dev/docs/modeling/conditions)
+- Permify 建模，[fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)

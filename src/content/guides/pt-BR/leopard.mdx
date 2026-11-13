@@ -1,0 +1,247 @@
+---
+title: "Leopard, o índice de grupos"
+description: "Como o Zanzibar responde sobre associação a grupos profundamente aninhados com uma única interseção de conjuntos, e quanto isso custa a cada escrita."
+section: guide
+part: mechanisms
+order: 7
+checked: "2026-11-13"
+paper: ["3.2.4", "4.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+O Zanzibar normalmente responde a um Check seguindo as tuplas do objeto até o usuário, uma consulta por vez. Para a maioria dos dados, isso é rápido. Para grupos aninhados em muitos níveis, não é, e o Zanzibar repassa essas verificações ao Leopard, um índice que pré-calcula o aninhamento.
+
+## Por que o aninhamento é lento
+
+Estenda o exemplo corrente. `group:eng` agora está dentro de `group:product`, que está dentro de `group:all`, e o readme é compartilhado com todo o `group:all`. Quantas consultas são necessárias para descobrir que Beto pode ver o readme?
+
+<Graph
+  width={640}
+  height={380}
+  title="Uma cadeia de grupos aninhados"
+  desc="user:beto é membro de group:eng, os membros de group:eng são membros de group:product, os membros de group:product são membros de group:all, e os membros de group:all são visualizadores de doc:readme. Verificar o acesso de Beto começa em doc:readme e lê um objeto por passo: doc:readme, group:all, group:product e group:eng, quatro leituras em sequência."
+  nodes={[
+    { id: "doc", x: 200, y: 30, label: "doc:readme", kind: "object", mono: true },
+    { id: "all", x: 200, y: 110, label: "group:all", kind: "group", mono: true },
+    { id: "prod", x: 200, y: 190, label: "group:product", kind: "group", mono: true },
+    { id: "eng", x: 200, y: 270, label: "group:eng", kind: "group", mono: true, on: true },
+    { id: "beto", x: 200, y: 350, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "n1", x: 470, y: 30, label: "1. lê doc:readme: visualizadores são group:all", kind: "note" },
+    { id: "n2", x: 470, y: 110, label: "2. lê group:all: inclui group:product", kind: "note" },
+    { id: "n3", x: 470, y: 190, label: "3. lê group:product: inclui group:eng", kind: "note" },
+    { id: "n4", x: 470, y: 270, label: "4. lê group:eng: Beto é membro", kind: "note" },
+  ]}
+  edges={[
+    { from: "all", to: "doc", label: "viewer" },
+    { from: "prod", to: "all", label: "member" },
+    { from: "eng", to: "prod", label: "member" },
+    { from: "beto", to: "eng", label: "member", on: true },
+  ]}
+  caption="Cada passo indica o objeto do passo seguinte, então as quatro leituras não podem começar juntas. Cada objeto também pode estar em um servidor diferente (veja a página de arquitetura)."
+/>
+
+As tuplas por trás da figura são:
+
+```text
+doc:readme#viewer@group:all#member
+group:all#member@group:product#member
+group:product#member@group:eng#member
+group:eng#member@user:beto
+```
+
+Observe que o passo *n* não pode começar até que o passo *n* − 1 tenha retornado. O artigo chama isso de pointer chasing e diz que ele "can be expensive when indirect ACLs or groups are deep or wide" (§3.2.3) ("pode ser custoso quando ACLs indiretas ou grupos são profundos ou largos"). A largura também prejudica: se `group:all` tivesse cem grupos filhos, o passo 2 se ramificaria de cem formas. Por isso: "Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation." (§3.2.4) ("O pointer chasing recursivo durante a avaliação de verificações tem dificuldade em manter baixa latência com grupos profundamente aninhados ou que têm um grande número de grupos filhos. Para namespaces selecionados que exibem tal estrutura, o Zanzibar trata as verificações usando o Leopard, um índice especializado que oferece suporte a computação eficiente de conjuntos.")
+
+## Dois tipos de conjunto
+
+O Leopard armazena "a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID" (§3.2.4) ("uma coleção de conjuntos nomeados usando tuplas `(T, s, e)`, em que *T* é um enum que representa o tipo de conjunto e *s* e *e* são inteiros de 64 bits que representam o ID do conjunto e o ID do elemento"). A associação a grupos usa dois tipos de conjunto:
+
+- `GROUP2GROUP(s)`: os grupos que são, "*directly or indirectly*" ("*direta ou indiretamente*"), subgrupos do grupo ancestral *s*.
+- `MEMBER2GROUP(s)`: os grupos dos quais o usuário *s* é membro "*direct*" ("*direto*").
+
+O que os conjuntos contêm no exemplo?
+
+<Graph
+  width={640}
+  height={330}
+  title="GROUP2GROUP e MEMBER2GROUP no exemplo"
+  desc="GROUP2GROUP(group:all) é group:all, group:product e group:eng. GROUP2GROUP(group:product) é group:product e group:eng. GROUP2GROUP(group:eng) é group:eng. MEMBER2GROUP(user:beto) é group:eng. MEMBER2GROUP(user:anne) é vazio."
+  nodes={[
+    { id: "g1", x: 125, y: 40, label: "GROUP2GROUP(group:all)", kind: "object", mono: true },
+    { id: "g2", x: 125, y: 100, label: "GROUP2GROUP(group:product)", kind: "object", mono: true },
+    { id: "g3", x: 125, y: 160, label: "GROUP2GROUP(group:eng)", kind: "object", mono: true },
+    { id: "m1", x: 125, y: 240, label: "MEMBER2GROUP(user:beto)", kind: "object", mono: true },
+    { id: "m2", x: 125, y: 300, label: "MEMBER2GROUP(user:anne)", kind: "object", mono: true },
+    { id: "s1", x: 455, w: 330, y: 40, label: "{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "s2", x: 455, w: 330, y: 100, label: "{ group:product, group:eng }", kind: "group", mono: true },
+    { id: "s3", x: 455, w: 330, y: 160, label: "{ group:eng }", kind: "group", mono: true },
+    { id: "s4", x: 455, w: 330, y: 240, label: "{ group:eng }", kind: "group", mono: true, on: true },
+    { id: "s5", x: 455, w: 330, y: 300, label: "{ }", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "g1", to: "s1" },
+    { from: "g2", to: "s2" },
+    { from: "g3", to: "s3" },
+    { from: "m1", to: "s4", on: true },
+    { from: "m2", to: "s5" },
+  ]}
+  caption="GROUP2GROUP é achatado: group:all lista group:eng, embora eng esteja dois níveis abaixo. MEMBER2GROUP não é: lista apenas associações diretas. Cada grupo aparece em seu próprio conjunto GROUP2GROUP; o artigo não diz isso, veja a nota abaixo."
+/>
+
+Observe a assimetria. Todo o aninhamento é incorporado em `GROUP2GROUP`, de modo que o lado do usuário só precisa registrar onde o usuário foi adicionado diretamente. Nas palavras do artigo, "Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard" (§3.2.4) ("Achatar os caminhos de grupo para grupo permite que a alcançabilidade seja avaliada de forma eficiente pelo Leopard").
+
+<Callout kind="warn" title="Um grupo contém a si mesmo?">
+O artigo define `GROUP2GROUP(s)` como os grupos que são subgrupos de *s* e não diz se o próprio *s* está no conjunto. Para que um membro direto de *G* passe no teste abaixo, *G* precisa estar em `GROUP2GROUP(G)` ou ser tratado separadamente. As figuras assumem a primeira opção; isso é uma inferência, não algo que o artigo afirma.
+</Callout>
+
+## Associação é uma interseção não vazia
+
+"To evaluate whether user *U* is a member of group *G*, we check whether" (§3.2.4) ("Para avaliar se o usuário *U* é membro do grupo *G*, verificamos se")
+
+```text
+(MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
+```
+
+Ou seja: algum grupo ao qual o usuário foi adicionado diretamente também está em algum lugar abaixo de *G*? O que isso dá para Beto e Anne em relação a `group:all`?
+
+<Graph
+  width={640}
+  height={330}
+  title="Associação como interseção"
+  desc="MEMBER2GROUP(user:beto), que é group:eng, intersectado com GROUP2GROUP(group:all), que é group:all, group:product e group:eng, dá group:eng: não vazio, então Beto é membro de group:all. MEMBER2GROUP(user:anne), que é vazio, intersectado com o mesmo conjunto dá o conjunto vazio, então Anne não é membro."
+  nodes={[
+    { id: "mb", x: 190, y: 50, label: "MEMBER2GROUP(user:beto)\n{ group:eng }", kind: "group", mono: true },
+    { id: "ga", x: 190, y: 130, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "rb", x: 530, y: 90, label: "∩ = { group:eng }\nnão vazio: membro", kind: "object", on: true },
+    { id: "ma", x: 190, y: 220, label: "MEMBER2GROUP(user:anne)\n{ }", kind: "group", mono: true },
+    { id: "gb", x: 190, y: 295, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "ra", x: 530, y: 257, label: "∩ = { }\nvazio: não é membro", kind: "object" },
+  ]}
+  edges={[
+    { from: "mb", to: "rb", on: true },
+    { from: "ga", to: "rb", on: true },
+    { from: "ma", to: "ra" },
+    { from: "gb", to: "ra" },
+  ]}
+  caption="Duas consultas e uma interseção, qualquer que seja a profundidade do aninhamento. Beto está dentro; Anne, não."
+/>
+
+As quatro leituras sequenciais da primeira figura viraram duas consultas a conjuntos e uma interseção. Para concluir a pergunta original, o Zanzibar ainda lê a tupla do readme que indica `group:all#member`; é a profundidade abaixo disso que o Leopard elimina. O artigo não detalha como um Check é dividido entre a avaliação comum e as consultas ao Leopard, portanto essa divisão é uma leitura da §3.2.4, não uma citação.
+
+## Interseção em listas ordenadas
+
+Quão barata é a interseção? "Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets. For example, evaluating the intersection between two sets, *A* and *B*, requires only O(min(|A|, |B|)) skip-list seeks." (§3.2.4) ("As tuplas do índice são armazenadas como listas ordenadas de inteiros em uma estrutura como uma skip list, permitindo assim uniões e interseções eficientes entre conjuntos. Por exemplo, avaliar a interseção entre dois conjuntos, *A* e *B*, requer apenas O(min(|A|, |B|)) buscas na skip list.")
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={520}
+  title="Interseção de uma lista ordenada curta com uma longa"
+  desc="A lista A contém 17, 42 e 90. A lista B contém 3, 8, 17, 21, 30, 42, 55, 61, 77, 84, 93 e 99. Para cada elemento de A, uma busca em B encontra o primeiro elemento que não é menor: 17 encontra 17, 42 encontra 42, 90 para em 93, que não corresponde. A interseção é 17 e 42, encontrada em três buscas."
+  nodes={[
+    { id: "la", x: 30, y: 50, label: "A", kind: "note" },
+    { id: "lb", x: 30, y: 200, label: "B", kind: "note" },
+    { id: "a1", x: 182, y: 50, label: "17", mono: true, w: 38, on: true },
+    { id: "a2", x: 320, y: 50, label: "42", mono: true, w: 38, on: true },
+    { id: "a3", x: 527, y: 50, label: "90", mono: true, w: 38 },
+    { id: "b0", x: 90, y: 200, label: "3", mono: true, w: 38 },
+    { id: "b1", x: 136, y: 200, label: "8", mono: true, w: 38 },
+    { id: "b2", x: 182, y: 200, label: "17", mono: true, w: 38, on: true },
+    { id: "b3", x: 228, y: 200, label: "21", mono: true, w: 38 },
+    { id: "b4", x: 274, y: 200, label: "30", mono: true, w: 38 },
+    { id: "b5", x: 320, y: 200, label: "42", mono: true, w: 38, on: true },
+    { id: "b6", x: 366, y: 200, label: "55", mono: true, w: 38 },
+    { id: "b7", x: 412, y: 200, label: "61", mono: true, w: 38 },
+    { id: "b8", x: 458, y: 200, label: "77", mono: true, w: 38 },
+    { id: "b9", x: 504, y: 200, label: "84", mono: true, w: 38 },
+    { id: "b10", x: 550, y: 200, label: "93", mono: true, w: 38 },
+    { id: "b11", x: 596, y: 200, label: "99", mono: true, w: 38 },
+  ]}
+  edges={[
+    { from: "a1", to: "b2", label: "busca 1: acerto", on: true },
+    { from: "a2", to: "b5", label: "busca 2: acerto", on: true },
+    { from: "a3", to: "b10", label: "busca 3: erro", dashed: true },
+  ]}
+  caption="Três elementos em A, três buscas em B. Os doze elementos de B nunca são percorridos um a um. Os níveis superiores da skip list, que tornam cada busca rápida, não estão desenhados."
+/>
+
+Observe que o trabalho acompanha a lista mais curta. Quando um usuário é membro direto de apenas alguns grupos, `MEMBER2GROUP(U)` é curto e o teste continua barato mesmo quando `GROUP2GROUP(G)` é enorme. O artigo não informa tamanhos de conjuntos; esse caso é uma suposição. O índice "is sharded by element IDs" ("é particionado em shards por IDs de elemento"), e os shards "are usually served entirely from memory" (§3.2.4) ("normalmente são servidos inteiramente a partir da memória").
+
+## Três partes
+
+"The Leopard system consists of three discrete parts: a serving system capable of consistent and low-latency operations across sets; an offline, periodic index building system; and an online real-time layer capable of continuously updating the serving system as tuple changes occur." (§3.2.4) ("O sistema Leopard consiste em três partes distintas: um sistema de serviço capaz de operações consistentes e de baixa latência sobre conjuntos; um sistema offline e periódico de construção de índice; e uma camada online em tempo real capaz de atualizar continuamente o sistema de serviço à medida que ocorrem alterações nas tuplas.") Como elas se conectam?
+
+<Graph
+  width={640}
+  height={350}
+  title="As três partes do Leopard"
+  desc="Um construtor de índice offline lê um snapshot das tuplas e configurações do Zanzibar e produz shards de índice, que são replicados e trocados no sistema de serviço do Leopard. Em paralelo, um indexador incremental lê o stream do Watch do Zanzibar e escreve atualizações com timestamp na camada incremental do sistema de serviço. Os aclservers consultam o sistema de serviço, que mescla a camada incremental sobre o índice offline no timestamp da consulta."
+  nodes={[
+    { id: "snap", x: 85, y: 60, label: "snapshot de\ntuplas + config", kind: "store" },
+    { id: "build", x: 310, y: 60, label: "construtor de índice\noffline (periódico)", kind: "server" },
+    { id: "serve", x: 480, y: 185, label: "serviço do Leopard\níndice offline\n+ camada incremental", kind: "server", on: true },
+    { id: "watch", x: 85, y: 300, label: "API Watch", kind: "server" },
+    { id: "inc", x: 290, y: 300, label: "indexador\nincremental", kind: "server" },
+    { id: "acl", x: 560, y: 315, label: "aclservers", kind: "server" },
+  ]}
+  edges={[
+    { from: "snap", to: "build" },
+    { from: "build", to: "serve", label: "novos shards" },
+    { from: "watch", to: "inc", label: "alterações de tuplas" },
+    { from: "inc", to: "serve", label: "(T, s, e, t, d)", labelOffset: -22 },
+    { from: "acl", to: "serve", label: "consulta", dir: "both" },
+  ]}
+  caption="O caminho offline é completo, mas desatualizado; o caminho incremental é atual, mas cobre apenas alterações desde o último snapshot. O serviço mescla os dois."
+/>
+
+- **Construtor de índice offline.** Ele "generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples." ("gera shards de índice a partir de um snapshot das tuplas de relação e configurações do Zanzibar e replica os shards globalmente. Ele respeita as regras de reescrita de userset e expande recursivamente as arestas em um grafo de ACL para formar tuplas de índice do Leopard.") Os servidores "swap old shards with new ones when they become available" ("trocam shards antigos por novos quando estes ficam disponíveis").
+- **Camada incremental.** O índice offline sozinho "cannot do so at a fresh and consistent snapshot" ("não consegue fazê-lo em um snapshot atual e consistente"), então os servidores mantêm "an incremental layer that indexes all updates since the offline snapshot" ("uma camada incremental que indexa todas as atualizações desde o snapshot offline"), cada atualização uma tupla `(T, s, e, t, d)` "where *t* is the timestamp of the update and *d* is a deletion marker" ("em que *t* é o timestamp da atualização e *d* é um marcador de exclusão"). "Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing." ("Atualizações com timestamps menores ou iguais ao timestamp da consulta são mescladas sobre o índice offline durante o processamento da consulta.")
+- **Alimentação.** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions." ("o indexador incremental do Leopard chama a API Watch do Zanzibar para receber um stream temporalmente ordenado de modificações de tuplas do Zanzibar e transforma as atualizações em um stream temporalmente ordenado de adições, atualizações e exclusões de tuplas do Leopard.")
+
+Todas as citações desta lista são da §3.2.4. Como as atualizações carregam timestamps e são mescladas até o timestamp da consulta, uma resposta do Leopard pode refletir o mesmo snapshot que o restante do Check; o propósito declarado pelo artigo para a camada incremental é "To support consistent ACL evaluation" ("Para dar suporte a uma avaliação de ACL consistente").
+
+## O custo: uma escrita, muitas atualizações de índice
+
+O achatamento é pago no momento da escrita. Volte para antes de eng ser adicionado a product e suponha que `group:eng` tenha dois subgrupos próprios, `group:infra` e `group:web`. Agora alguém adiciona eng a product. Quantas tuplas de índice mudam?
+
+<Graph
+  width={640}
+  height={380}
+  title="Uma escrita de tupla se desdobra em muitas atualizações de índice"
+  desc="Adicionar a tupla group:product#member@group:eng#member torna group:eng, group:infra e group:web novos descendentes tanto de group:product quanto de group:all. O indexador incremental transforma essa única tupla em seis adições a GROUP2GROUP: product ganha eng, infra e web, e all ganha eng, infra e web."
+  nodes={[
+    { id: "t", x: 110, y: 40, label: "group:product#member\n@group:eng#member", kind: "store", mono: true },
+    { id: "inc", x: 110, y: 190, label: "indexador\nincremental", kind: "server" },
+    { id: "e1", x: 520, y: 30, w: 190, label: "+ G2G(product, eng)", kind: "group", mono: true },
+    { id: "e2", x: 520, y: 94, w: 190, label: "+ G2G(product, infra)", kind: "group", mono: true },
+    { id: "e3", x: 520, y: 158, w: 190, label: "+ G2G(product, web)", kind: "group", mono: true },
+    { id: "e4", x: 520, y: 222, w: 190, label: "+ G2G(all, eng)", kind: "group", mono: true },
+    { id: "e5", x: 520, y: 286, w: 190, label: "+ G2G(all, infra)", kind: "group", mono: true },
+    { id: "e6", x: 520, y: 350, w: 190, label: "+ G2G(all, web)", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "t", to: "inc", label: "1 escrita" },
+    { from: "inc", to: "e1" },
+    { from: "inc", to: "e2" },
+    { from: "inc", to: "e3" },
+    { from: "inc", to: "e4" },
+    { from: "inc", to: "e5" },
+    { from: "inc", to: "e6" },
+  ]}
+  caption="1 tupla do Zanzibar, 6 tuplas do Leopard (o prefixo group: foi omitido): cada ancestral de product (product, all) vezes cada descendente de eng (eng, infra, web). MEMBER2GROUP não muda."
+/>
+
+A contagem é o número de ancestrais de um lado vezes o número de descendentes do outro, então ela cresce tanto com a profundidade quanto com a largura. Para calculá-la, "Generating updates for the GROUP2GROUP tuples requires the incremental indexer to maintain group-to-group membership for denormalizing the effects of a relation tuple update to potentially multiple index updates." ("Gerar atualizações para as tuplas GROUP2GROUP exige que o indexador incremental mantenha a associação de grupo para grupo, a fim de desnormalizar os efeitos de uma atualização de tupla de relação em potencialmente múltiplas atualizações de índice.") Na escala do Google: "In practice, a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events." (§3.2.4) ("Na prática, uma única adição ou exclusão de tupla do Zanzibar pode gerar potencialmente dezenas de milhares de eventos distintos de tuplas do Leopard.")
+
+Uma exclusão é mais sutil do que a figura: uma tupla de índice só pode ser removida se nenhum outro caminho ainda conectar os dois grupos. O artigo não descreve como o indexador decide isso.
+
+Essa também é a razão pela qual o Leopard é a exceção. Em outros pontos, "Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)" (§3.2.5) ("o Zanzibar evita a desnormalização do armazenamento e depende apenas de dados normalizados (exceto nos casos descritos na §3.2.4)"), e o Leopard é usado apenas para namespaces selecionados "that exhibit such structure" (§3.2.4) ("que exibem tal estrutura").
+
+## Em produção
+
+Da §4.4, ao longo de 7 dias: "The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile" ("O índice Leopard está executando 1,56M QPS na mediana, ou 2,22M QPS no 99º percentil"), e "Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile." ("os servidores do Leopard respondem em menos de 150 μs na mediana, ou em menos de 1 ms no 99º percentil.") A camada incremental "writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile." ("escreve aproximadamente 500 atualizações de índice por segundo na mediana e aproximadamente 1,5 mil atualizações por segundo no 99º percentil.") As chamadas ao Leopard usam hedging, assim como as chamadas ao Spanner (§3.2.7).
+
+## Fontes
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3.2.3, §3.2.4, §3.2.5, §3.2.7, §4.4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

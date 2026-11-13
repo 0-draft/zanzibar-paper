@@ -1,0 +1,247 @@
+---
+title: "Leopard: 그룹 인덱스"
+description: "Zanzibar가 깊게 중첩된 그룹의 멤버십을 집합 교집합 하나로 답하는 방법, 그리고 그 대가로 쓰기마다 치르는 비용."
+section: guide
+part: mechanisms
+order: 7
+checked: "2026-11-13"
+paper: ["3.2.4", "4.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar는 보통 객체에서 사용자까지 튜플을 한 번에 하나씩 조회하며 따라가서 Check에 답한다. 대부분의 데이터에서는 이것이 빠르다. 여러 단계로 중첩된 그룹에서는 그렇지 않으며, Zanzibar는 그런 검사를 중첩을 미리 계산해 둔 인덱스인 Leopard에 넘긴다.
+
+## 중첩이 느린 이유
+
+예제를 확장해 보자. 이제 `group:eng`는 `group:product` 안에 있고, `group:product`는 `group:all` 안에 있으며, readme는 `group:all` 전체와 공유되어 있다. Beto가 readme를 열람할 수 있다는 것을 알아내려면 조회가 몇 번 필요한가?
+
+<Graph
+  width={640}
+  height={380}
+  title="중첩된 그룹 사슬"
+  desc="user:beto는 group:eng의 멤버이고, group:eng의 멤버는 group:product의 멤버이며, group:product의 멤버는 group:all의 멤버이고, group:all의 멤버는 doc:readme의 열람자다. Beto의 접근을 검사하는 것은 doc:readme에서 시작하여 단계마다 객체 하나를 읽는다. doc:readme, group:all, group:product, group:eng의 순서로 네 번 읽는다."
+  nodes={[
+    { id: "doc", x: 200, y: 30, label: "doc:readme", kind: "object", mono: true },
+    { id: "all", x: 200, y: 110, label: "group:all", kind: "group", mono: true },
+    { id: "prod", x: 200, y: 190, label: "group:product", kind: "group", mono: true },
+    { id: "eng", x: 200, y: 270, label: "group:eng", kind: "group", mono: true, on: true },
+    { id: "beto", x: 200, y: 350, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "n1", x: 470, y: 30, label: "1. doc:readme 읽기: 열람자는 group:all", kind: "note" },
+    { id: "n2", x: 470, y: 110, label: "2. group:all 읽기: group:product 포함", kind: "note" },
+    { id: "n3", x: 470, y: 190, label: "3. group:product 읽기: group:eng 포함", kind: "note" },
+    { id: "n4", x: 470, y: 270, label: "4. group:eng 읽기: Beto는 멤버", kind: "note" },
+  ]}
+  edges={[
+    { from: "all", to: "doc", label: "viewer" },
+    { from: "prod", to: "all", label: "member" },
+    { from: "eng", to: "prod", label: "member" },
+    { from: "beto", to: "eng", label: "member", on: true },
+  ]}
+  caption="각 단계가 다음 단계의 객체를 알려 주므로 네 번의 읽기는 함께 시작할 수 없다. 각 객체는 서로 다른 서버에 있을 수도 있다(아키텍처 페이지 참조)."
+/>
+
+그림 뒤의 튜플은 다음과 같다.
+
+```text
+doc:readme#viewer@group:all#member
+group:all#member@group:product#member
+group:product#member@group:eng#member
+group:eng#member@user:beto
+```
+
+*n*번째 단계는 *n* − 1번째 단계가 돌아올 때까지 시작할 수 없다는 점에 주목하라. 논문은 이를 포인터 추적이라고 부르며, 이것이 "can be expensive when indirect ACLs or groups are deep or wide"(간접 ACL이나 그룹이 깊거나 넓으면 비용이 커질 수 있다)라고 말한다(§3.2.3). 넓은 것도 문제다. `group:all`에 하위 그룹이 백 개 있다면 2단계는 백 갈래로 나뉠 것이다. 그래서 "Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation."(검사 평가 중의 재귀적 포인터 추적은 깊게 중첩되었거나 하위 그룹이 매우 많은 그룹에 대해 낮은 지연 시간을 유지하기 어렵다. 이러한 구조를 보이는 일부 선택된 네임스페이스에 대해, Zanzibar는 효율적인 집합 연산을 지원하는 특수 인덱스인 Leopard를 사용하여 검사를 처리한다.)(§3.2.4)
+
+## 두 종류의 집합
+
+Leopard는 "a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID"(`(T, s, e)` 튜플을 사용하는 이름 붙은 집합의 모음으로, *T*는 집합 유형을 나타내는 열거형이고 *s*와 *e*는 집합 ID와 원소 ID를 나타내는 64비트 정수다)를 저장한다(§3.2.4). 그룹 멤버십에는 두 가지 집합 유형이 쓰인다.
+
+- `GROUP2GROUP(s)`: 상위 그룹 *s*의 "*directly or indirectly*"(*직접 또는 간접적인*) 하위 그룹인 그룹들.
+- `MEMBER2GROUP(s)`: 사용자 *s*가 "*direct*"(*직접*) 멤버인 그룹들.
+
+예에서 이 집합들은 무엇을 담는가?
+
+<Graph
+  width={640}
+  height={330}
+  title="예에서의 GROUP2GROUP과 MEMBER2GROUP"
+  desc="GROUP2GROUP(group:all)은 group:all, group:product, group:eng다. GROUP2GROUP(group:product)는 group:product, group:eng다. GROUP2GROUP(group:eng)는 group:eng다. MEMBER2GROUP(user:beto)는 group:eng다. MEMBER2GROUP(user:anne)은 비어 있다."
+  nodes={[
+    { id: "g1", x: 125, y: 40, label: "GROUP2GROUP(group:all)", kind: "object", mono: true },
+    { id: "g2", x: 125, y: 100, label: "GROUP2GROUP(group:product)", kind: "object", mono: true },
+    { id: "g3", x: 125, y: 160, label: "GROUP2GROUP(group:eng)", kind: "object", mono: true },
+    { id: "m1", x: 125, y: 240, label: "MEMBER2GROUP(user:beto)", kind: "object", mono: true },
+    { id: "m2", x: 125, y: 300, label: "MEMBER2GROUP(user:anne)", kind: "object", mono: true },
+    { id: "s1", x: 455, w: 330, y: 40, label: "{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "s2", x: 455, w: 330, y: 100, label: "{ group:product, group:eng }", kind: "group", mono: true },
+    { id: "s3", x: 455, w: 330, y: 160, label: "{ group:eng }", kind: "group", mono: true },
+    { id: "s4", x: 455, w: 330, y: 240, label: "{ group:eng }", kind: "group", mono: true, on: true },
+    { id: "s5", x: 455, w: 330, y: 300, label: "{ }", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "g1", to: "s1" },
+    { from: "g2", to: "s2" },
+    { from: "g3", to: "s3" },
+    { from: "m1", to: "s4", on: true },
+    { from: "m2", to: "s5" },
+  ]}
+  caption="GROUP2GROUP은 평탄화되어 있다. eng는 두 단계 아래에 있지만 group:all의 목록에 들어 있다. MEMBER2GROUP은 그렇지 않다. 직접 멤버십만 나열한다. 각 그룹은 자신의 GROUP2GROUP 집합 안에 그렸다. 논문은 그렇게 말하지 않는다. 아래 메모를 보라."
+/>
+
+비대칭에 주목하라. 중첩은 전부 `GROUP2GROUP`에 접혀 들어가므로, 사용자 쪽은 사용자가 직접 추가된 곳만 기록하면 된다. 논문의 표현으로 "Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard"(그룹 간 경로를 평탄화하면 Leopard가 도달 가능성을 효율적으로 평가할 수 있다)(§3.2.4).
+
+<Callout kind="warn" title="그룹은 자기 자신을 포함하는가?">
+논문은 `GROUP2GROUP(s)`를 *s*의 하위 그룹인 그룹들로 정의하며, *s* 자신이 그 집합에 들어 있는지는 말하지 않는다. *G*의 직접 멤버가 아래의 판정을 통과하려면 *G*가 `GROUP2GROUP(G)`에 들어 있거나 따로 처리되어야 한다. 그림들은 전자를 가정한다. 이는 추론이며 논문이 말하는 내용이 아니다.
+</Callout>
+
+## 멤버십은 비어 있지 않은 교집합이다
+
+"To evaluate whether user *U* is a member of group *G*, we check whether"(사용자 *U*가 그룹 *G*의 멤버인지 평가하기 위해, 우리는 다음을 확인한다)(§3.2.4)
+
+```text
+(MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
+```
+
+즉, 사용자가 직접 추가된 그룹 가운데 *G* 아래 어딘가에도 있는 것이 있는가? `group:all`에 대해 Beto와 Anne은 어떤 결과를 얻는가?
+
+<Graph
+  width={640}
+  height={330}
+  title="교집합으로서의 멤버십"
+  desc="group:eng인 MEMBER2GROUP(user:beto)과 group:all, group:product, group:eng인 GROUP2GROUP(group:all)의 교집합은 group:eng로 비어 있지 않으므로, Beto는 group:all의 멤버다. 비어 있는 MEMBER2GROUP(user:anne)과 같은 집합의 교집합은 공집합이므로, Anne은 멤버가 아니다."
+  nodes={[
+    { id: "mb", x: 190, y: 50, label: "MEMBER2GROUP(user:beto)\n{ group:eng }", kind: "group", mono: true },
+    { id: "ga", x: 190, y: 130, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "rb", x: 530, y: 90, label: "∩ = { group:eng }\n비어 있지 않음: 멤버", kind: "object", on: true },
+    { id: "ma", x: 190, y: 220, label: "MEMBER2GROUP(user:anne)\n{ }", kind: "group", mono: true },
+    { id: "gb", x: 190, y: 295, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "ra", x: 530, y: 257, label: "∩ = { }\n비어 있음: 멤버 아님", kind: "object" },
+  ]}
+  edges={[
+    { from: "mb", to: "rb", on: true },
+    { from: "ga", to: "rb", on: true },
+    { from: "ma", to: "ra" },
+    { from: "gb", to: "ra" },
+  ]}
+  caption="중첩의 깊이와 상관없이 조회 두 번과 교집합 하나. Beto는 멤버이고 Anne은 아니다."
+/>
+
+첫 번째 그림의 순차적인 읽기 네 번이 집합 조회 두 번과 교집합 하나가 되었다. 원래 질문을 끝내려면 Zanzibar는 여전히 `group:all#member`를 지정하는 readme의 튜플을 읽는다. Leopard가 없애는 것은 그 아래의 깊이다. 논문은 Check가 일반 평가와 Leopard 쿼리 사이에서 어떻게 나뉘는지 자세히 말하지 않으므로, 이 분할은 §3.2.4를 읽고 해석한 것이며 인용이 아니다.
+
+## 정렬된 목록에 대한 교집합
+
+교집합은 얼마나 저렴한가? "Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets. For example, evaluating the intersection between two sets, *A* and *B*, requires only O(min(|A|, |B|)) skip-list seeks."(인덱스 튜플은 스킵 리스트 같은 구조에 정수의 정렬된 목록으로 저장되므로, 집합 사이의 합집합과 교집합을 효율적으로 계산할 수 있다. 예를 들어 두 집합 *A*와 *B*의 교집합을 평가하는 데에는 O(min(|A|, |B|))번의 스킵 리스트 탐색만 필요하다.)(§3.2.4)
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={520}
+  title="짧은 정렬 목록과 긴 정렬 목록의 교집합"
+  desc="목록 A에는 17, 42, 90이 있다. 목록 B에는 3, 8, 17, 21, 30, 42, 55, 61, 77, 84, 93, 99가 있다. A의 각 원소에 대해 B에서 탐색 한 번으로 그보다 작지 않은 첫 원소를 찾는다. 17은 17을, 42는 42를 찾고, 90은 93에 도달하며 이는 일치하지 않는다. 교집합은 17과 42이며, 탐색 세 번으로 찾는다."
+  nodes={[
+    { id: "la", x: 30, y: 50, label: "A", kind: "note" },
+    { id: "lb", x: 30, y: 200, label: "B", kind: "note" },
+    { id: "a1", x: 182, y: 50, label: "17", mono: true, w: 38, on: true },
+    { id: "a2", x: 320, y: 50, label: "42", mono: true, w: 38, on: true },
+    { id: "a3", x: 527, y: 50, label: "90", mono: true, w: 38 },
+    { id: "b0", x: 90, y: 200, label: "3", mono: true, w: 38 },
+    { id: "b1", x: 136, y: 200, label: "8", mono: true, w: 38 },
+    { id: "b2", x: 182, y: 200, label: "17", mono: true, w: 38, on: true },
+    { id: "b3", x: 228, y: 200, label: "21", mono: true, w: 38 },
+    { id: "b4", x: 274, y: 200, label: "30", mono: true, w: 38 },
+    { id: "b5", x: 320, y: 200, label: "42", mono: true, w: 38, on: true },
+    { id: "b6", x: 366, y: 200, label: "55", mono: true, w: 38 },
+    { id: "b7", x: 412, y: 200, label: "61", mono: true, w: 38 },
+    { id: "b8", x: 458, y: 200, label: "77", mono: true, w: 38 },
+    { id: "b9", x: 504, y: 200, label: "84", mono: true, w: 38 },
+    { id: "b10", x: 550, y: 200, label: "93", mono: true, w: 38 },
+    { id: "b11", x: 596, y: 200, label: "99", mono: true, w: 38 },
+  ]}
+  edges={[
+    { from: "a1", to: "b2", label: "탐색 1: 일치", on: true },
+    { from: "a2", to: "b5", label: "탐색 2: 일치", on: true },
+    { from: "a3", to: "b10", label: "탐색 3: 불일치", dashed: true },
+  ]}
+  caption="A의 원소 셋, B에서 탐색 셋. B의 원소 열두 개를 하나씩 훑지 않는다. 각 탐색을 빠르게 만드는 스킵 리스트의 상위 계층은 그리지 않았다."
+/>
+
+작업량은 더 짧은 목록을 따른다는 점에 주목하라. 사용자가 몇 개의 그룹에만 직접 속해 있다면 `MEMBER2GROUP(U)`는 짧고, `GROUP2GROUP(G)`가 거대하더라도 판정은 저렴하게 유지된다. 논문은 집합 크기를 제시하지 않으므로 이 경우는 가정이다. 인덱스는 "is sharded by element IDs"(원소 ID로 샤딩되며), 샤드는 "are usually served entirely from memory"(보통 전부 메모리에서 제공된다)(§3.2.4).
+
+## 세 부분
+
+"The Leopard system consists of three discrete parts: a serving system capable of consistent and low-latency operations across sets; an offline, periodic index building system; and an online real-time layer capable of continuously updating the serving system as tuple changes occur."(Leopard 시스템은 세 개의 별개 부분으로 이루어진다. 집합에 대해 일관되고 지연 시간이 낮은 연산을 할 수 있는 서빙 시스템, 오프라인으로 주기적으로 인덱스를 구축하는 시스템, 그리고 튜플 변경이 일어날 때 서빙 시스템을 지속적으로 갱신할 수 있는 온라인 실시간 계층이다.)(§3.2.4) 이들은 어떻게 연결되는가?
+
+<Graph
+  width={640}
+  height={350}
+  title="Leopard의 세 부분"
+  desc="오프라인 인덱스 빌더는 Zanzibar의 튜플과 설정의 스냅샷을 읽어 인덱스 샤드를 만들고, 샤드는 복제되어 Leopard 서빙 시스템에 교체 투입된다. 이와 병행하여 증분 인덱서는 Zanzibar의 Watch 스트림을 읽고 타임스탬프가 붙은 갱신을 서빙 시스템의 증분 계층에 쓴다. aclservers는 서빙 시스템에 쿼리하며, 서빙 시스템은 쿼리 타임스탬프에서 증분 계층을 오프라인 인덱스 위에 병합한다."
+  nodes={[
+    { id: "snap", x: 85, y: 60, label: "튜플 + 설정\n스냅샷", kind: "store" },
+    { id: "build", x: 310, y: 60, label: "오프라인 인덱스 빌더\n(주기적)", kind: "server" },
+    { id: "serve", x: 480, y: 185, label: "Leopard 서빙\n오프라인 인덱스\n+ 증분 계층", kind: "server", on: true },
+    { id: "watch", x: 85, y: 300, label: "Watch API", kind: "server" },
+    { id: "inc", x: 290, y: 300, label: "증분\n인덱서", kind: "server" },
+    { id: "acl", x: 560, y: 315, label: "aclservers", kind: "server" },
+  ]}
+  edges={[
+    { from: "snap", to: "build" },
+    { from: "build", to: "serve", label: "새 샤드" },
+    { from: "watch", to: "inc", label: "튜플 변경" },
+    { from: "inc", to: "serve", label: "(T, s, e, t, d)", labelOffset: -22 },
+    { from: "acl", to: "serve", label: "쿼리", dir: "both" },
+  ]}
+  caption="오프라인 경로는 완전하지만 오래되었고, 증분 경로는 최신이지만 마지막 스냅샷 이후의 변경만 포함한다. 서빙이 둘을 병합한다."
+/>
+
+- **오프라인 인덱스 빌더.** 이는 "generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples."(Zanzibar 관계 튜플과 설정의 스냅샷으로부터 인덱스 샤드를 생성하고, 샤드를 전 세계에 복제한다. 유저셋 재작성 규칙을 준수하며, ACL 그래프의 간선을 재귀적으로 전개하여 Leopard 인덱스 튜플을 만든다.) 서버는 "swap old shards with new ones when they become available"(새 샤드가 사용 가능해지면 오래된 샤드를 새 것으로 교체한다).
+- **증분 계층.** 오프라인 인덱스만으로는 "cannot do so at a fresh and consistent snapshot"(최신의 일관된 스냅샷에서 그렇게 할 수 없으므로), 서버는 "an incremental layer that indexes all updates since the offline snapshot"(오프라인 스냅샷 이후의 모든 갱신을 인덱싱하는 증분 계층)을 유지한다. 각 갱신은 `(T, s, e, t, d)` 튜플이며, "where *t* is the timestamp of the update and *d* is a deletion marker"(여기서 *t*는 갱신의 타임스탬프이고 *d*는 삭제 표시다). "Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing."(쿼리 타임스탬프 이하의 타임스탬프를 가진 갱신은 쿼리 처리 중에 오프라인 인덱스 위에 병합된다.)
+- **공급.** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions."(Leopard 증분 인덱서는 Zanzibar의 Watch API를 호출하여 시간순으로 정렬된 Zanzibar 튜플 수정 스트림을 받고, 그 갱신을 시간순으로 정렬된 Leopard 튜플 추가, 갱신, 삭제 스트림으로 변환한다.)
+
+이 목록의 인용은 모두 §3.2.4에서 왔다. 갱신은 타임스탬프를 가지고 쿼리 타임스탬프까지 병합되므로, Leopard의 답은 Check의 나머지 부분과 같은 스냅샷을 반영할 수 있다. 논문이 밝히는 증분 계층의 목적은 "To support consistent ACL evaluation"(일관된 ACL 평가를 지원하기 위해)이다.
+
+## 대가: 쓰기 하나, 많은 인덱스 갱신
+
+평탄화의 비용은 쓰기 시점에 치른다. eng가 product에 추가되기 전으로 돌아가서, `group:eng`에 자신의 하위 그룹 `group:infra`와 `group:web`이 있다고 하자. 이제 누군가가 eng를 product에 추가한다. 인덱스 튜플은 몇 개나 바뀌는가?
+
+<Graph
+  width={640}
+  height={380}
+  title="튜플 쓰기 하나가 많은 인덱스 갱신으로 팬아웃된다"
+  desc="튜플 group:product#member@group:eng#member를 추가하면 group:eng, group:infra, group:web이 group:product와 group:all 양쪽의 새로운 하위 그룹이 된다. 증분 인덱서는 그 튜플 하나를 GROUP2GROUP 추가 여섯 개로 바꾼다. product는 eng, infra, web을 얻고, all도 eng, infra, web을 얻는다."
+  nodes={[
+    { id: "t", x: 110, y: 40, label: "group:product#member\n@group:eng#member", kind: "store", mono: true },
+    { id: "inc", x: 110, y: 190, label: "증분\n인덱서", kind: "server" },
+    { id: "e1", x: 520, y: 30, w: 190, label: "+ G2G(product, eng)", kind: "group", mono: true },
+    { id: "e2", x: 520, y: 94, w: 190, label: "+ G2G(product, infra)", kind: "group", mono: true },
+    { id: "e3", x: 520, y: 158, w: 190, label: "+ G2G(product, web)", kind: "group", mono: true },
+    { id: "e4", x: 520, y: 222, w: 190, label: "+ G2G(all, eng)", kind: "group", mono: true },
+    { id: "e5", x: 520, y: 286, w: 190, label: "+ G2G(all, infra)", kind: "group", mono: true },
+    { id: "e6", x: 520, y: 350, w: 190, label: "+ G2G(all, web)", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "t", to: "inc", label: "쓰기 1회" },
+    { from: "inc", to: "e1" },
+    { from: "inc", to: "e2" },
+    { from: "inc", to: "e3" },
+    { from: "inc", to: "e4" },
+    { from: "inc", to: "e5" },
+    { from: "inc", to: "e6" },
+  ]}
+  caption="Zanzibar 튜플 1개, Leopard 튜플 6개(group: 접두사는 생략). product의 모든 상위 그룹(product, all) 곱하기 eng의 모든 하위 그룹(eng, infra, web). MEMBER2GROUP은 바뀌지 않는다."
+/>
+
+개수는 한쪽의 상위 그룹 수 곱하기 다른 쪽의 하위 그룹 수이므로, 깊이와 넓이 모두에 따라 커진다. 이를 계산하기 위해 "Generating updates for the GROUP2GROUP tuples requires the incremental indexer to maintain group-to-group membership for denormalizing the effects of a relation tuple update to potentially multiple index updates."(GROUP2GROUP 튜플에 대한 갱신을 생성하려면, 증분 인덱서는 관계 튜플 갱신의 효과를 잠재적으로 여러 인덱스 갱신으로 비정규화하기 위해 그룹 간 멤버십을 유지해야 한다.) Google의 규모에서는 이렇다. "In practice, a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events."(실제로 Zanzibar 튜플 하나의 추가나 삭제가 잠재적으로 수만 개의 개별 Leopard 튜플 이벤트를 만들 수 있다.)(§3.2.4)
+
+삭제는 그림보다 미묘하다. 인덱스 튜플은 두 그룹을 잇는 다른 경로가 남아 있지 않을 때에만 제거할 수 있다. 논문은 인덱서가 이를 어떻게 판단하는지 기술하지 않는다.
+
+Leopard가 예외인 이유도 이것이다. 다른 곳에서 "Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)"(Zanzibar는 저장소 비정규화를 피하고 정규화된 데이터에만 의존한다(§3.2.4에서 기술한 경우는 제외))(§3.2.5)이며, Leopard는 "that exhibit such structure"(그러한 구조를 보이는) 일부 선택된 네임스페이스에만 사용된다(§3.2.4).
+
+## 프로덕션에서
+
+§4.4에서, 7일간: "The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile"(Leopard 인덱스는 중앙값에서 156만 QPS, 99번째 백분위수에서 222만 QPS를 처리한다), 그리고 "Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile."(Leopard 서버는 중앙값에서 150 μs 미만, 99번째 백분위수에서 1 ms 미만으로 응답한다.) 증분 계층은 "writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile."(중앙값에서 초당 약 500건, 99번째 백분위수에서 초당 약 1,500건의 인덱스 갱신을 쓴다.) Leopard에 대한 호출은 Spanner에 대한 호출과 마찬가지로 헤징된다(§3.2.7).
+
+## 출처
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3.2.3, §3.2.4, §3.2.5, §3.2.7, §4.4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

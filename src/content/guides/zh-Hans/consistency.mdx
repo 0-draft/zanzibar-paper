@@ -1,0 +1,328 @@
+---
+title: "一致性、快照与 zookie"
+description: "为什么授权系统必须遵循 ACL 变更与内容变更的顺序，以及 Zanzibar 如何借助 Spanner 时间戳和 zookie 做到这一点。"
+section: guide
+part: mechanisms
+order: 4
+checked: "2026-11-13"
+paper: ["2.2", "2.4", "2.4.4", "3.2.1", "3.2.5", "4.1"]
+---
+
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+ACL 检查回答的是“此用户现在能否做这件事”。在一个跨全球复制的系统中，难点在于“现在”：不同的服务器看到的写入各不相同。本页说明 Zanzibar 承诺遵循哪种顺序，[Spanner](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf) 如何让这一承诺的维持成本很低，以及 *zookie* 如何让客户端设定一次检查所需的最低新鲜度。
+
+## “new enemy”问题
+
+论文以一条规则开启 §2.2："ACL checks must respect the order in which users modify ACLs and object contents to avoid unexpected sharing behaviors."（ACL 检查必须遵循用户修改 ACL 和对象内容的顺序，以避免出现意外的共享行为。）它把这种失效称为 “new enemy” 问题：一个刚被从 ACL 中移除的用户，仍然看到了这次移除本应隐藏的内容。
+
+论文给出了两个例子。为了便于与 §2.2 对照阅读，本页在这两个例子中沿用论文自己的人名 Alice、Bob 和 Charlie；其他地方则使用 Anne、Beto 和 Chen 的贯穿示例。
+
+<Callout kind="paper" title="§2.2，例 A：忽略 ACL 更新顺序">
+
+1. Alice removes Bob from the ACL of a folder;（Alice 将 Bob 从某个文件夹的 ACL 中移除；）
+2. Alice then asks Charlie to move new documents to the folder, where document ACLs inherit from folder ACLs;（随后 Alice 请 Charlie 将新文档移入该文件夹，其中文档 ACL 继承自文件夹 ACL；）
+3. Bob should not be able to see the new documents, but may do so if the ACL check neglects the ordering between the two ACL changes.（Bob 本不应能看到这些新文档，但如果 ACL 检查忽略了这两次 ACL 变更之间的顺序，他就可能看到。）
+
+</Callout>
+
+如果一次检查看到了第二次变更却没看到第一次，会出什么问题？左边一帧是没有顺序保证的系统；右边一帧是同一情形在 Zanzibar 下的表现。
+
+<Frames>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="时间"
+  ticks={["T_A1", "T_A2"]}
+  title="没有顺序保证时的例 A"
+  desc="Alice 将 Bob 从文件夹 ACL 中移除（A1），然后请 Charlie 把新文档移入该文件夹（A2）。Bob 的检查所基于的数据包含 A2 却不包含 A1，因此 Bob 被允许阅读新文档。这就是违规。"
+  events={[
+    { lane: 0, t: 0, label: "A1：把 Bob 从\n文件夹中移除", kind: "write" },
+    { lane: 1, t: 1, label: "A2：把新文档\n移入文件夹", kind: "write" },
+    { lane: 2, t: 2, label: "检查看到 A2\n但没看到 A1", kind: "bad" },
+    { lane: 2, t: 3, label: "Bob 看到\n新文档", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "请求" }]}
+  caption="违规：检查应用了 A2 却没有应用 A1，Bob 读到了新文档。"
+/>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="时间"
+  ticks={["T_A1", "T_A2"]}
+  title="Zanzibar 下的例 A"
+  desc="A1 和 A2 获得的时间戳满足 T_A1 小于 T_A2。在 T_A2 之前的快照上进行的检查看不到文件夹中的文档。在 T_A2 或之后的快照上进行的检查也会看到 A1，因此无论哪种情况 Bob 都被拒绝。"
+  events={[
+    { lane: 0, t: 0, label: "A1：把 Bob 从\n文件夹中移除", kind: "write" },
+    { lane: 1, t: 1, label: "A2：把新文档\n移入文件夹", kind: "write" },
+    { lane: 2, t: 2, label: "在 T < T_A2\n上检查", kind: "read", mono: true },
+    { lane: 2, t: 3, label: "文档尚未\n在文件夹中", kind: "good" },
+    { lane: 2, t: 4, label: "在 T ≥ T_A2\n上检查", kind: "read", mono: true },
+    { lane: 2, t: 5, label: "看到 A1：\nBob 被拒绝", kind: "good" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "请求" }]}
+  caption="Zanzibar：任何包含 A2 的快照也都包含 A1。"
+/>
+
+</Frames>
+
+注意，不存在包含 A2 却不包含 A1 的快照。这就是全部的保证：§2.2 解释说，如果检查在 `T < T_A2` 上运行，"the document ACLs will not include the folder ACL"（文档 ACL 将不包含文件夹 ACL）；如果在 `T ≥ T_A2 > T_A1` 上运行，它 "will observe update A1, which removed Bob from the folder ACL"（将观察到更新 A1，而该更新已将 Bob 从文件夹 ACL 中移除）。
+
+<Callout kind="paper" title="§2.2，例 B：将旧 ACL 误用于新内容">
+
+1. Alice removes Bob from the ACL of a document;（Alice 将 Bob 从某个文档的 ACL 中移除；）
+2. Alice then asks Charlie to add new contents to the document;（随后 Alice 请 Charlie 向该文档添加新内容；）
+3. Bob should not be able to see the new contents, but may do so if the ACL check is evaluated with a stale ACL from before Bob's removal.（Bob 本不应能看到这些新内容，但如果 ACL 检查使用的是 Bob 被移除之前的陈旧 ACL 进行评估，他就可能看到。）
+
+</Callout>
+
+例 B 只有一处不同：第二次变更针对的是文档的*内容*，而内容存放在客户端应用的存储中，不在 Zanzibar 中。Zanzibar 根本看不到这次写入。那么它如何知道关于新内容的检查必须足够新？
+
+<Frames>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="时间"
+  ticks={["T_B1", "T_B2"]}
+  title="没有顺序保证时的例 B"
+  desc="Alice 将 Bob 从文档 ACL 中移除（B1），然后请 Charlie 添加新内容（B2）。Bob 的检查在 B1 之前的陈旧快照上评估，因此仍然允许 Bob，Bob 读到了新内容。这就是违规。"
+  events={[
+    { lane: 0, t: 0, label: "B1：把 Bob 从\n文档 ACL 中移除", kind: "write" },
+    { lane: 1, t: 1, label: "B2：添加\n新内容", kind: "write" },
+    { lane: 2, t: 2, label: "在陈旧的\nT < T_B1 上检查", kind: "bad", mono: true },
+    { lane: 2, t: 3, label: "Bob 看到\n新内容", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "请求" }]}
+  caption="违规：旧的 ACL 被应用于新内容。"
+/>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="时间"
+  ticks={["T_B1", "T_B2"]}
+  title="Zanzibar 下的例 B"
+  desc="Alice 移除 Bob（B1）。Charlie 的内容变更获得一个编码了其时间戳 T_B2 的 zookie，并与新内容一起存储。Bob 的检查携带该 zookie，因此在 T_B2 或之后的快照上评估，该快照包含 B1，Bob 被拒绝。"
+  events={[
+    { lane: 0, t: 0, label: "B1：把 Bob 从\n文档 ACL 中移除", kind: "write" },
+    { lane: 1, t: 1, label: "B2 + zookie\n(T_B2)", kind: "write" },
+    { lane: 2, t: 2, label: "检查携带\n该 zookie", kind: "read" },
+    { lane: 2, t: 3, label: "看到 B1：\nBob 被拒绝", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "请求" },
+    { from: [1, 1], to: [2, 2], label: "zookie", dashed: true },
+  ]}
+  caption="Zanzibar：与 B2 一起存储的 zookie 强制使用 T_B2 或之后的快照。"
+/>
+
+</Frames>
+
+虚线箭头就是解决办法。zookie 随内容一起传递，因此关于 B2 的检查无法在比 B2 更旧的快照上运行，而所有这样的快照都已包含 B1。本页其余部分解释这一机制所依赖的两个性质，以及传递 zookie 的协议。
+
+## 具有因果意义的时间戳
+
+§2.2 列出了两个性质：*外部一致性*和*有界陈旧度的快照读*。论文为外部一致性引用了 [Gifford 1981 年的博士论文](#来源)。Spanner 论文为事务表述了同一性质："if a transaction T1 commits before another transaction T2 starts, then T1's commit timestamp is smaller than T2's"（如果事务 T1 在另一个事务 T2 开始之前提交，那么 T1 的提交时间戳小于 T2 的），并指出这 "equivalently, linearizability"（等价于可线性化），引用了 [Herlihy 和 Wing（1990）](https://doi.org/10.1145/78969.78972)。
+
+用 Zanzibar 的话说（§2.2），两个具有因果关系的更新 `x ≺ y` 获得的时间戳满足 `T_x < T_y`。在时间戳 `T` 上的快照读 "observes all updates with timestamps ≤ T"（会观察到所有时间戳 ≤ T 的更新）。合起来就是：如果一次读取看到了 `y`，它也会看到在 `y` 之前发生的一切。这之所以可行，是因为存储是多版本的：Spanner 把快照读定义为 "a read in the past that executes without locking"（一种在过去的时间点上、无需加锁执行的读取）（[Spanner §4.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)），而在多版本存储中 "each write on a data item produces a new copy (or version)"（对数据项的每次写入都会产生一个新的副本（或版本））（[Bernstein 和 Goodman，1983](https://doi.org/10.1145/319996.319998)）。
+
+在这一规则下读者会看到什么？最终一致副本的读者又可能看到什么？在这个变体中，readme 起初不在 `folder:A` 中。Anne 先把 Chen 从 `folder:A` 的查看者中移除（`x`，提交于 T=10），然后把 `doc:readme` 移入 `folder:A`（`y`，提交于 T=20）。
+
+<Swimlane
+  lanes={["ACL 写入", "快照读", "最终一致副本"]}
+  laneWidth={170}
+  rowHeight={64}
+  timeLabel="时间"
+  ticks={["T=10", "T=20"]}
+  title="快照读与最终一致副本的对比"
+  desc="写入 x 在时间戳 10 把 Chen 从 folder:A 中移除；写入 y 在时间戳 20 把 doc:readme 移入 folder:A，且 x 发生在 y 之前。在 T=15 上的快照读只看到 x；在 T=25 上的快照读看到 x 和 y。最终一致副本先应用了 y 后应用 x，在这段窗口内 Chen 可以看到 readme。"
+  events={[
+    { lane: 0, t: 0, label: "x：把 Chen 从\nfolder:A 中移除", kind: "write" },
+    { lane: 0, t: 1, label: "y：把 readme\n移入 folder:A", kind: "write" },
+    { lane: 1, t: 2, label: "T=15 的快照：\n只看到 x", kind: "good" },
+    { lane: 2, t: 2, label: "副本已有 y，\n尚无 x", kind: "bad" },
+    { lane: 1, t: 3, label: "T=25 的快照：\n看到 x 和 y", kind: "good" },
+    { lane: 2, t: 3, label: "Chen 看到 readme\n（x 未应用）", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [0, 1], label: "x ≺ y" }]}
+  caption="任意 T 上的快照都是因果顺序的一个前缀。最终一致副本在追上之前，可能呈现有 y 而无 x 的状态。"
+/>
+
+注意，两次快照读看到的内容在*多少*上不同，但在*顺序*上从不不同：每一次都是历史的一个前缀。最终一致副本最终也会收敛，但在此之前它可能呈现一个从未存在过的状态。论文在 §5 中自己作了这一对比：TAO "offers eventual global consistency with asynchronous replication"（通过异步复制提供最终的全局一致性），而 Zanzibar "provides external consistency and snapshot reads with bounded staleness"（提供外部一致性和有界陈旧度的快照读）。
+
+## 时间戳从何而来：TrueTime
+
+Zanzibar 并不自己计算这些时间戳。它把 ACL 存储在 Spanner 中，而 Spanner 的 "TrueTime mechanism assigns each ACL write a microsecond-resolution timestamp, such that the timestamps of writes reflect the causal ordering between writes"（TrueTime 机制为每次 ACL 写入分配一个微秒级精度的时间戳，使写入的时间戳反映写入之间的因果顺序）（§2.2）。其工作方式的概要见 [Spanner 论文（OSDI '12）](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)的 §3、§4.1.2 和 §4.2.1。
+
+- `TT.now()` 返回一个区间 `[earliest, latest]`，保证包含调用时的绝对时间。不确定度 `ε` 是区间宽度的一半；在 Google 的生产环境中，它 "typically a sawtooth function of time, varying from about 1 to 7 ms over each poll interval"（通常是时间的锯齿函数，在每个轮询间隔内在约 1 到 7 毫秒之间变化）。
+- **开始**：leader 为写入分配一个不小于 `TT.now().latest` 的提交时间戳 `s`。
+- **提交等待**：在 `TT.after(s)` 为真之前，也就是在 `s` 确定已在所有地方过去之前，客户端看不到这次写入。Spanner 指出 "the expected wait is at least 2 ∗ ε̄"（预期等待时间至少为 2 ∗ ε̄），其中 `ε̄` 是平均误差界（§4.2.1）。
+
+等待如何使时间戳具有因果性？
+
+<Graph
+  width={640}
+  height={300}
+  title="Spanner 中的提交等待"
+  desc="一次写入到达 leader，leader 调用 TT.now()，得到一个从 earliest 到 latest、宽度为 2 epsilon 的区间。leader 取 s 等于 latest。然后它等待直到 TT.after(s) 为真，这大约需要 2 epsilon，此后才让写入可见并回复。任何在回复之后开始的事务都会更晚调用 TT.now()，因此它的 latest，进而它的时间戳，都大于 s。"
+  nodes={[
+    { id: "ear", x: 70, y: 55, label: "earliest", kind: "note" },
+    { id: "lat", x: 240, y: 55, label: "latest", kind: "note" },
+    { id: "req", x: 70, y: 150, label: "写入到达\nTT.now()", kind: "server" },
+    { id: "s", x: 240, y: 150, label: "s = latest", kind: "server", mono: true },
+    { id: "after", x: 420, y: 150, label: "TT.after(s)\nis true", kind: "server", mono: true },
+    { id: "vis", x: 568, y: 150, label: "写入可见，\n通知客户端", kind: "store", on: true },
+    { id: "next", x: 568, y: 255, label: "下一次写入：\n时间戳 > s", kind: "client" },
+  ]}
+  edges={[
+    { from: "ear", to: "lat", label: "不确定度：2ε", dir: "both", labelOffset: -16 },
+    { from: "lat", to: "s", label: "开始规则", dashed: true },
+    { from: "req", to: "s", label: "选定 s" },
+    { from: "s", to: "after", label: "提交等待", on: true, labelOffset: -34 },
+    { from: "after", to: "vis" },
+    { from: "vis", to: "next", label: "引起" },
+  ]}
+  minWidth={520}
+  caption="时间从左向右推进，再向下到下一次写入。等过不确定度意味着，在任何人能基于这次写入采取行动之前，s 已经成为过去。"
+/>
+
+注意最后一步：由这次写入引起的任何事情，都在客户端得到通知之后才开始，也就是在 `s` 确定已经过去之后，因此它自己的 `TT.now().latest` 以及它的时间戳都大于 `s`。这就是外部一致性，代价是每次写入几毫秒的等待。Zanzibar 论文 §5 对此作了概括：Zanzibar "builds on Spanner’s TrueTime abstraction"（构建在 Spanner 的 TrueTime 抽象之上），以 "provide linearizable commit timestamps encoded as zookies"（提供编码为 zookie 的可线性化提交时间戳）。
+
+同一篇论文也解释了为什么 Zanzibar 不能改用逻辑时钟：Lamport 时钟 "require explicit participation of all 'processes', where in Zanzibar’s use cases some of the 'processes' can be external clients or even human users"（需要所有“进程”显式参与，而在 Zanzibar 的使用场景中，有些“进程”可能是外部客户端甚至是人类用户）（§5）。在例 A 中，“请求”那条箭头是 Alice 在和 Charlie 交谈，这是任何时钟都看不到的渠道。
+
+## zookie 协议
+
+在一个有良好顺序的时间戳上进行快照读，就解决了例 A。例 B 还需要检查*足够新*。一种做法是在最新快照上评估每一次检查，但 §2.2 否定了这种做法：它 "would require global data synchronization with high-latency round trips and limited availability"（需要进行全局数据同步，带来高延迟的往返且可用性受限）。取而代之的是，客户端自己携带所需的新鲜度，即 *zookie*："an opaque byte sequence encoding a globally meaningful timestamp that reflects an ACL write, a client content version, or a read snapshot"（一个不透明的字节序列，编码了一个具有全局意义的时间戳，该时间戳反映一次 ACL 写入、一个客户端内容版本或一个读取快照）（§2.4）。
+
+每一步由谁持有 zookie？在下图中，Anne 保存了对 `doc:readme` 的一次编辑，之后 Beto 打开了它。
+
+<Swimlane
+  lanes={["客户端应用", "客户端存储", "Zanzibar", "Spanner"]}
+  laneWidth={142}
+  rowHeight={64}
+  timeLabel="时间"
+  title="zookie 协议"
+  desc="1. Anne 保存一次编辑；客户端应用向 Zanzibar 发送一次内容变更检查，Zanzibar 在 Spanner 的最新快照上评估它。2. Zanzibar 回答“允许”，并附带一个时间戳晚于所有先前 ACL 写入的 zookie。3. 应用在一次原子写入中把新内容和 zookie 写入自己的存储。4. 之后 Beto 打开 readme；应用加载内容及其 zookie。5. 应用发送一次携带该 zookie 的检查。6. Zanzibar 在至少与 zookie 一样新的快照上评估它并返回答案。"
+  events={[
+    { lane: 0, t: 0, label: "Anne 保存编辑", kind: "note" },
+    { lane: 0, t: 1, label: "内容变更\n检查", kind: "read" },
+    { lane: 2, t: 1, label: "在最新快照\n上评估", kind: "read" },
+    { lane: 3, t: 1, label: "最新快照", kind: "good" },
+    { lane: 2, t: 2, label: "允许 +\nzookie z", kind: "good" },
+    { lane: 0, t: 2, label: "得到 z", kind: "note" },
+    { lane: 0, t: 3, label: "写入 v2 + z", kind: "write" },
+    { lane: 1, t: 3, label: "readme v2, z", kind: "write", mono: true },
+    { lane: 0, t: 4, label: "Beto 打开\nreadme", kind: "note" },
+    { lane: 0, t: 5, label: "check(Beto, z)", kind: "read", mono: true },
+    { lane: 2, t: 5, label: "在快照 ≥ z\n上评估", kind: "read", mono: true },
+    { lane: 3, t: 5, label: "在 T ≥ z\n上读取", kind: "good", mono: true },
+    { lane: 2, t: 6, label: "基于该快照\n作答", kind: "good" },
+    { lane: 0, t: 6, label: "显示或隐藏 v2", kind: "note" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [2, 1], label: "无 zookie" },
+    { from: [2, 1], to: [3, 1] },
+    { from: [2, 2], to: [0, 2], label: "zookie z" },
+    { from: [0, 3], to: [1, 3], label: "原子写入" },
+    { from: [1, 3], to: [0, 4], label: "加载 v2, z", dashed: true },
+    { from: [0, 5], to: [2, 5], label: "携带 z" },
+    { from: [2, 5], to: [3, 5] },
+    { from: [2, 6], to: [0, 6] },
+  ]}
+  caption="zookie 由内容变更检查生成，存放在内容旁边，并在之后对该版本的每一次检查中交回。"
+/>
+
+按照 §2.2 和 §2.4.4，逐步来看：
+
+1. **内容变更检查。** 当用户即将保存一次变更时，客户端发送一次*内容变更*检查。它 "does not carry a zookie and is evaluated at the latest snapshot"（不携带 zookie，并在最新快照上评估）（§2.4.4）。
+2. **生成 zookie。** 如果变更被允许，响应中包含一个 zookie。Zanzibar "encodes a current global timestamp in the zookie and ensures that all prior ACL writes have lower timestamps"（将当前的全局时间戳编码到 zookie 中，并确保所有先前的 ACL 写入都具有更低的时间戳）（§2.2）。
+3. **与内容一起存储。** "The client stores the zookie with the content change in an atomic write to the client storage"（客户端在对客户端存储的一次原子写入中，将 zookie 与内容变更一起存储）（§2.2）。检查本身不必与内容写入处于同一事务中。
+4. **由之后的检查携带。** 之后对该内容版本的每一次检查都发送所存储的 zookie。
+5. **在至少一样新的快照上评估。** "A check is always evaluated at a consistent snapshot no earlier than the given zookie"（检查总是在一个不早于给定 zookie 的一致快照上评估）（§2.4.4）。
+
+在例 B 中，与新内容一起存储的 zookie 编码了 `T_B2`，而 `T_B2 > T_B1`，因此 Bob 在第 5 步的检查必然会看到他被移除这一事实。
+
+zookie 是有意设计成不透明的。论文使用 "an opaque cookie instead of the actual timestamp to discourage our clients from choosing arbitrary timestamps and to allow future extensions"（不透明的 cookie 而不是实际时间戳，是为了避免客户端选择任意时间戳，并为未来的扩展留有余地）（§2.4）。§5 补充说，该协议 "does *not* let clients read or evaluate ACLs at an arbitrary snapshot"（*不*允许客户端在任意快照上读取或评估 ACL），正是这一点把选择权留给了 Zanzibar。
+
+## 为什么是“至少一样新”而不是“恰好在”
+
+zookie 是一个下界。Zanzibar 可以在 zookie 的时间戳上评估检查，也可以在任何更晚的时间戳上评估。§2.2 把这称为该协议的 "at-least-as-fresh semantics"（“至少一样新”的语义），并说它 "allow[s] Zanzibar to choose any timestamp fresher than the one encoded in a zookie"（使 Zanzibar 可以选择任何比 zookie 中编码的时间戳更新的时间戳）。这种自由有三种用途。
+
+- **默认陈旧度（§3.2.1）。** 没有 zookie 时，服务器选择 "a default staleness chosen to ensure that all transactions are evaluated at a timestamp that is as recent as possible without impacting latency"（一个默认陈旧度，以确保所有事务都在不影响延迟的前提下尽可能新的时间戳上评估）。每台服务器跟踪在给定陈旧度下的读取需要离开所在区域的频率，并把默认值调整到 "the lowest 'safe' value"（最低的“安全”值）。论文指出这 "is purely a performance optimization"（纯粹是一项性能优化），因为 "Zanzibar always respects zookies when provided"（只要提供了 zookie，Zanzibar 总会遵循它）。
+- **量化（§3.2.5）。** 评估时间戳会被 "rounded up to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies"（向上取整到较粗的粒度，例如 1 秒或 10 秒，同时遵循请求 zookie 中的陈旧度约束）。*向上*取整永远不会破坏下界。
+- **共享缓存（§3.2.5）。** 缓存键包含快照时间戳，因此来自不同快照的结果永远不会混在一起。由于取整，"the vast majority of recent checks and reads"（绝大多数近期检查和读取）在相同的时间戳上评估，并 "share cache results"（共享缓存结果）。
+
+当三个检查携带相差几百毫秒的 zookie 到达时，向上取整能带来什么？
+
+<Graph
+  width={620}
+  height={250}
+  title="对评估时间戳向上取整"
+  desc="针对 doc:readme 的三个检查，分别来自 Anne、Beto 和 Chen，携带同一秒内不同微秒时间戳的 zookie。Zanzibar 把每一个都向上取整到同一个粗粒度时间戳 T_q，它不小于每一个 zookie，因此三个检查都在同一个快照上评估，并共享以 T_q 为键的缓存条目。任何更晚的时间戳，直到 leader 上的最新数据，也都是允许的。"
+  nodes={[
+    { id: "a", x: 90, y: 50, label: "Anne 的检查\nzookie 12.104 s", kind: "client" },
+    { id: "b", x: 90, y: 125, label: "Beto 的检查\nzookie 12.380 s", kind: "client" },
+    { id: "c", x: 90, y: 200, label: "Chen 的检查\nzookie 12.911 s", kind: "client" },
+    { id: "q", x: 330, y: 125, label: "在 T_q = 13 s\n上评估", kind: "server", on: true },
+    { id: "cache", x: 330, y: 220, label: "缓存键\n包含 T_q", kind: "server" },
+    { id: "now", x: 530, y: 125, label: "最新数据\n（leader）", kind: "store" },
+  ]}
+  edges={[
+    { from: "a", to: "q", label: "向上取整", on: true },
+    { from: "b", to: "q", on: true },
+    { from: "c", to: "q", label: "向上取整", on: true },
+    { from: "q", to: "cache", label: "共享" },
+    { from: "q", to: "now", label: "同样允许", dashed: true },
+  ]}
+  minWidth={480}
+  caption="三个 zookie 都是下界；13 s 满足所有下界。这些时间戳仅作示意，并非出自论文。"
+/>
+
+注意，`T_q` 甚至可能略微处于未来。§3.2.5 涵盖了这种情况：Spanner "ensures that a snapshot read at timestamp T will observe all writes up to T—this holds even if T is in the future, in which case the read will wait until TrueTime has moved past T."（确保在时间戳 T 上的快照读会观察到截至 T 的所有写入；即使 T 处于未来也成立，此时读取会等待，直到 TrueTime 越过 T。）
+
+## Safe 请求与 Recent 请求
+
+新鲜度的代价是距离。"When a zookie timestamp is higher than that of the most recent data replicated to the region, the storage reads require cross-region round trips to the leader replica"（当 zookie 时间戳高于已复制到该区域的最新数据的时间戳时，存储读取需要跨区域往返到 leader 副本）（§4.1）。存储以 "replication heartbeats with 8-second intervals"（间隔为 8 秒的复制心跳）进行复制，因此 §4.1 以 10 秒为界划分请求：
+
+- *Safe* 请求 "have zookies more than 10 seconds old and can be served within the region most of time"（的 zookie 时龄超过 10 秒，大多数时候可以在区域内得到处理）。
+- *Recent* 请求 "have zookies less than 10 seconds old and often require inter-region round trips"（的 zookie 时龄不足 10 秒，往往需要跨区域往返）。
+
+8 秒与 Spanner 论文一致，其中 "a leader by default advances MinNextTS() values every 8 seconds"（leader 默认每 8 秒推进一次 MinNextTS() 值），因此副本 "can serve reads at timestamps greater than 8 seconds old in the worst case"（在最坏情况下可以处理时间戳早于 8 秒前的读取）（[Spanner §4.2.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)）。
+
+论文的表 2（§4.2）给出了每类请求的延迟，单位为毫秒，以 2018 年 12 月某 7 天期间的均值（标准差）表示：
+
+| | API | 50%ile | 95%ile | 99%ile |
+| --- | --- | --- | --- | --- |
+| Safe | Check | 3.0 (0.091) | 9.46 (0.3) | 15.0 (1.19) |
+| Safe | Read | 2.18 (0.031) | 3.71 (0.094) | 8.03 (3.28) |
+| Safe | Expand | 4.27 (0.313) | 8.84 (0.586) | 34.1 (4.35) |
+| Recent | Check | 2.86 (0.087) | 60.0 (2.1) | 76.3 (2.59) |
+| Recent | Read | 2.21 (0.054) | 40.1 (2.03) | 86.2 (3.84) |
+| Recent | Expand | 5.79 (0.224) | 45.6 (3.44) | 121.0 (2.38) |
+| Recent | Write | 127.0 (3.65) | 233.0 (23.0) | 401.0 (133.0) |
+
+中位数相近；尾部则不然。Recent Check 的第 95 百分位为 60.0 毫秒，而 Safe Check 为 9.46 毫秒，差值就是跨区域往返的代价。写入最慢，因为它们 "always require distributed coordination among Spanner servers"（总是需要 Spanner 服务器之间的分布式协调）（§4.2）；在 Spanner 中，这种协调包括提交等待。根据 §4.1 和图 3，Safe 请求的数量比 Recent 请求多 "about two orders of magnitude"（约两个数量级），"which allows Zanzibar to serve the vast majority of ACL checks locally"（这使 Zanzibar 能够在本地处理绝大多数 ACL 检查）。大多数请求之所以可以是 Safe 的，是因为 zookie 只是一个下界：对较旧内容的检查可以使用较旧的、已经复制好的数据。
+
+<Callout kind="note" title="未经核实">
+
+论文把 Gifford 的工作引为 1981 年的斯坦福博士论文（参考文献 18）；Spanner 论文则把同一工作引为 Xerox PARC 技术报告 CSL-81-8，1982 年 7 月。本页没有核对任何在线副本。
+
+</Callout>
+
+## 来源
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.2, §2.4, §2.4.4, §3.2.1, §3.2.5, §4.1, §4.2 (Table 2), §5.
+- James C. Corbett et al., [Spanner: Google's Globally-Distributed Database](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), OSDI '12, §1, §3, §4.1, §4.1.2, §4.2.1.
+- Maurice P. Herlihy and Jeannette M. Wing, [Linearizability: A Correctness Condition for Concurrent Objects](https://doi.org/10.1145/78969.78972), ACM TOPLAS 12(3), July 1990, pp. 463–492.
+- Philip A. Bernstein and Nathan Goodman, [Multiversion Concurrency Control: Theory and Algorithms](https://doi.org/10.1145/319996.319998), ACM TODS 8(4), December 1983.
+- David K. Gifford, *Information Storage in a Decentralized Computer System*, PhD thesis, Stanford, 1981（Zanzibar 参考文献 18）；另见 Xerox PARC CSL-81-8（Spanner 参考文献 16）。未核实链接。

@@ -1,0 +1,370 @@
+---
+title: "アーキテクチャ: 1 つの Check から Spanner まで"
+description: "Zanzibar を支えるサーバーとデータベースを、1 つの Check リクエストと Watch ストリームに沿って追う。"
+section: guide
+part: mechanisms
+order: 5
+checked: "2026-11-13"
+paper: ["3", "3.1", "3.2.5", "3.2.6", "3.2.7", "4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar は、Spanner データベース群の前に置かれたサーバー群である。本ページではまず構成要素を挙げ、次に 1 つの Check リクエストがそれらをどう通るかを追い、最後にデータがディスク上でどう配置されているかを見る。末尾の数値は、論文が 2018 年の本番環境について報告しているものである。
+
+## 構成要素
+
+どんな箱があり、その間をデータはどちら向きに流れるのか。論文は図 2 でこれに答えている。下の図はその配色 (クライアントは青、サーバーは黄、Spanner データベースは緑) を保ち、細部を省いたものである。
+
+<Graph
+  width={640}
+  height={400}
+  minWidth={560}
+  title="Zanzibar のアーキテクチャ (簡略版)"
+  desc="クライアントは Zanzibar のサービングクラスタ内の aclserver に Check、Read、Expand、Write を送る。watchserver は論文と同じくクラスタの外に描いている。aclserver は Spanner から名前空間設定を読み込み、名前空間ごとに 1 つある Spanner データベースでリレーションタプルを読み書きし、すべての書き込みを同じく Spanner にある変更ログに追記する。watchserver は変更ログを追いかけ、変更をクライアント (Watch API) と Leopard (論文の図 2 は Leopard を別のインデックスシステムとして描いている) にストリームする。定期実行のオフラインパイプラインはタプルデータベースを読み、スナップショットをダンプし、古いバージョンをガベージコレクションする。Leopard はそのスナップショットからインデックスを構築し、aclserver のために集合計算に答える。"
+  groups={[
+    { x: 178, y: 28, w: 184, h: 112, label: "Zanzibar サービングクラスタ" },
+    { x: 425, y: 20, w: 210, h: 262, label: "Spanner" },
+  ]}
+  nodes={[
+    { id: "cl", x: 55, y: 90, label: "クライアント", kind: "client" },
+    { id: "acl", x: 270, y: 90, label: "aclservers", kind: "server" },
+    { id: "watch", x: 270, y: 250, label: "watchserver", kind: "server" },
+    { id: "wcl", x: 55, y: 250, label: "クライアント", kind: "client" },
+    { id: "cfg", x: 531, y: 70, label: "名前空間設定", kind: "store" },
+    { id: "tup", x: 531, y: 150, label: "リレーションタプル\n(名前空間ごとに 1 DB)", kind: "store" },
+    { id: "log", x: 495, y: 248, label: "変更ログ", kind: "store" },
+    { id: "pipe", x: 585, y: 360, label: "オフライン\nパイプライン\n(定期実行)", kind: "server" },
+    { id: "leo", x: 120, y: 360, label: "Leopard", kind: "server" },
+  ]}
+  edges={[
+    { from: "cl", to: "acl", label: "Check, Read,\nExpand, Write", dir: "both" },
+    { from: "cfg", to: "acl", label: "読み込み" },
+    { from: "acl", to: "tup", label: "読み取り、書き込み", dir: "both", labelOffset: 12 },
+    { from: "acl", to: "log", label: "追記", labelOffset: -12 },
+    { from: "log", to: "watch", label: "追跡" },
+    { from: "watch", to: "wcl", label: "Watch" },
+    { from: "watch", to: "leo", label: "変更" },
+    { from: "tup", to: "pipe", label: "ダンプ、\nGC", dir: "both", labelOffset: -24 },
+    { from: "pipe", to: "leo", label: "スナップショット" },
+    { from: "leo", to: "acl", label: "集合\n計算", labelOffset: -34 },
+  ]}
+  caption="論文の図 2 を簡略化して描き直したもの。矢印はデータの流れる向きを示す。クライアントが 2 回出てくるのは線を離すためだけであり、aclserver を呼ぶクライアントと Watch を購読するクライアントは同じである。"
+/>
+
+クライアントが 2 種類のサーバーとやり取りしている点に注目してほしい。`aclservers` は 4 種類のリクエストに答え、`watchservers` は変更をストリームするだけである。論文の言葉では、`aclservers` は "are organized in clusters and respond to Check, Read, Expand, and Write requests" (クラスタとして編成され、Check、Read、Expand、Write の各リクエストに応答する)。一方 `watchservers` は "tail the changelog and serve a stream of namespace changes to clients in near real time" (変更ログを追いかけ、名前空間の変更のストリームをほぼリアルタイムでクライアントに提供する) (§3)。Leopard は大きなグループや深く入れ子になったグループのためのインデックスであり、[専用のページ](../leopard/) がある。
+
+オフラインパイプラインは "dumps of the relation tuples in each namespace at a known snapshot timestamp" (既知のスナップショットタイムスタンプにおける各名前空間のリレーションタプルのダンプ) を作り、"tuple versions older than a threshold configured per namespace" (名前空間ごとに設定されたしきい値より古いタプルバージョン) をガベージコレクションする (§3)。
+
+## 1 つの Check を順に追う
+
+追うリクエストは「Beto は readme の閲覧者か」である。共通の例では readme の閲覧者には `group:eng` のメンバーが含まれ、Beto はその一人なので、答えは yes である。Zanzibar はそれを、`doc:readme` と `group:eng` の 2 つのオブジェクトを読んで確かめなければならない。
+
+### 任意のサーバーに届き、そこからファンアウトする
+
+どのサーバーが作業をするのか。どのサーバーでもリクエストを受けられ、作業はそこからオブジェクトごとに分散される。
+
+<Graph
+  width={640}
+  height={260}
+  title="Check はクラスタ全体にファンアウトする"
+  desc="クライアントが aclserver A に Check を送る。サーバー A は doc:readme を担当する aclserver B に、Beto が readme の閲覧者かを尋ねる。サーバー B は group:eng のメンバーが閲覧者であることを見つけ、group:eng を担当する aclserver C に Beto がメンバーかを尋ねる。答えは同じ矢印をたどって A に戻り、A がクライアントに応答する。"
+  nodes={[
+    { id: "cl", x: 60, y: 130, label: "クライアント", kind: "client" },
+    { id: "a", x: 240, y: 130, label: "aclserver A\nCheck を受信", kind: "server" },
+    { id: "b", x: 480, y: 60, label: "aclserver B\nキー: doc:readme", kind: "server", on: true },
+    { id: "c", x: 480, y: 210, label: "aclserver C\nキー: group:eng", kind: "server", on: true },
+  ]}
+  edges={[
+    { from: "cl", to: "a", label: "Check", dir: "both" },
+    { from: "a", to: "b", label: "readme の閲覧者?", dir: "both", labelOffset: -12 },
+    { from: "b", to: "c", label: "eng のメンバー?", dir: "both" },
+  ]}
+  caption="Check(user:beto, viewer, doc:readme)。答えは同じ矢印をたどって戻り、A がクライアントに応答する。"
+/>
+
+サーバー A はどちらのオブジェクトも担当している必要がなかった。論文はまさにこの形を説明している。"Requests arrive at any server in a cluster and that server fans out the work to other servers in the cluster as necessary. Those servers may in turn contact other servers to compute intermediate results. The initial server gathers the final result and returns it to the client." (リクエストはクラスタ内の任意のサーバーに到着し、そのサーバーは必要に応じて作業をクラスタ内の他のサーバーにファンアウトする。それらのサーバーはさらに、中間結果を計算するために他のサーバーに問い合わせることがある。最初のサーバーが最終結果を集めてクライアントに返す。) (§3)
+
+### コンシステントハッシュが問い合わせ先を決める
+
+A は readme について B に尋ねればよいとどうやって知ったのか。クラスタのサーバー群は 1 つの分散キャッシュを構成している。"Cache entries are distributed across Zanzibar servers with consistent hashing" (キャッシュエントリはコンシステントハッシュによって Zanzibar のサーバー群に分散される) (§3.2.5)。この方式は [Karger ら (STOC '97)](https://people.csail.mit.edu/karger/Papers/web.pdf) によるもので、論文は [20] として引用している。ほとんどの名前空間では、転送キーはオブジェクト ID から計算される (§3.2.5)。
+
+<Graph
+  width={640}
+  height={350}
+  title="サーバーのリングに対応づけられた転送キー"
+  desc="4 台の aclserver A、B、C、D がリング上に並ぶ。リクエスト doc:readme#viewer と doc:readme#owner はどちらもオブジェクト doc:readme でハッシュされ、サーバー B に向かう。group:eng#member はサーバー C に、folder:A#viewer はサーバー D に向かう。"
+  nodes={[
+    { id: "A", x: 320, y: 60, label: "aclserver A", kind: "server" },
+    { id: "B", x: 420, y: 165, label: "aclserver B", kind: "server" },
+    { id: "C", x: 320, y: 270, label: "aclserver C", kind: "server" },
+    { id: "D", x: 220, y: 165, label: "aclserver D", kind: "server" },
+    { id: "kv", x: 545, y: 50, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "ko", x: 545, y: 275, label: "doc:readme#owner", kind: "object", mono: true },
+    { id: "kg", x: 130, y: 325, label: "group:eng#member", kind: "object", mono: true },
+    { id: "kf", x: 100, y: 60, label: "folder:A#viewer", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "A", to: "B", dir: "none" },
+    { from: "B", to: "C", dir: "none" },
+    { from: "C", to: "D", dir: "none" },
+    { from: "D", to: "A", dir: "none" },
+    { from: "kv", to: "B", label: "hash(doc:readme)", dashed: true, on: true, labelOffset: -14 },
+    { from: "ko", to: "B", label: "hash(doc:readme)", dashed: true, on: true, labelOffset: 14 },
+    { from: "kg", to: "C", label: "hash(group:eng)", dashed: true, labelOffset: 14 },
+    { from: "kf", to: "D", label: "hash(folder:A)", dashed: true, labelOffset: -12 },
+  ]}
+  caption="キーが関係ではなくオブジェクトなので、readme に対する 2 つのリクエストはどちらも B に向かう。リングはコンシステントハッシュの教科書的な図であり、Zanzibar がどの変種を使っているかは論文に書かれていない。"
+/>
+
+readme の `viewer` と `owner` が同じサーバーで出会う点に注目してほしい。それがオブジェクトをキーにする理由である。"processing a check on ⟨*object#relation*⟩ often involves indirect ACL checks on other relations of the same object and reading relation tuples of the object. These checks and reads can be processed by the same server since they share the same forwarding key with the parent check request." (⟨*object#relation*⟩ に対するチェックの処理には、しばしば同じオブジェクトの他の関係に対する間接的な ACL チェックや、そのオブジェクトのリレーションタプルの読み取りが伴う。これらのチェックと読み取りは、親のチェックリクエストと同じ転送キーを共有するので、同じサーバーで処理できる。) (§3.2.5) Karger らは、キャッシュが追加・削除されたときに、負荷の均衡を保つのに必要な最小限の割合のオブジェクトだけが移動すればよいようにコンシステントハッシュを設計した。キャッシュに向いているのはそのためである。
+
+ホットなキーについて、論文は [Slicer](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya) を "to help distribute hot keys to multiple servers" (ホットなキーを複数のサーバーに分散させるのを助けるために) 使っていると付け加えている (§3.2.5)。
+
+### 呼び出しの両端が答えをキャッシュする
+
+多数のサーバーが一度に C へ `group:eng` について尋ねたらどうなるか。たとえば、検索結果ページが eng と共有されている数十のドキュメントをチェックする場合である。
+
+<Graph
+  width={640}
+  height={300}
+  title="呼び出し元と呼び出し先のキャッシュが木を作る"
+  desc="それぞれキャッシュを持つ 3 台の aclserver A、D、E が、aclserver C にあるユーザーが group:eng のメンバーかを尋ねる。サーバー C も自身のキャッシュを持ち、ミスしたときだけ Spanner から group:eng のタプルを読む。"
+  nodes={[
+    { id: "a", x: 100, y: 60, label: "aclserver A\n+ キャッシュ", kind: "server" },
+    { id: "d", x: 100, y: 150, label: "aclserver D\n+ キャッシュ", kind: "server" },
+    { id: "e", x: 100, y: 240, label: "aclserver E\n+ キャッシュ", kind: "server" },
+    { id: "c", x: 340, y: 150, label: "aclserver C\n+ キャッシュ", kind: "server", on: true },
+    { id: "db", x: 570, y: 150, label: "group のタプル\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "a", to: "c", label: "eng のメンバー?" },
+    { from: "d", to: "c" },
+    { from: "e", to: "c" },
+    { from: "c", to: "db", label: "ミス時", on: true },
+  ]}
+  caption="呼び出し元でのヒットは C への RPC を 1 回省く。C でのヒットは Spanner からの読み取りを 1 回省く。"
+/>
+
+呼び出し元のキャッシュと呼び出し先のキャッシュは積み重なって木になる。"To handle hot forwarding keys, we cache results at both the caller and the callee of internal RPCs, effectively forming cache trees." (ホットな転送キーに対処するため、内部 RPC の呼び出し元と呼び出し先の両方で結果をキャッシュし、実質的にキャッシュの木を形成している。) (§3.2.5) キャッシュキーにはスナップショットタイムスタンプが含まれ、タイムスタンプは "rounded up to a coarse granularity, such as one or ten seconds" (1 秒や 10 秒といった粗い粒度に切り上げられる) ので、最近のリクエストの大半がエントリを共有できる (§3.2.5)。本番環境では、チェックのキャッシュは "a 10% hit rate on the delegate’s side" (委譲先側で 10% のヒット率) と、委譲元側で "a 2% hit rate" (2% のヒット率) だった。論文は、これらの率は低く見えるが "they prevent 500K internal RPCs per second from creating hot spots" (毎秒 50 万の内部 RPC がホットスポットを生むのを防いでいる) と述べている (§4.4)。
+
+### ロックテーブルが同一のリクエストをまとめる
+
+キャッシュが役に立つのは、答えを保持してからである。最初のリクエストが終わる前に同一のリクエストが多数届けば、すべてがミスして Spanner に向かうことになる。これが [キャッシュスタンピード](https://en.wikipedia.org/wiki/Cache_stampede) である (論文の参考文献 [3])。C はそれをどう避けるのか。
+
+<Swimlane
+  lanes={["リクエスト 1", "aclserver C", "リクエスト 2", "Spanner"]}
+  laneWidth={140}
+  rowHeight={58}
+  timeLabel="時間"
+  title="ロックテーブルは複数の同一リクエストのうち 1 つだけを通す"
+  desc="リクエスト 1 が C にキャッシュキー K を求める。C はミスし、K をロックテーブルに記録する。リクエスト 2 が同じキーを求め、待たされる。C は Spanner から行を 1 回だけ読み、キャッシュを埋め、エントリを解放する。両方のリクエストが答えを得る。"
+  events={[
+    { lane: 0, t: 0, label: "キー K を要求", kind: "read" },
+    { lane: 1, t: 0, label: "ミス: K をロック", kind: "write" },
+    { lane: 2, t: 1, label: "キー K を要求", kind: "read" },
+    { lane: 1, t: 1, label: "K はロック中: 待機", kind: "note" },
+    { lane: 1, t: 2, label: "1 回だけ読む", kind: "read" },
+    { lane: 3, t: 2, label: "行", kind: "read" },
+    { lane: 1, t: 3, label: "キャッシュを埋める", kind: "good" },
+    { lane: 0, t: 4, label: "回答", kind: "good" },
+    { lane: 2, t: 4, label: "回答", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [2, 1], to: [1, 1] },
+    { from: [1, 2], to: [3, 2] },
+    { from: [1, 3], to: [0, 4] },
+    { from: [1, 3], to: [2, 4] },
+  ]}
+  caption="リクエスト 2 は Spanner に向かわずにブロックする。キー K について発行される読み取りは 1 回だけである。"
+/>
+
+論文によれば、"we maintain a *lock table* on each server to track outstanding reads and checks. Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated." (各サーバーに *ロックテーブル* を保持し、処理中の読み取りとチェックを追跡する。同じキャッシュキーを共有するリクエストのうち処理を始めるのは 1 つだけであり、残りはキャッシュが埋まるまでブロックされる。) (§3.2.5) チェックについては、ロックテーブルによって委譲先側で "an additional 12%" (さらに 12%)、委譲元側で "an additional 3%" (さらに 3%) が節約された (§4.4)。
+
+2 つの改良が後から加えられた (§3.2.5)。非常に人気のあるオブジェクトについては、Zanzibar は ⟨*object#relation*⟩ の *すべての* タプルを一度に読んでキャッシュし、"trading read bandwidth for cacheability" (読み取り帯域と引き換えにキャッシュしやすさを得る)。また、キャンセルされたサブチェックはキャッシュキーを空のまま残すので、"eager cancellation when there are waiters on the corresponding lock table entry" (対応するロックテーブルのエントリに待機者がいる場合の積極的なキャンセル) を遅らせる。
+
+### Spanner への読み取りはプールされる
+
+次に、1 つのオブジェクトの複数の関係に触れるチェックを考える。Chen は readme の閲覧者か。論文の図 1 の設定では、`viewer` は `editor` を含み、`editor` は `owner` を含み、`parent` フォルダの閲覧者はドキュメントの閲覧者である。したがってサーバー B は readme のタプルセットを 4 つ読む必要がある。
+
+<Graph
+  width={640}
+  height={300}
+  title="1 つのチェックの葉の読み取りは 1 つのプールを共有する"
+  desc="Chen が doc:readme の閲覧者かを評価するには、readme の viewer、editor、owner、parent のタプルが必要である。4 つの葉は aclserver B 上で同時に評価され、B はそれらの読み取りをプールしてから Spanner の doc データベースに送る。"
+  nodes={[
+    { id: "v", x: 110, y: 50, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "e", x: 110, y: 117, label: "doc:readme#editor", kind: "object", mono: true },
+    { id: "o", x: 110, y: 184, label: "doc:readme#owner", kind: "object", mono: true },
+    { id: "p", x: 110, y: 251, label: "doc:readme#parent", kind: "object", mono: true },
+    { id: "b", x: 350, y: 150, label: "aclserver B\n読み取りをプール", kind: "server", on: true },
+    { id: "db", x: 575, y: 150, label: "doc のタプル\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "v", to: "b" },
+    { from: "e", to: "b" },
+    { from: "o", to: "b" },
+    { from: "p", to: "b" },
+    { from: "b", to: "db", label: "RPC が減る", on: true },
+  ]}
+  caption="Check(user:chen, viewer, doc:readme)。4 つの葉はすべて同時に始まり、その読み取りはまとめて送られる。"
+/>
+
+葉は並行に実行される。"we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled." (ブール式の木のすべての葉ノードを並行に評価する。あるノードの結果が部分木の結果を決めたときは、その部分木の他のノードの評価はキャンセルされる。) (§3.2.3) その読み取りはまとめられる。"We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner." (同じ ACL チェックのための読み取りをまとめるプーリング機構を適用し、Spanner への読み取り RPC の数を最小限に抑えている。) (§3.2.3) その後 parent タプルが `folder:A` を指し、`folder:A#viewer` は `folder:A` を担当するサーバーに転送され、そこで Chen が見つかる。1 つのプールが何回の RPC になるかは論文に書かれておらず、「減る」というところまでしか言えない。
+
+タプルの配置がこれを安価にしている。主キーの順序は "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair" (あるオブジェクト ID や *(オブジェクト ID, 関係)* ペアに対するすべてのリレーションタプルを引けるようにする) (§3.1.1、後述の [ストレージ](#ストレージ) を参照)。
+
+### 遅い Spanner 読み取りはヘッジされる
+
+リクエストとは無関係な理由で遅くなる読み取りもある。Spanner と Leopard への呼び出しについて、Zanzibar はリクエストのヘッジを用いる。これは論文の参考文献 [16] である [Dean と Barroso の「The Tail at Scale」(CACM、2013)](https://research.google/pubs/the-tail-at-scale/) による技法である。2 つ目のリクエストはいつ送られるのか。
+
+<Swimlane
+  lanes={["aclserver", "Spanner レプリカ 1", "Spanner レプリカ 2"]}
+  laneWidth={180}
+  rowHeight={58}
+  timeLabel="時間"
+  title="遅延させたヘッジ読み取り"
+  desc="aclserver が Spanner レプリカ 1 に読み取りを送るが、レプリカ 1 は遅い。ヘッジの遅延時間が過ぎた後、aclserver は同じ読み取りをレプリカ 2 に送る。レプリカ 2 が先に答え、aclserver はその答えを使い、レプリカ 1 での読み取りをキャンセルする。"
+  events={[
+    { lane: 0, t: 0, label: "読み取りを送信", kind: "read" },
+    { lane: 1, t: 0, label: "遅い", kind: "bad" },
+    { lane: 0, t: 1, label: "遅延時間が経過", kind: "note" },
+    { lane: 2, t: 1, label: "同じ読み取り", kind: "read" },
+    { lane: 2, t: 2, label: "応答", kind: "good" },
+    { lane: 0, t: 3, label: "先着の応答を使う", kind: "good" },
+    { lane: 1, t: 4, label: "キャンセル済み", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [0, 1], to: [2, 1], label: "ヘッジ" },
+    { from: [2, 2], to: [0, 3] },
+    { from: [0, 3], to: [1, 4], label: "キャンセル", dashed: true },
+  ]}
+  caption="ヘッジは、最初の読み取りが遅いとわかってから初めて送られる。"
+/>
+
+ヘッジとは "we send the same request to multiple servers, use whichever response comes back first, and cancel the other requests" (同じリクエストを複数のサーバーに送り、最初に返ってきた応答を使い、他のリクエストをキャンセルする) ことである (§3.2.7)。2 つ目のリクエストは待つ。"we first send one request and defer sending hedged requests until the initial request is known to be slow" (まず 1 つのリクエストを送り、最初のリクエストが遅いとわかるまでヘッジリクエストの送信を遅らせる)。遅延時間は "*N*th percentile latency based on recent measurements" (最近の測定に基づく *N* パーセンタイルのレイテンシ) の推定器で決まる (§3.2.7)。本番環境では "1% of Spanner reads, or 200K reads per second, benefit from hedging" (Spanner 読み取りの 1%、すなわち毎秒 20 万の読み取りがヘッジの恩恵を受けている) (§4.4)。
+
+<Callout kind="note" title="aclserver 間ではヘッジしない">
+Zanzibar は自身の内部呼び出しをヘッジしない。チェックはコストがまちまちだからである。"Hedging check requests would result in duplicating the most expensive workloads and, ironically, worsening latency." (チェックリクエストをヘッジすると、最もコストの高いワークロードを重複させることになり、皮肉にもレイテンシを悪化させる。) (§3.2.7) 代わりにレプリカと監視によって遅いサーバーを避けている。
+</Callout>
+
+### クライアントごとに上限を設ける
+
+共有サービスは、あるクライアントが他のクライアントを遅くするのを防がなければならない。§3.2.6 は 4 つの制限を挙げている。
+
+- CPU: 各 RPC のコストは "generic *cpu-seconds*" (汎用の *CPU 秒*) で計られる。各クライアントにはグローバルな CPU 上限があり、"its RPCs will be throttled if it exceeds the limit *and* there is no spare capacity in the overall system." (上限を超え、*かつ* システム全体に余剰容量がない場合、その RPC はスロットリングされる。)
+- 処理中の RPC: 各サーバーは総数と、クライアントごとの数を制限する。
+- Spanner: "the maximum number of concurrent reads per *(object, client)* and per client on each Spanner server." (各 Spanner サーバー上での *(オブジェクト, クライアント)* ごと、およびクライアントごとの同時読み取りの最大数。)
+- ロックテーブル: "different lock table keys for requests from different clients" (異なるクライアントからのリクエストには異なるロックテーブルキーを用いる)。これにより、Spanner があるクライアントをスロットリングしても、別のクライアントがブロックされない。
+
+## Watch の経路
+
+書き込みはストリームにも流れる。Anne がタプルを書き込んだ後、その変更はどこへ行くのか。
+
+<Graph
+  width={640}
+  height={330}
+  title="書き込みから Watch ストリームまで"
+  desc="クライアントが aclserver に Write を送る。aclserver は 1 つの Spanner トランザクションの中で、タプルを doc 名前空間のデータベースに、エントリを変更ログのシャードに書き込む。watchserver は変更ログを追いかけ、変更を Watch クライアントと Leopard のインクリメンタルインデクサにストリームする。"
+  nodes={[
+    { id: "w", x: 60, y: 70, label: "クライアント\nWrite", kind: "client" },
+    { id: "acl", x: 230, y: 70, label: "aclserver", kind: "server" },
+    { id: "tup", x: 470, y: 40, label: "doc のタプル", kind: "store" },
+    { id: "log", x: 470, y: 140, label: "変更ログシャード", kind: "store", on: true },
+    { id: "watch", x: 470, y: 240, label: "watchserver", kind: "server", on: true },
+    { id: "cl", x: 300, y: 300, label: "Watch クライアント", kind: "client" },
+    { id: "leo", x: 580, y: 300, label: "Leopard\nインデクサ", kind: "server" },
+  ]}
+  edges={[
+    { from: "w", to: "acl", label: "タプル" },
+    { from: "acl", to: "tup", label: "同一 txn", labelOffset: -10 },
+    { from: "acl", to: "log", label: "同一 txn", labelOffset: 10 },
+    { from: "log", to: "watch", label: "追跡", on: true },
+    { from: "watch", to: "cl", label: "変更" },
+    { from: "watch", to: "leo" },
+  ]}
+  caption="タプルとその変更ログのエントリは 1 つのトランザクションでコミットされるので、ストリームが書き込みを取りこぼしたり、コミットされなかった書き込みを見せたりすることはない。"
+/>
+
+"Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction." (Zanzibar のすべての書き込みは、単一のトランザクションでタプルストレージと変更ログシャードの両方にコミットされる。) 変更ログシャードをホストする Spanner サーバーは、"to minimize blocking of changelog reads on pending transactions" (保留中のトランザクションによって変更ログの読み取りがブロックされるのを最小限に抑えるため) トランザクションコーディネータとして振る舞う (§3.1.2)。Leopard はこのストリームの消費者の一つである。そのインクリメンタルインデクサは "calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications" (Zanzibar の Watch API を呼び出して、時間順に並んだ Zanzibar のタプル変更のストリームを受け取る) (§3.2.4)。
+
+## ストレージ
+
+どんなデータベースがあり、行はどんな形をしているのか。データベースは 3 種類ある (§3)。
+
+<Graph
+  width={640}
+  height={300}
+  title="Zanzibar の Spanner データベース"
+  desc="名前空間ごとに 1 つのデータベースがリレーションタプルを保持する。ここでは doc、group、folder である。単一の名前空間設定データベースが、設定と設定更新の変更ログを保持する。すべての名前空間が共有する単一の変更ログデータベースが、タプルの更新を記録する。aclserver はタプルデータベースを読み書きし、設定データベースを読み込んで監視し、変更ログに追記する。"
+  nodes={[
+    { id: "doc", x: 90, y: 60, label: "doc のタプル", kind: "store" },
+    { id: "grp", x: 90, y: 150, label: "group のタプル", kind: "store" },
+    { id: "fol", x: 90, y: 240, label: "folder のタプル", kind: "store" },
+    { id: "acl", x: 320, y: 150, label: "aclservers", kind: "server" },
+    { id: "cfg", x: 520, y: 60, label: "名前空間設定\n(設定 + その変更ログ)", kind: "store" },
+    { id: "log", x: 520, y: 240, label: "変更ログ\n(全名前空間)", kind: "store" },
+  ]}
+  edges={[
+    { from: "acl", to: "doc", dir: "both" },
+    { from: "acl", to: "grp", label: "読み取り、書き込み", dir: "both" },
+    { from: "acl", to: "fol", dir: "both" },
+    { from: "cfg", to: "acl", label: "読み込み、監視" },
+    { from: "acl", to: "log", label: "追記" },
+  ]}
+  caption="名前空間ごとに 1 つのタプルデータベース (左)、すべての名前空間が共有する 1 つの設定データベースと 1 つの変更ログ (右)。"
+/>
+
+**タプルデータベース。** "We store relation tuples of each namespace in a separate database, where each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*." (各名前空間のリレーションタプルを別々のデータベースに格納し、各行は主キー *(シャード ID, オブジェクト ID, 関係, ユーザー, コミットタイムスタンプ)* で識別される。) (§3.1.1) コミットタイムスタンプがキーの一部なので、古いバージョンはそれぞれ別の行に残り、"so that we can evaluate checks and reads at any timestamp within the garbage collection window" (ガベージコレクションの期間内の任意のタイムスタンプでチェックと読み取りを評価できる)。共通の例のタプルは、`doc` と `group` のデータベースに次のように置かれることになる。
+
+| データベース | シャード ID | オブジェクト ID | 関係 | ユーザー | コミットタイムスタンプ |
+| --- | --- | --- | --- | --- | --- |
+| `doc` | *s*(readme) | `readme` | `owner` | `user:anne` | *t*₁ |
+| `doc` | *s*(readme) | `readme` | `parent` | `folder:A#...` | *t*₂ |
+| `doc` | *s*(readme) | `readme` | `viewer` | `group:eng#member` | *t*₃ |
+| `group` | *s*(eng) | `eng` | `member` | `user:beto` | *t*₄ |
+
+1 つのオブジェクトの行はまとまって並ぶ。論文によれば、このキー順序は "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair" (あるオブジェクト ID や *(オブジェクト ID, 関係)* ペアに対するすべてのリレーションタプルを引けるようにする)。"Usually the shard ID is determined solely by the object ID" (通常、シャード ID はオブジェクト ID だけで決まる)。メンバーが非常に多いグループでは、"computed from both object ID and user" (オブジェクト ID とユーザーの両方から計算される) こともある (§3.1.1)。論文はシャード関数を示していないので、上の *s*(…) は仮置きであり、ユーザー列の正確なエンコーディングも説明されていない。
+
+**変更ログ。** すべての名前空間で 1 つのデータベースであり、*(変更ログシャード ID, タイムスタンプ, 一意の更新 ID)* をキーとする。"where a changelog shard is randomly selected for each write" (変更ログシャードは書き込みごとにランダムに選ばれる) (§3.1.2)。
+
+**名前空間設定。** 2 つのテーブルを持つ 1 つのデータベースである。"keyed by namespace IDs" (名前空間 ID をキーとする) 設定と、"keyed by commit timestamps" (コミットタイムスタンプをキーとする) "a changelog of config updates" (設定更新の変更ログ) である。サーバーは起動時にすべての設定を読み込み、その後はその変更ログを追いかける (§3.1.3)。
+
+**レプリケーション。** "Replicas exist in dozens of locations around the world, with multiple replicas per region. The 5 voting replicas are in eastern and central United States, in 3 different metropolitan areas to isolate failures but within 25 milliseconds of each other so that Paxos transactions commit quickly." (レプリカは世界中の数十の場所にあり、リージョンごとに複数のレプリカがある。5 つの投票レプリカは米国東部と中部にあり、障害を隔離するために 3 つの異なる都市圏に置かれているが、Paxos トランザクションが速くコミットするよう互いに 25 ミリ秒以内の距離にある。) (§3.1.4) Spanner 自体は論文の参考文献 [15] である [Corbett ら (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf) で説明されている。
+
+## 運用上の数値
+
+論文の §4 は次の数値を報告している。API ごとのピークとレイテンシは 2018 年 12 月の 7 日間のものである (§4、§4.2)。その他の数値について、論文は期間を明示していない。各セルは原文のまま引用する。
+
+| 項目 | 論文の記述 | § |
+| --- | --- | --- |
+| 本番運用期間 | "more than 5 years" (5 年以上) | 4 |
+| 名前空間 | "more than 1,500 namespaces defined by hundreds of client applications" (数百のクライアントアプリケーションが定義した 1,500 以上の名前空間) | 4 |
+| タプル | "more than 2 trillion relation tuples that occupy close to 100 terabytes" (100 テラバイト近くを占める 2 兆以上のリレーションタプル) | 4 |
+| レプリケーション | "fully replicated in more than 30 locations around the world" (世界中の 30 以上の場所に完全に複製) | 4 |
+| クライアント負荷 | "more than 10 million client queries per second (QPS)" (毎秒 1,000 万以上のクライアントクエリ (QPS)) | 4 |
+| API ごとのピーク | "Check requests peak at roughly 4.2M QPS, Read at 8.2M, Expand at 760K, and Write at 25K" (ピークは Check が約 4.2M QPS、Read が 8.2M、Expand が 760K、Write が 25K) | 4 |
+| サーバー | "more than 10,000 servers organized in several dozen clusters around the world" (世界中の数十のクラスタに編成された 10,000 台以上のサーバー) | 4 |
+| クラスタあたりのサーバー | "from fewer than 100 to more than 1,000, with the median near 500" (100 台未満から 1,000 台超まで、中央値は 500 台前後) | 4 |
+| Check Safe のレイテンシ | "At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively." (50、95、99、99.9 パーセンタイルで、ピークはそれぞれ約 3、11、20、93 ミリ秒。) | 4.2 |
+| 可用性 | "above 99.999% over the past 3 years of operation at Google" (Google での過去 3 年間の運用で 99.999% 超) | 4.3 |
+| 内部 RPC | "22 million internal “delegated” RPCs per second, split about evenly between reads and checks" (毎秒 2,200 万の内部「委譲」RPC。読み取りとチェックがほぼ半々) | 4.4 |
+| キャッシュ参照 | "approximately 200 million lookups per second at peak, 150 million from checks and 50 million from reads" (ピーク時に毎秒約 2 億回の参照。うちチェックが 1.5 億、読み取りが 5,000 万) | 4.4 |
+| Spanner への読み取り | "only 20 million read RPCs per second to Spanner" (Spanner への読み取り RPC は毎秒わずか 2,000 万) | 4.4 |
+| Spanner の読み取りレイテンシ | "0.5 msec at the median, and 2 msec at the 95th percentile" (中央値で 0.5 ミリ秒、95 パーセンタイルで 2 ミリ秒) | 4.4 |
+| ヘッジされた読み取り | "1% of Spanner reads, or 200K reads per second, benefit from hedging" (Spanner 読み取りの 1%、すなわち毎秒 20 万の読み取りがヘッジの恩恵を受けている) | 4.4 |
+
+最後の数行の比率に注目してほしい。毎秒 2 億回のキャッシュ参照に対して、Spanner への読み取り RPC は 2,000 万回である。ストレージに送られる読み取り 1 回につき、約 10 回のメモリ内参照が行われている。
+
+## 出典
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3, §3.1, §3.2.3, §3.2.5–§3.2.7, §4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- Karger et al., "Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the World Wide Web", STOC '97 (論文の参考文献 [20]): [https://people.csail.mit.edu/karger/Papers/web.pdf](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- Dean and Barroso, "The Tail at Scale", Communications of the ACM 56(2), 2013 (論文の参考文献 [16]): [https://research.google/pubs/the-tail-at-scale/](https://research.google/pubs/the-tail-at-scale/)
+- "Cache stampede", Wikipedia, 論文が引用しているもの (参考文献 [3]): [https://en.wikipedia.org/wiki/Cache_stampede](https://en.wikipedia.org/wiki/Cache_stampede)
+- Adya et al., "Slicer: Auto-sharding for datacenter applications", OSDI '16 (論文の参考文献 [12]): [https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya)
+- Corbett et al., "Spanner: Google's globally-distributed database", OSDI '12 (論文の参考文献 [15]): [https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)

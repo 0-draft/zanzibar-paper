@@ -1,0 +1,237 @@
+---
+title: "사용자가 볼 수 있는 것 나열하기"
+description: "\"Anne이 볼 수 있는 모든 문서\"가 Check와 다른 질문인 이유, 논문이 그에 대해 제공하는 것, 그리고 실무에서 쓰이는 세 가지 방법."
+section: guide
+part: practice
+order: 8
+checked: "2026-11-13"
+paper: ["1", "2.4.1", "2.4.3", "2.4.5", "3.2.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Check는 질문 하나에 답한다. 이 사용자는 이 객체에 이 일을 해도 되는가. 목록 페이지는 다른 질문을 한다. 이 사용자는 어떤 객체를 볼 수 있는가, 그것도 필터링하고 정렬하여 한 페이지씩. 이 페이지는 두 번째 질문이 왜 더 어려운지, 논문이 그에 대해 무엇을 제공하는지, 그리고 Zanzibar 계열 제품들이 문서화한 세 가지 방법을 설명한다.
+
+## Check와는 다른 질문
+
+Check는 객체 하나에서 시작하여 사용자를 찾거나 경로가 다할 때까지 튜플을 따라간다(§2.4.4, §3.2.3). 작업량은 그 객체에 매달린 것으로 한정된다. "Anne이 볼 수 있는 모든 문서"에는 시작 객체가 없다. 이를 Check로 답하려면 시스템의 문서마다 Check를 하나씩 해야 하며, 그 대부분은 "아니요"로 답해진다.
+
+목록에는 인가 서비스가 가지고 있지 않은 데이터도 필요하다. OpenFGA의 가이드는 이렇게 말한다. 서비스는 "does not store object metadata (names of files, creation dates, time of last update, etc)"(객체 메타데이터(파일 이름, 생성 날짜, 마지막 갱신 시각 등)를 저장하지 않으므로), 검색은 "will require data from your database"(여러분의 데이터베이스에 있는 데이터를 필요로 한다)([OpenFGA, Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)). 필터링과 정렬은 여러분의 데이터베이스에서 일어나고, 인가는 다른 서비스에서 일어나며, 답은 그 둘의 교집합이다.
+
+논문은 이 용도를 잘 알고 있다. 통합 시스템을 만드는 첫 번째 동기로 든 것 가운데 "a search index that respects access control and works across applications"(접근 제어를 준수하면서 여러 애플리케이션에 걸쳐 동작하는 검색 인덱스)가 있고(§1), 지연 시간 목표에서는 특히 "serving search results, which often require tens to hundreds of checks"(흔히 수십에서 수백 건의 검사가 필요한 검색 결과 제공)를 든다(§1).
+
+## 논문이 제공하는 것과 제공하지 않는 것
+
+논문의 API에는 호출이 다섯 가지 있다. Read, Write, Watch, Check, Expand다(§2.4). 그중 어느 것도 "사용자 U가 볼 수 있는 모든 객체"를 반환하지 않는다.
+
+- **Read**는 저장된 튜플만 반환한다. 사용자를 키로 하는 튜플셋으로 클라이언트는 "look up all groups with a given user as a direct member"(주어진 사용자를 직접 멤버로 갖는 모든 그룹을 조회)할 수 있다(§2.4.1). *직접*이다. Read는 재작성 규칙을 적용하지 않으므로 `editor`에서 `viewer`로, 폴더에서 그 문서들로 따라가지 않는다.
+- **Expand**는 재작성 규칙을 따라가지만 방향이 반대다. ⟨*object#relation*⟩ 쌍을 받아 그 "effective userset"(실효 유저셋)을 *유저셋 트리*로 반환하며, 그 리프는 "are user IDs or usersets pointing to other ⟨*object#relation*⟩ pairs"(사용자 ID이거나 다른 ⟨*object#relation*⟩ 쌍을 가리키는 유저셋이다)(§2.4.5). 논문은 그 목적을 밝힌다. Expand는 클라이언트가 "build efficient search indices for access-controlled content"(접근 제어되는 콘텐츠를 위한 효율적인 검색 인덱스를 구축)할 수 있게 한다(§2.4.5). 인덱스를 구축하는 것은 클라이언트의 일이다.
+- **Watch**는 튜플 변경을 스트리밍하여 "clients maintain secondary indices of relation tuples"(클라이언트가 관계 튜플의 보조 인덱스를 유지)할 수 있게 한다(§2.4.3).
+- **Leopard**(§3.2.4)는 중첩된 *그룹*을 평탄화한다. 사용자가 그룹에 속하는지를 집합 교집합 하나로 답한다. Zanzibar 내부에서 "selected namespaces"(일부 선택된 네임스페이스)에 대한 Check를 빠르게 하는 데 쓰이며, 논문은 이를 목록 API로 기술하지 않는다. [Leopard: 그룹 인덱스](../leopard/)를 보라.
+
+readme의 열람자에 대해 Expand가 반환하는 것은, 클라이언트가 실제로 원하는 평평한 목록과 비교하면 어떤가?
+
+<Frames>
+
+<Graph
+  width={480}
+  height={300}
+  title="Expand: 유저셋 트리"
+  desc="doc:readme#viewer의 Expand는 트리를 반환한다. 루트는 doc:readme#viewer이고 그 아래 union 노드에 자식이 셋 있다. 유저셋 리프 group:eng#member, editor에 대한 union, 유저셋 리프 folder:A#viewer다. editor union에는 owner에서 온 리프 user:anne이 있다. 두 유저셋 리프는 user:beto(group:eng#member를 통해)와 user:chen(folder:A#viewer를 통해)에 도달하려면 추가 Expand 호출이 필요하며, 그 단계는 점선이다."
+  nodes={[
+    { id: "root", x: 240, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u", x: 240, y: 95, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 85, y: 170, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 240, y: 170, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 395, y: 170, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "beto", x: 85, y: 265, label: "user:beto", kind: "subject", mono: true },
+    { id: "anne", x: 240, y: 265, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 395, y: 265, label: "user:chen", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u" },
+    { from: "u", to: "eng" },
+    { from: "u", to: "ed" },
+    { from: "u", to: "fold" },
+    { from: "eng", to: "beto", label: "다음 Expand", dashed: true },
+    { from: "ed", to: "anne", label: "owner" },
+    { from: "fold", to: "chen", label: "다음 Expand", dashed: true },
+  ]}
+  minWidth={420}
+  caption="트리는 구조를 유지한다. 유저셋 리프는 다른 객체를 가리키며, 클라이언트가 이를 차례로 전개한다."
+/>
+
+<Graph
+  width={300}
+  height={300}
+  title="조회 API: 평평한 목록"
+  desc="doc:readme에 대해 view를 가진 주체를 찾는 조회 호출은 사용자 ID 세 개 user:anne, user:beto, user:chen을 트리 구조 없는 평평한 목록으로 반환한다."
+  nodes={[
+    { id: "q", x: 150, y: 40, label: "doc:readme를\n누가 볼 수 있나?", kind: "server" },
+    { id: "anne", x: 150, y: 130, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 150, y: 195, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "chen", x: 150, y: 260, label: "user:chen", kind: "subject", mono: true, on: true },
+  ]}
+  edges={[{ from: "q", to: "anne", label: "스트리밍된 ID" }]}
+  caption="LookupSubjects(SpiceDB) 또는 ListUsers(OpenFGA): 같은 답을 이미 평탄화한 형태."
+/>
+
+</Frames>
+
+트리는 "Anne은 무엇을 볼 수 있는가"가 아니라 "누가 이 문서를 볼 수 있는가"에 답한다는 점에 주목하라. Expand만으로 Anne의 문서를 나열하려면 클라이언트는 모든 문서를 전개하거나, §2.4.5가 제안하듯 미리 전개하여 결과를 자신의 인덱스에 보관해야 한다. SpiceDB 문서도 같은 공백을 설명한다. Expand는 "responds with a tree structure that can be awkward for applications to consume"(애플리케이션이 다루기 불편할 수 있는 트리 구조로 응답한다)이므로, SpiceDB는 "return a flattened list of results"(평탄화된 결과 목록을 반환하는) `LookupResources`와 `LookupSubjects`를 추가했다([SpiceDB, Google Zanzibar](https://authzed.com/docs/spicedb/concepts/zanzibar)).
+
+## 방법 1: 조회 API, 그다음 데이터베이스에서 필터링
+
+인가 서비스가 역방향 질문을 직접 계산한다. SpiceDB의 `LookupResources`와 OpenFGA의 `ListObjects`는 사용자가 권한을 가진 어떤 타입의 모든 객체 ID를 반환한다. 그러면 애플리케이션은 그 ID들을 데이터베이스 쿼리(`WHERE id = ANY(…)`)에 넣고, 데이터베이스는 평소처럼 필터링, 정렬, 페이지 분할을 한다. SpiceDB는 이를 "the simplest approach from a bookkeeping perspective and is a good place to start"(관리 측면에서 가장 단순한 방법이며 시작하기 좋은 지점)라고 부른다([SpiceDB, Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)).
+
+대가는 첫 행을 보여 주기 전에 ID 전체 집합이 돌아와야 하고, 이를 계산하려면 사용자로부터 그래프를 거꾸로 따라가야 한다는 것이다.
+
+- SpiceDB: "it's a heavy request that can cause performance problems when more than 10k results are involved"(결과가 1만 건을 넘으면 성능 문제를 일으킬 수 있는 무거운 요청이다)([SpiceDB, Querying Data](https://authzed.com/docs/spicedb/concepts/querying-data)). 이는 "can get slow quickly: with a sufficiently large relation dataset, a sufficiently complex schema, or a sufficiently large set of accessible results"(관계 데이터 세트가 충분히 크거나, 스키마가 충분히 복잡하거나, 접근 가능한 결과 집합이 충분히 크면 빠르게 느려질 수 있다)([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)). 요청은 결과를 스트리밍하며 커서를 지원한다.
+- OpenFGA: `ListObjects`는 "will return the results found within the time allotted (`listObjectsDeadline`, default: `3s`) up to the maximum number of results configured (`listObjectsMaxResults`, default: `1000`)"(할당된 시간(`listObjectsDeadline`, 기본값 `3s`) 안에 찾은 결과를 설정된 최대 결과 수(`listObjectsMaxResults`, 기본값 `1000`)까지 반환한다)이며, "access-aware filtering on small object collections"(작은 객체 컬렉션에 대한 접근 인지 필터링)용으로 자리매김되어 있다([OpenFGA, Relationship Queries](https://openfga.dev/docs/interacting/relationship-queries)). 그 성능은 "drastically depending on the model complexity, number of tuples, and the relations it needs to evaluate"(모델 복잡도, 튜플 수, 평가해야 하는 관계에 따라 크게) 달라지며, `and`나 `but not`이 있는 관계는 "are more expensive to evaluate than relations with `or`"(`or`가 있는 관계보다 평가 비용이 크다)([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)).
+
+부분 목록으로는 정렬하기에 충분하지 않다. OpenFGA는 목록 전체를 손에 넣기 전까지는 "you won't be able to sort using it"(그것으로 정렬할 수 없을 것이다)이라고 지적한다([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)).
+
+## 방법 2: 데이터베이스 쿼리, 그다음 일괄 검사
+
+다른 방향이다. 데이터베이스가 (사용자의 쿼리로 필터링하고 정렬한) 후보 한 페이지를 만들게 하고, 그 페이지를 일괄 호출 하나(SpiceDB `CheckBulkPermissions`, OpenFGA `/batch-check`)로 검사하고, 거부된 행을 버리고, 페이지가 찰 때까지 반복한다. 이는 §1이 검색 결과에 대해 기술하는 방식, 즉 한 번에 수십에서 수백 건씩 Check를 쓰는 것이다.
+
+SpiceDB의 가이드는 이 루프와 그 제약을 제시한다. "because we don't know how many results are going to be accessible beforehand, we need to iterate until we have a full page of accessible results"(접근 가능한 결과가 몇 개일지 미리 알 수 없으므로, 접근 가능한 결과로 한 페이지가 찰 때까지 반복해야 한다). 성능은 "will depend in part on choosing the size of the page of candidate results"(후보 결과 페이지의 크기를 어떻게 정하는지에 부분적으로 달려 있다). 그리고 이 방법은 "works better with an API backed by cursor-based pagination than limit-offset pagination, since the database doesn't know the offset associated with the last accessible result"(데이터베이스가 마지막 접근 가능한 결과의 오프셋을 알지 못하므로, limit-offset 페이지 분할보다 커서 기반 페이지 분할을 쓰는 API에서 더 잘 작동한다)([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)). 가이드는 모든 일괄 호출을 "at the same revision"(같은 리비전에서) 실행할 것도 권한다. 첫 호출에서 ZedToken(SpiceDB의 zookie)을 받아 나머지 호출에 함께 보내면, 한 페이지가 두 스냅샷에서 조립되는 일이 없다.
+
+Anne이 문서 목록을 열 때 두 방법은 호출을 어떤 순서로 하는가?
+
+<Frames>
+
+<Swimlane
+  lanes={["앱", "인가 서비스", "앱 데이터베이스"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="시간"
+  title="사전 필터링: 조회, 그다음 쿼리"
+  desc="Anne이 자신의 문서를 요청한다. 앱은 Anne이 열람할 수 있는 문서에 대한 조회 API를 호출하고, 인가 서비스는 Anne에서부터 그래프를 따라가 일치하는 모든 ID를 반환한다. 그다음 앱은 그 ID들을 필터로 하여 데이터베이스에 쿼리하고, 데이터베이스는 필터링하고 정렬하여 한 페이지를 반환한다."
+  events={[
+    { lane: 0, t: 0, label: "Anne: 내 문서\n목록", kind: "note" },
+    { lane: 0, t: 1, label: "anne이 볼 수 있는\n문서 조회", kind: "read" },
+    { lane: 1, t: 1, label: "anne에서부터\n그래프 탐색", kind: "read" },
+    { lane: 1, t: 2, label: "모든 ID:\nreadme, …", kind: "good", mono: true },
+    { lane: 0, t: 3, label: "query with\nid IN (IDs)", kind: "read", mono: true },
+    { lane: 2, t: 3, label: "필터, 정렬,\n한 페이지", kind: "read" },
+    { lane: 0, t: 4, label: "페이지 표시", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [1, 1] },
+    { from: [1, 2], to: [0, 3], label: "모든 ID" },
+    { from: [0, 3], to: [2, 3] },
+    { from: [2, 3], to: [0, 4] },
+  ]}
+  caption="인가 호출은 한 번이지만, 그 답은 첫 행 전에 전체 집합이다."
+/>
+
+<Swimlane
+  lanes={["앱", "인가 서비스", "앱 데이터베이스"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="시간"
+  title="사후 필터링: 쿼리, 그다음 일괄 검사"
+  desc="Anne이 자신의 문서를 요청한다. 앱은 데이터베이스에서 필터링하고 정렬한 다음 후보 20개를 커서로 가져온다. 그 20개에 대해 하나의 스냅샷에서 일괄 검사 하나를 보내고, 인가 서비스는 어느 것이 허용되는지, 예를 들어 7개를 반환한다. 페이지가 차지 않으면 앱은 다음 후보를 가져와 반복하고, 그다음 페이지를 보여 준다."
+  events={[
+    { lane: 0, t: 0, label: "Anne: 내 문서\n목록", kind: "note" },
+    { lane: 0, t: 1, label: "다음 후보\n20개", kind: "read" },
+    { lane: 2, t: 1, label: "필터, 정렬,\n커서", kind: "read" },
+    { lane: 0, t: 2, label: "ID 20개\n일괄 검사", kind: "read" },
+    { lane: 1, t: 2, label: "검사 20건,\n스냅샷 하나", kind: "read" },
+    { lane: 1, t: 3, label: "7개 허용", kind: "good" },
+    { lane: 0, t: 4, label: "페이지 미달:\n반복", kind: "note" },
+    { lane: 0, t: 5, label: "페이지 표시", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [2, 1] },
+    { from: [2, 1], to: [0, 2] },
+    { from: [0, 2], to: [1, 2] },
+    { from: [1, 3], to: [0, 4] },
+  ]}
+  caption="답은 작지만, 반복 횟수는 Anne이 볼 수 있는 후보가 얼마나 많은지에 달려 있다."
+/>
+
+</Frames>
+
+비용이 어디로 옮겨 가는지에 주목하라. 사전 필터링은 Anne이 볼 수 있는 모든 것에 비례하는 비용을 한 번 치른다. 사후 필터링은 Anne이 볼 수 없는 후보의 수에 비례하는 비용을 반복마다 치른다. OpenFGA의 가이드는 이를 규칙으로 만든다. 검색 후 검사는 데이터베이스 쿼리가 반환하는 행이 적거나 사용자가 그중 높은 비율을 볼 수 있을 때 잘 맞는다. 사용자가 많은 객체를 보지만 그것이 전체의 작은 비율에 불과할 때, 즉 가이드의 "Google Drive" 사례에서는 잘 맞지 않는다. "you will be retrieving and checking against a lot of items and discarding most of them"(많은 항목을 가져와 검사하고 그 대부분을 버리게 될 것이기) 때문이다([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)).
+
+## 방법 3: Watch로 공급되는 비정규화 인덱스
+
+세 번째 방법은 §2.4.3과 §2.4.5가 기술하는 것이다. 누가 무엇을 볼 수 있는지에 대한 자신의 인덱스를 보호 대상 데이터 옆에 두고, 변경 스트림으로 최신 상태를 유지한다. 그러면 목록 쿼리는 자신의 데이터베이스 안의 조인이 된다.
+
+각 부분은 어디에 있고, 무엇이 인덱스를 최신으로 유지하는가?
+
+<Graph
+  width={640}
+  height={260}
+  title="Watch로 공급되는 인덱스"
+  desc="앱은 인가 서비스에 튜플을 쓴다. 인덱서는 Watch 스트림을 소비하여 그룹과 폴더 상속을 사용자와 문서의 쌍으로 평탄화하고, 이를 앱 자신의 데이터베이스에 있는 doc_viewers 테이블에 쓰며, 재개할 수 있도록 마지막 스트림 토큰을 저장한다. 목록 엔드포인트는 doc_viewers를 documents 테이블과 조인한다. 회수가 아직 인덱스에 도달하지 않은 행을 버리기 위해, 최종 페이지를 인가 서비스에 다시 검사할 수 있다(점선)."
+  nodes={[
+    { id: "app", x: 80, y: 50, label: "앱\n튜플 쓰기", kind: "client" },
+    { id: "authz", x: 300, y: 50, label: "인가 서비스", kind: "server" },
+    { id: "idx", x: 530, y: 50, label: "인덱서:\n그룹, 폴더\n평탄화", kind: "server", on: true },
+    { id: "tok", x: 530, y: 200, label: "last token", kind: "store", mono: true },
+    { id: "dv", x: 300, y: 200, label: "doc_viewers\n(user, doc)", kind: "store", mono: true, on: true },
+    { id: "list", x: 80, y: 200, label: "목록 엔드포인트", kind: "client" },
+  ]}
+  edges={[
+    { from: "app", to: "authz", label: "Write" },
+    { from: "authz", to: "idx", label: "Watch", on: true },
+    { from: "idx", to: "tok", label: "저장" },
+    { from: "idx", to: "dv", label: "upsert / delete", on: true },
+    { from: "list", to: "dv", label: "JOIN docs" },
+    { from: "list", to: "authz", label: "페이지 재검사", dashed: true },
+  ]}
+  minWidth={520}
+  caption="인덱스는 사본이다. 스트림보다 뒤처지며, 재검사가 아직 전달 중인 회수를 처리한다."
+/>
+
+인덱서 상자에 주목하라. 이것은 Zanzibar 내부에서 Leopard가 하는 일을 한다. 튜플 하나가 많은 행을 바꿀 수 있다. `group:eng#member@user:beto`를 추가하면 `group:eng`가 열람할 수 있는 모든 문서에 대해 행이 추가되고, `folder:A`에 열람자를 추가하면 폴더 안의 모든 문서에 대해 행이 추가된다. 논문은 Leopard에 대해 같은 팬아웃을 보고한다. "a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events"(Zanzibar 튜플 하나의 추가나 삭제가 잠재적으로 수만 개의 개별 Leopard 튜플 이벤트를 만들 수 있다)(§3.2.4).
+
+제품들은 이를 구축하는 두 가지 방법을 문서화한다.
+
+- **변경 스트림으로 직접 구축한다.** OpenFGA의 두 번째 방법은 `GET /changes`를 소비하고, 사용 중인 모델 버전에 맞게 변경을 평탄화한 다음(그 예: "`user:anne, writer, doc:planning` becomes two tuples", 두 개의 튜플이 된다), 최종 결과에 대해 `/check`를 호출하여 "to filter out any resource with permissions revoked but whose authorization data has not made it into your index yet"(권한이 회수되었지만 그 인가 데이터가 아직 인덱스에 들어오지 않은 리소스를 걸러낸다)([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)). SpiceDB에서는 그 스트림이 `Watch`다. 그 스트림이 왜 내구성 있는 큐가 아닌지는 [튜플을 데이터와 맞춰 두기](../sync/)에서 다룬다.
+- **벤더가 계산하게 한다.** AuthZed Materialize는 "takes inspiration from the Leopard index"(Leopard 인덱스에서 영감을 얻었으며), 설정된 권한을 미리 계산하고, 그 Event Streams 기능으로 "keep your own copy of it — either colocated alongside the data it protects in your application database, or in a secondary index like a search engine"(그 사본을 직접 보관할 수 있다. 애플리케이션 데이터베이스에서 보호 대상 데이터 옆에 두거나, 검색 엔진 같은 보조 인덱스에 둘 수 있다)([AuthZed, What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview)). 이는 상용 기능이다. Event Streams는 "currently in early access for AuthZed Dedicated users"(현재 AuthZed Dedicated 사용자에게 얼리 액세스로 제공된다)([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)), 그리고 문서화된 제약에는 "your application must be able to tolerate some lag"(애플리케이션이 어느 정도의 지연을 견딜 수 있어야 한다)가 포함된다([Materialize limitations](https://authzed.com/docs/materialize/getting-started/limitations)).
+
+## 세 방법 나란히 비교
+
+규모 한도는 각 제품의 문서에서 인용했다. 지연 시간과 노력은 상대적인 것이며 측정한 것이 아니다.
+
+| | 조회 API, 그다음 쿼리 | 쿼리, 그다음 일괄 검사 | Watch로 공급되는 인덱스 |
+| --- | --- | --- | --- |
+| 지연 시간 | 접근 가능한 객체 수와 스키마 깊이에 따라 커진다. 첫 행 전에 전체 집합 | 반복 횟수, 즉 거부되는 후보의 비율에 따라 커진다 | 데이터베이스 조인. 그래프 깊이와 무관 |
+| 최신성 | Check와 같은 일관성 옵션(SpiceDB의 ZedToken, OpenFGA의 `MINIMIZE_LATENCY` / `HIGHER_CONSISTENCY`) | Check와 같다. 한 페이지의 모든 반복에 토큰 하나를 쓴다 | 스트림보다 뒤처진다. 페이지를 재검사하여 회수된 행을 버린다 |
+| 문서상의 규모 한도 | SpiceDB: "performance problems when more than 10k results are involved"(결과가 1만 건을 넘으면 성능 문제). OpenFGA: 기본값 `3s`와 결과 `1000`개, "small object collections"(작은 객체 컬렉션) | SpiceDB: "the size of the page of candidate results"(후보 결과 페이지의 크기)에 달려 있다. OpenFGA: 사용자가 많은 객체 중 작은 비율만 볼 때 나쁘다 | SpiceDB: "the greatest scalability of the three options"(세 가지 선택지 중 가장 큰 확장성)(Materialize를 통해) |
+| 노력 | 호출 하나와 `IN` 절 | 루프, 커서 페이지 분할, 페이지 크기 선택 | 인덱서, 평탄화 로직, 저장된 스트림 위치, 재구축. 또는 상용 서비스 |
+
+<Callout kind="note" title="측정된 수치 하나, 2021년">
+
+조회 API에 대해 찾은 유일한 지연 시간 수치는 2021년 SpiceDB 설계 제안의 각주다. "approximately ~100ms for a LookupResources call on a SpiceDB with 100-250K relationships, and a graph nesting of 3-5 deep"(관계 10만~25만 개, 그래프 중첩 깊이 3~5인 SpiceDB에서 LookupResources 호출에 약 100ms)([spicedb#207](https://github.com/authzed/spicedb/issues/207)). 이는 오래된 버전의 시험 결과이며 벤치마크가 아니다.
+
+</Callout>
+
+OpenFGA의 가이드는 사용자가 많은 객체 중 적은 수만 볼 때 사후 필터링을 실용적으로 만드는 두 가지 방법을 덧붙인다. 데이터베이스 쿼리에서 테넌트로 필터링하거나("Duplicating logic from the authorization model is not ideal, but it can be a reasonable trade-off", 인가 모델의 로직을 중복하는 것은 이상적이지 않지만 합리적인 절충일 수 있다), 더 거친 리소스, 예를 들어 사용자가 볼 수 있는 폴더를 먼저 나열하고 문서를 폴더로 필터링하는 것이다([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)). 예제에서 Chen의 접근은 `folder:A`에서 오므로, "Chen이 열람할 수 있는 폴더 안의 문서"는 폴더 하나짜리 목록으로 Chen을 처리한다.
+
+빈 목록에도 결정이 필요하다. SpiceDB의 가이드는 세밀한 시스템에서는 403 대신 "often makes sense to treat 'there is no data' and 'there is nothing you're authorized to see' as the same, by returning a successful response with an empty result set"(빈 결과 집합과 함께 성공 응답을 반환하여 '데이터가 없음'과 '볼 수 있도록 인가된 것이 없음'을 같은 것으로 취급하는 편이 흔히 합리적이다)라고 제안한다([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)).
+
+<Callout kind="paper" title="논문에서">
+
+동기로서의 검색: §1. Read와 직접 멤버십 조회: §2.4.1. Watch와 보조 인덱스: §2.4.3. Expand와 유저셋 트리: §2.4.5. Leopard: §3.2.4. 용어: [Expand](../glossary/#expand), [유저셋 트리](../glossary/#userset-tree), [Watch](../glossary/#watch), [Leopard](../glossary/#leopard).
+
+</Callout>
+
+## 출처
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §1, §2.4.1, §2.4.3, §2.4.5, §3.2.4.
+- AuthZed (vendor), [Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint), SpiceDB docs.
+- AuthZed (vendor), [Querying Data](https://authzed.com/docs/spicedb/concepts/querying-data), SpiceDB docs.
+- AuthZed (vendor), [Google Zanzibar](https://authzed.com/docs/spicedb/concepts/zanzibar), SpiceDB docs, section "Reverse Indices".
+- AuthZed (vendor), [What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview) and [Limitations](https://authzed.com/docs/materialize/getting-started/limitations).
+- AuthZed, [Proposal: Lookup Watch API and Tiger Cache for fast ACL-aware filtering](https://github.com/authzed/spicedb/issues/207), spicedb issue #207, opened 2021-10-22.
+- OpenFGA, [Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions).
+- OpenFGA, [Relationship Queries: Check, Read, Expand, ListObjects and ListUsers](https://openfga.dev/docs/interacting/relationship-queries).
+- OpenFGA, [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency).

@@ -1,0 +1,328 @@
+---
+title: "Consistência, snapshots e zookies"
+description: "Por que um sistema de autorização precisa respeitar a ordem das alterações de ACL e de conteúdo, e como o Zanzibar faz isso com timestamps do Spanner e zookies."
+section: guide
+part: mechanisms
+order: 4
+checked: "2026-11-13"
+paper: ["2.2", "2.4", "2.4.4", "3.2.1", "3.2.5", "4.1"]
+---
+
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Uma verificação de ACL responde "este usuário pode fazer isto, agora". Em um sistema replicado ao redor do mundo, o "agora" é a parte difícil: servidores diferentes viram escritas diferentes. Esta página explica qual ordem o Zanzibar promete respeitar, como o [Spanner](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf) torna barato cumprir essa promessa e como o *zookie* permite que um cliente defina o frescor mínimo de que uma verificação precisa.
+
+## O problema do “novo inimigo”
+
+O artigo abre a §2.2 com uma regra: "ACL checks must respect the order in which users modify ACLs and object contents to avoid unexpected sharing behaviors." (As verificações de ACL devem respeitar a ordem em que os usuários modificam as ACLs e o conteúdo dos objetos, a fim de evitar comportamentos de compartilhamento inesperados.) Ele chama a falha de problema do “novo inimigo” ("new enemy"): um usuário que acabou de ser removido de uma ACL ainda vê o conteúdo que a remoção deveria esconder.
+
+O artigo dá dois exemplos. Para esses dois, esta página mantém os nomes do próprio artigo, Alice, Bob e Charlie, para que você possa lê-los ao lado da §2.2; em todos os outros lugares ela usa o exemplo recorrente de Anne, Beto e Chen.
+
+<Callout kind="paper" title="§2.2, Exemplo A: Negligenciar a ordem das atualizações de ACL">
+
+1. Alice remove Bob da ACL de uma pasta;
+2. Em seguida, Alice pede a Charlie que mova novos documentos para a pasta, em que as ACLs dos documentos herdam das ACLs da pasta;
+3. Bob não deveria conseguir ver os novos documentos, mas poderá fazê-lo se a verificação de ACL negligenciar a ordenação entre as duas alterações de ACL.
+
+</Callout>
+
+O que pode dar errado se uma verificação enxerga a segunda alteração, mas não a primeira? O quadro da esquerda é um sistema sem ordenação; o da direita é a mesma história sob o Zanzibar.
+
+<Frames>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="tempo"
+  ticks={["T_A1", "T_A2"]}
+  title="Exemplo A sem ordenação"
+  desc="Alice remove Bob da ACL da pasta (A1) e depois pede a Charlie, que move novos documentos para a pasta (A2). A verificação de Bob é avaliada sobre dados que incluem A2, mas não A1, de modo que Bob é autorizado a ler os novos documentos. Esta é a violação."
+  events={[
+    { lane: 0, t: 0, label: "A1: remove Bob\nda pasta", kind: "write" },
+    { lane: 1, t: 1, label: "A2: move novos\ndocs p/ a pasta", kind: "write" },
+    { lane: 2, t: 2, label: "verificação vê A2\nmas não A1", kind: "bad" },
+    { lane: 2, t: 3, label: "Bob vê os\nnovos docs", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "pede" }]}
+  caption="Violação: a verificação aplica A2 sem A1, e Bob lê os novos documentos."
+/>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="tempo"
+  ticks={["T_A1", "T_A2"]}
+  title="Exemplo A sob o Zanzibar"
+  desc="A1 e A2 recebem timestamps com T_A1 menor que T_A2. Uma verificação em um snapshot anterior a T_A2 não vê os documentos na pasta. Uma verificação em um snapshot em T_A2 ou depois também vê A1, de modo que Bob é negado em qualquer caso."
+  events={[
+    { lane: 0, t: 0, label: "A1: remove Bob\nda pasta", kind: "write" },
+    { lane: 1, t: 1, label: "A2: move novos\ndocs p/ a pasta", kind: "write" },
+    { lane: 2, t: 2, label: "verificação em\nT < T_A2", kind: "read", mono: true },
+    { lane: 2, t: 3, label: "docs ainda não\nestão na pasta", kind: "good" },
+    { lane: 2, t: 4, label: "verificação em\nT ≥ T_A2", kind: "read", mono: true },
+    { lane: 2, t: 5, label: "vê A1:\nBob negado", kind: "good" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "pede" }]}
+  caption="Zanzibar: todo snapshot que contém A2 também contém A1."
+/>
+
+</Frames>
+
+Observe que não existe snapshot que contenha A2, mas não A1. Essa é toda a garantia: a §2.2 explica que, se uma verificação for executada em `T < T_A2`, "the document ACLs will not include the folder ACL" (as ACLs dos documentos não incluirão a ACL da pasta), e, se for executada em `T ≥ T_A2 > T_A1`, ela "will observe update A1, which removed Bob from the folder ACL" (observará a atualização A1, que removeu Bob da ACL da pasta).
+
+<Callout kind="paper" title="§2.2, Exemplo B: Aplicar indevidamente uma ACL antiga a conteúdo novo">
+
+1. Alice remove Bob da ACL de um documento;
+2. Em seguida, Alice pede a Charlie que adicione novo conteúdo ao documento;
+3. Bob não deveria conseguir ver o novo conteúdo, mas poderá fazê-lo se a verificação de ACL for avaliada com uma ACL desatualizada, anterior à remoção de Bob.
+
+</Callout>
+
+O Exemplo B difere em um detalhe: a segunda alteração é no *conteúdo* do documento, que fica no armazenamento da aplicação cliente, não no Zanzibar. O Zanzibar nunca vê essa escrita. Como ele pode saber que uma verificação sobre o novo conteúdo precisa ser suficientemente atual?
+
+<Frames>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="tempo"
+  ticks={["T_B1", "T_B2"]}
+  title="Exemplo B sem ordenação"
+  desc="Alice remove Bob da ACL do documento (B1) e depois pede a Charlie, que adiciona novo conteúdo (B2). A verificação de Bob é avaliada em um snapshot desatualizado, anterior a B1, de modo que ainda autoriza Bob, e Bob lê o novo conteúdo. Esta é a violação."
+  events={[
+    { lane: 0, t: 0, label: "B1: remove Bob\nda ACL do doc", kind: "write" },
+    { lane: 1, t: 1, label: "B2: adiciona\nnovo conteúdo", kind: "write" },
+    { lane: 2, t: 2, label: "verificação em\nT < T_B1 antigo", kind: "bad", mono: true },
+    { lane: 2, t: 3, label: "Bob vê o\nnovo conteúdo", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [1, 1], label: "pede" }]}
+  caption="Violação: uma ACL antiga é aplicada a conteúdo novo."
+/>
+
+<Swimlane
+  lanes={["Alice", "Charlie", "Bob"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="tempo"
+  ticks={["T_B1", "T_B2"]}
+  title="Exemplo B sob o Zanzibar"
+  desc="Alice remove Bob (B1). A alteração de conteúdo de Charlie recebe um zookie que codifica seu timestamp T_B2, armazenado com o novo conteúdo. A verificação de Bob carrega esse zookie, de modo que é avaliada em um snapshot em T_B2 ou depois, que inclui B1, e Bob é negado."
+  events={[
+    { lane: 0, t: 0, label: "B1: remove Bob\nda ACL do doc", kind: "write" },
+    { lane: 1, t: 1, label: "B2 + zookie\n(T_B2)", kind: "write" },
+    { lane: 2, t: 2, label: "verificação leva\no zookie", kind: "read" },
+    { lane: 2, t: 3, label: "vê B1:\nBob negado", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "pede" },
+    { from: [1, 1], to: [2, 2], label: "zookie", dashed: true },
+  ]}
+  caption="Zanzibar: o zookie armazenado com B2 força um snapshot em T_B2 ou depois."
+/>
+
+</Frames>
+
+A seta tracejada é a correção. O zookie viaja com o conteúdo, de modo que a verificação sobre B2 não pode ser executada em um snapshot mais antigo que B2, e todo snapshot desse tipo já contém B1. O restante da página explica as duas propriedades das quais isso depende e o protocolo que faz o zookie circular.
+
+## Timestamps causalmente significativos
+
+A §2.2 nomeia duas propriedades: *consistência externa* e *leituras de snapshot com defasagem limitada*. O artigo cita a [tese de Gifford de 1981](#fontes) para a consistência externa. O artigo do Spanner enuncia a mesma propriedade para transações: "if a transaction T1 commits before another transaction T2 starts, then T1's commit timestamp is smaller than T2's" (se uma transação T1 é confirmada antes que outra transação T2 comece, então o timestamp de commit de T1 é menor que o de T2), e observa que isso é "equivalently, linearizability" (equivalentemente, linearizabilidade), citando [Herlihy e Wing (1990)](https://doi.org/10.1145/78969.78972).
+
+Nas palavras do Zanzibar (§2.2), duas atualizações causalmente relacionadas `x ≺ y` recebem timestamps com `T_x < T_y`. Uma leitura de snapshot no timestamp `T` "observes all updates with timestamps ≤ T" (observa todas as atualizações com timestamps ≤ T). Juntando as duas coisas: se uma leitura vê `y`, ela também vê tudo o que aconteceu antes de `y`. Isso funciona porque o armazenamento é multiversão: o Spanner define uma leitura de snapshot como "a read in the past that executes without locking" (uma leitura no passado que é executada sem locks) ([Spanner §4.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)), e em um armazenamento multiversão "each write on a data item produces a new copy (or version)" (cada escrita em um item de dados produz uma nova cópia, ou versão) ([Bernstein e Goodman, 1983](https://doi.org/10.1145/319996.319998)).
+
+O que um leitor vê sob essa regra, e o que pode ver um leitor de uma réplica com consistência eventual? Nesta variação, o readme começa fora de `folder:A`. Anne primeiro remove Chen como visualizador de `folder:A` (`x`, confirmada em T=10) e depois move `doc:readme` para `folder:A` (`y`, em T=20).
+
+<Swimlane
+  lanes={["escritas de ACL", "leitura de snapshot", "réplica eventual"]}
+  laneWidth={170}
+  rowHeight={64}
+  timeLabel="tempo"
+  ticks={["T=10", "T=20"]}
+  title="Leituras de snapshot versus uma réplica com consistência eventual"
+  desc="A escrita x remove Chen de folder:A no timestamp 10; a escrita y move doc:readme para folder:A no timestamp 20, e x acontece antes de y. Uma leitura de snapshot em T=15 vê apenas x; uma leitura de snapshot em T=25 vê x e y. Uma réplica com consistência eventual aplica y antes de x, e nessa janela Chen consegue ver o readme."
+  events={[
+    { lane: 0, t: 0, label: "x: remove Chen\nde folder:A", kind: "write" },
+    { lane: 0, t: 1, label: "y: move readme\np/ folder:A", kind: "write" },
+    { lane: 1, t: 2, label: "snapshot em T=15:\nvê só x", kind: "good" },
+    { lane: 2, t: 2, label: "réplica tem y,\nainda não x", kind: "bad" },
+    { lane: 1, t: 3, label: "snapshot em T=25:\nvê x e y", kind: "good" },
+    { lane: 2, t: 3, label: "Chen vê readme\n(x não aplicado)", kind: "bad" },
+  ]}
+  arrows={[{ from: [0, 0], to: [0, 1], label: "x ≺ y" }]}
+  caption="Um snapshot em qualquer T é um prefixo da ordem causal. Uma réplica eventual pode expor y sem x até se atualizar."
+/>
+
+Observe que as duas leituras de snapshot diferem em *quanto* veem, mas nunca na *ordem*: cada uma é um prefixo do histórico. A réplica eventual também convergirá, mas até lá pode mostrar um estado que nunca existiu. O próprio artigo faz esse contraste na §5: o TAO "offers eventual global consistency with asynchronous replication" (oferece consistência global eventual com replicação assíncrona), enquanto o Zanzibar "provides external consistency and snapshot reads with bounded staleness" (fornece consistência externa e leituras de snapshot com defasagem limitada).
+
+## De onde vêm os timestamps: TrueTime
+
+O Zanzibar não calcula esses timestamps por conta própria. Ele armazena as ACLs no Spanner, cujo "TrueTime mechanism assigns each ACL write a microsecond-resolution timestamp, such that the timestamps of writes reflect the causal ordering between writes" (mecanismo TrueTime atribui a cada escrita de ACL um timestamp com resolução de microssegundos, de modo que os timestamps das escritas reflitam a ordenação causal entre elas) (§2.2). O esboço de como isso funciona está nas §3, §4.1.2 e §4.2.1 do [artigo do Spanner (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf).
+
+- `TT.now()` retorna um intervalo `[earliest, latest]` que garantidamente contém o tempo absoluto em que foi chamado. A incerteza `ε` é metade da largura do intervalo; no ambiente de produção do Google, ela era "typically a sawtooth function of time, varying from about 1 to 7 ms over each poll interval" (tipicamente uma função dente de serra do tempo, variando de cerca de 1 a 7 ms ao longo de cada intervalo de consulta).
+- **Início**: o líder atribui a uma escrita um timestamp de commit `s` não menor que `TT.now().latest`.
+- **Espera de commit** (commit wait): os clientes não podem ver a escrita até que `TT.after(s)` seja verdadeiro, ou seja, até que `s` tenha definitivamente passado em todos os lugares. O Spanner observa que "the expected wait is at least 2 ∗ ε̄" (a espera esperada é de pelo menos 2 ∗ ε̄), em que `ε̄` é o limite médio de erro (§4.2.1).
+
+Como a espera torna os timestamps causais?
+
+<Graph
+  width={640}
+  height={300}
+  title="Espera de commit no Spanner"
+  desc="Uma escrita chega ao líder, que chama TT.now() e obtém um intervalo de earliest a latest, com largura 2 epsilon. O líder escolhe s igual a latest. Em seguida espera até que TT.after(s) seja verdadeiro, o que leva cerca de 2 epsilon, e só então torna a escrita visível e responde. Qualquer transação que comece depois da resposta chama TT.now() mais tarde, de modo que seu latest, e portanto seu timestamp, é maior que s."
+  nodes={[
+    { id: "ear", x: 70, y: 55, label: "earliest", kind: "note" },
+    { id: "lat", x: 240, y: 55, label: "latest", kind: "note" },
+    { id: "req", x: 70, y: 150, label: "escrita chega\nTT.now()", kind: "server" },
+    { id: "s", x: 240, y: 150, label: "s = latest", kind: "server", mono: true },
+    { id: "after", x: 420, y: 150, label: "TT.after(s)\nis true", kind: "server", mono: true },
+    { id: "vis", x: 568, y: 150, label: "escrita visível,\ncliente avisado", kind: "store", on: true },
+    { id: "next", x: 568, y: 255, label: "próxima escrita:\ntimestamp > s", kind: "client" },
+  ]}
+  edges={[
+    { from: "ear", to: "lat", label: "incerteza: 2ε", dir: "both", labelOffset: -16 },
+    { from: "lat", to: "s", label: "regra de início", dashed: true },
+    { from: "req", to: "s", label: "escolhe s" },
+    { from: "s", to: "after", label: "espera de commit", on: true, labelOffset: -34 },
+    { from: "after", to: "vis" },
+    { from: "vis", to: "next", label: "causa" },
+  ]}
+  minWidth={520}
+  caption="O tempo corre da esquerda para a direita e depois desce até a próxima escrita. Esperar a incerteza passar significa que s está no passado antes que alguém possa agir com base na escrita."
+/>
+
+Observe o último passo: tudo o que é causado pela escrita começa depois que o cliente foi avisado, o que ocorre depois que `s` definitivamente passou, de modo que seu próprio `TT.now().latest`, e seu timestamp, é maior que `s`. Isso é consistência externa, paga com alguns milissegundos de espera por escrita. A §5 do artigo do Zanzibar resume: o Zanzibar "builds on Spanner’s TrueTime abstraction" (se apoia na abstração TrueTime do Spanner) para "provide linearizable commit timestamps encoded as zookies" (fornecer timestamps de commit linearizáveis codificados como zookies).
+
+O mesmo artigo explica por que o Zanzibar não pode usar um relógio lógico em vez disso: relógios de Lamport "require explicit participation of all 'processes', where in Zanzibar’s use cases some of the 'processes' can be external clients or even human users" (exigem a participação explícita de todos os "processos", enquanto, nos casos de uso do Zanzibar, alguns dos "processos" podem ser clientes externos ou mesmo usuários humanos) (§5). No Exemplo A, a seta "pede" é Alice falando com Charlie, um canal que nenhum relógio vê.
+
+## O protocolo de zookie
+
+Leituras de snapshot em um timestamp bem ordenado resolvem o Exemplo A. O Exemplo B também exige que a verificação seja *suficientemente atual*. Uma forma seria avaliar toda verificação no snapshot mais recente, mas a §2.2 rejeita isso: tal avaliação "would require global data synchronization with high-latency round trips and limited availability" (exigiria sincronização global de dados com viagens de ida e volta de alta latência e disponibilidade limitada). Em vez disso, o próprio cliente carrega o frescor necessário, como um *zookie*: "an opaque byte sequence encoding a globally meaningful timestamp that reflects an ACL write, a client content version, or a read snapshot" (uma sequência de bytes opaca que codifica um timestamp globalmente significativo que reflete uma escrita de ACL, uma versão de conteúdo do cliente ou um snapshot de leitura) (§2.4).
+
+Quem detém o zookie em cada passo? Na figura, Anne salva uma edição em `doc:readme` e, mais tarde, Beto o abre.
+
+<Swimlane
+  lanes={["app cliente", "armazen. do cliente", "Zanzibar", "Spanner"]}
+  laneWidth={142}
+  rowHeight={64}
+  timeLabel="tempo"
+  title="O protocolo de zookie"
+  desc="1. Anne salva uma edição; a aplicação cliente envia ao Zanzibar uma verificação de alteração de conteúdo, que ele avalia no snapshot mais recente do Spanner. 2. O Zanzibar responde permitido com um zookie cujo timestamp é posterior a todas as escritas de ACL anteriores. 3. A aplicação escreve o novo conteúdo e o zookie em seu próprio armazenamento em uma única escrita atômica. 4. Mais tarde, Beto abre o readme; a aplicação carrega o conteúdo e seu zookie. 5. A aplicação envia uma verificação que carrega o zookie. 6. O Zanzibar a avalia em um snapshot pelo menos tão atual quanto o zookie e retorna a resposta."
+  events={[
+    { lane: 0, t: 0, label: "Anne salva edição", kind: "note" },
+    { lane: 0, t: 1, label: "verificação de\nalteração de conteúdo", kind: "read" },
+    { lane: 2, t: 1, label: "avalia no snapshot\nmais recente", kind: "read" },
+    { lane: 3, t: 1, label: "snapshot mais recente", kind: "good" },
+    { lane: 2, t: 2, label: "permitido +\nzookie z", kind: "good" },
+    { lane: 0, t: 2, label: "recebe z", kind: "note" },
+    { lane: 0, t: 3, label: "escreve v2 + z", kind: "write" },
+    { lane: 1, t: 3, label: "readme v2, z", kind: "write", mono: true },
+    { lane: 0, t: 4, label: "Beto abre\no readme", kind: "note" },
+    { lane: 0, t: 5, label: "check(Beto, z)", kind: "read", mono: true },
+    { lane: 2, t: 5, label: "avalia no\nsnapshot ≥ z", kind: "read", mono: true },
+    { lane: 3, t: 5, label: "leitura em\nT ≥ z", kind: "good", mono: true },
+    { lane: 2, t: 6, label: "resposta nesse\nsnapshot", kind: "good" },
+    { lane: 0, t: 6, label: "mostra ou oculta v2", kind: "note" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [2, 1], label: "sem zookie" },
+    { from: [2, 1], to: [3, 1] },
+    { from: [2, 2], to: [0, 2], label: "zookie z" },
+    { from: [0, 3], to: [1, 3], label: "atômica" },
+    { from: [1, 3], to: [0, 4], label: "carrega v2, z", dashed: true },
+    { from: [0, 5], to: [2, 5], label: "leva z" },
+    { from: [2, 5], to: [3, 5] },
+    { from: [2, 6], to: [0, 6] },
+  ]}
+  caption="O zookie é emitido pela verificação de alteração de conteúdo, armazenado ao lado do conteúdo e devolvido em toda verificação posterior daquela versão."
+/>
+
+Passo a passo, seguindo a §2.2 e a §2.4.4:
+
+1. **Verificação de alteração de conteúdo.** Quando um usuário está prestes a salvar uma alteração, o cliente envia uma verificação de *alteração de conteúdo*. Ela "does not carry a zookie and is evaluated at the latest snapshot" (não carrega um zookie e é avaliada no snapshot mais recente) (§2.4.4).
+2. **Zookie emitido.** Se a alteração for permitida, a resposta inclui um zookie. O Zanzibar "encodes a current global timestamp in the zookie and ensures that all prior ACL writes have lower timestamps" (codifica um timestamp global atual no zookie e garante que todas as escritas de ACL anteriores tenham timestamps menores) (§2.2).
+3. **Armazenado com o conteúdo.** "The client stores the zookie with the content change in an atomic write to the client storage" (o cliente armazena o zookie junto com a alteração de conteúdo em uma escrita atômica no armazenamento do cliente) (§2.2). A verificação em si não precisa estar na mesma transação que a escrita do conteúdo.
+4. **Carregado pelas verificações posteriores.** Toda verificação posterior daquela versão do conteúdo envia o zookie armazenado.
+5. **Avaliado com frescor pelo menos igual.** "A check is always evaluated at a consistent snapshot no earlier than the given zookie" (uma verificação é sempre avaliada em um snapshot consistente não anterior ao zookie fornecido) (§2.4.4).
+
+No Exemplo B, o zookie armazenado com o novo conteúdo codifica `T_B2`, e `T_B2 > T_B1`, de modo que a verificação de Bob no passo 5 precisa ver sua remoção.
+
+O zookie é opaco de propósito. O artigo usa "an opaque cookie instead of the actual timestamp to discourage our clients from choosing arbitrary timestamps and to allow future extensions" (um cookie opaco em vez do timestamp real para desencorajar nossos clientes de escolher timestamps arbitrários e para permitir extensões futuras) (§2.4). A §5 acrescenta que o protocolo "does *not* let clients read or evaluate ACLs at an arbitrary snapshot" (*não* permite que os clientes leiam ou avaliem ACLs em um snapshot arbitrário), o que deixa a escolha com o Zanzibar.
+
+## Por que "pelo menos tão atual quanto" e não "exatamente em"
+
+Um zookie é um limite inferior. O Zanzibar pode avaliar uma verificação no timestamp do zookie ou em qualquer timestamp posterior. A §2.2 chama isso de "at-least-as-fresh semantics" (semântica "pelo menos tão atual quanto") do protocolo e diz que ela "allow[s] Zanzibar to choose any timestamp fresher than the one encoded in a zookie" (permite ao Zanzibar escolher qualquer timestamp mais atual do que o codificado em um zookie). Essa liberdade é usada de três formas.
+
+- **Defasagem padrão (§3.2.1).** Sem zookie, o servidor escolhe "a default staleness chosen to ensure that all transactions are evaluated at a timestamp that is as recent as possible without impacting latency" (uma defasagem padrão escolhida para garantir que todas as transações sejam avaliadas em um timestamp tão recente quanto possível sem afetar a latência). Cada servidor acompanha com que frequência leituras com uma dada defasagem tiveram de sair da zona e move o padrão para "the lowest 'safe' value" (o menor valor "seguro"). O artigo observa que isso "is purely a performance optimization" (é puramente uma otimização de desempenho), porque "Zanzibar always respects zookies when provided" (o Zanzibar sempre respeita os zookies quando fornecidos).
+- **Quantização (§3.2.5).** Os timestamps de avaliação são "rounded up to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies" (arredondados para cima para uma granularidade grossa, como um ou dez segundos, respeitando as restrições de defasagem dos zookies das requisições). Arredondar *para cima* nunca viola um limite inferior.
+- **Caches compartilhados (§3.2.5).** As chaves de cache contêm o timestamp do snapshot, de modo que resultados de snapshots diferentes nunca se misturam. Por causa do arredondamento, "the vast majority of recent checks and reads" (a grande maioria das verificações e leituras recentes) são avaliadas nos mesmos timestamps e "share cache results" (compartilham resultados de cache).
+
+O que o arredondamento para cima traz quando três verificações chegam com zookies separados por algumas centenas de milissegundos?
+
+<Graph
+  width={620}
+  height={250}
+  title="Arredondar para cima os timestamps de avaliação"
+  desc="Três verificações, de Anne, Beto e Chen sobre doc:readme, carregam zookies com timestamps diferentes, em microssegundos, dentro do mesmo segundo. O Zanzibar arredonda cada um para cima para o mesmo timestamp grosso T_q, que é maior ou igual a todos os zookies, de modo que as três são avaliadas em um único snapshot e compartilham entradas de cache indexadas por T_q. Qualquer timestamp posterior, até os dados mais recentes no líder, também seria permitido."
+  nodes={[
+    { id: "a", x: 90, y: 50, label: "verificação de Anne\nzookie 12.104 s", kind: "client" },
+    { id: "b", x: 90, y: 125, label: "verificação de Beto\nzookie 12.380 s", kind: "client" },
+    { id: "c", x: 90, y: 200, label: "verificação de Chen\nzookie 12.911 s", kind: "client" },
+    { id: "q", x: 330, y: 125, label: "avalia em\nT_q = 13 s", kind: "server", on: true },
+    { id: "cache", x: 330, y: 220, label: "chave de cache\ninclui T_q", kind: "server" },
+    { id: "now", x: 530, y: 125, label: "dados mais\nrecentes (líder)", kind: "store" },
+  ]}
+  edges={[
+    { from: "a", to: "q", label: "arredonda", on: true },
+    { from: "b", to: "q", on: true },
+    { from: "c", to: "q", label: "arredonda", on: true },
+    { from: "q", to: "cache", label: "compartilhado" },
+    { from: "q", to: "now", label: "também permitido", dashed: true },
+  ]}
+  minWidth={480}
+  caption="Os três zookies são limites inferiores; 13 s satisfaz todos eles. Os timestamps são ilustrativos, não vêm do artigo."
+/>
+
+Observe que `T_q` pode até estar ligeiramente no futuro. A §3.2.5 trata desse caso: o Spanner "ensures that a snapshot read at timestamp T will observe all writes up to T—this holds even if T is in the future, in which case the read will wait until TrueTime has moved past T." (garante que uma leitura de snapshot no timestamp T observará todas as escritas até T; isso vale mesmo se T estiver no futuro, caso em que a leitura esperará até que o TrueTime tenha passado de T.)
+
+## Requisições Safe e Recent
+
+O preço do frescor é a distância. "When a zookie timestamp is higher than that of the most recent data replicated to the region, the storage reads require cross-region round trips to the leader replica" (quando o timestamp de um zookie é maior que o dos dados mais recentes replicados para a região, as leituras do armazenamento exigem viagens de ida e volta entre regiões até a réplica líder) (§4.1). O armazenamento replica com "replication heartbeats with 8-second intervals" (heartbeats de replicação com intervalos de 8 segundos), de modo que a §4.1 divide as requisições em 10 segundos:
+
+- Requisições *Safe* "have zookies more than 10 seconds old and can be served within the region most of time" (têm zookies com mais de 10 segundos e podem ser servidas dentro da região na maior parte do tempo).
+- Requisições *Recent* "have zookies less than 10 seconds old and often require inter-region round trips" (têm zookies com menos de 10 segundos e frequentemente exigem viagens de ida e volta entre regiões).
+
+Os 8 segundos coincidem com o artigo do Spanner, em que "a leader by default advances MinNextTS() values every 8 seconds" (um líder, por padrão, avança os valores de MinNextTS() a cada 8 segundos), de modo que as réplicas "can serve reads at timestamps greater than 8 seconds old in the worst case" (podem servir leituras em timestamps com mais de 8 segundos no pior caso) ([Spanner §4.2.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)).
+
+A Tabela 2 do artigo (§4.2) dá a latência de cada tipo, em milissegundos, como média (desvio padrão) ao longo de um período de 7 dias em dezembro de 2018:
+
+| | API | percentil 50 | percentil 95 | percentil 99 |
+| --- | --- | --- | --- | --- |
+| Safe | Check | 3.0 (0.091) | 9.46 (0.3) | 15.0 (1.19) |
+| Safe | Read | 2.18 (0.031) | 3.71 (0.094) | 8.03 (3.28) |
+| Safe | Expand | 4.27 (0.313) | 8.84 (0.586) | 34.1 (4.35) |
+| Recent | Check | 2.86 (0.087) | 60.0 (2.1) | 76.3 (2.59) |
+| Recent | Read | 2.21 (0.054) | 40.1 (2.03) | 86.2 (3.84) |
+| Recent | Expand | 5.79 (0.224) | 45.6 (3.44) | 121.0 (2.38) |
+| Recent | Write | 127.0 (3.65) | 233.0 (23.0) | 401.0 (133.0) |
+
+As medianas são próximas; as caudas não. O percentil 95 de um Check Recent é 60.0 ms, contra 9.46 ms de um Safe, o custo da viagem entre regiões. As escritas são as mais lentas porque "always require distributed coordination among Spanner servers" (sempre exigem coordenação distribuída entre servidores do Spanner) (§4.2); no Spanner, essa coordenação inclui a espera de commit. Segundo a §4.1 e a Figura 3, as requisições Safe superam as Recent em "about two orders of magnitude" (cerca de duas ordens de grandeza), "which allows Zanzibar to serve the vast majority of ACL checks locally" (o que permite ao Zanzibar servir a grande maioria das verificações de ACL localmente). A maioria das requisições pode ser Safe porque um zookie é apenas um limite inferior: uma verificação de conteúdo mais antigo pode usar dados mais antigos, já replicados.
+
+<Callout kind="note" title="Não verificado">
+
+O artigo cita o trabalho de Gifford como uma tese de doutorado de Stanford de 1981 (referência 18); o artigo do Spanner cita o mesmo trabalho como o relatório técnico CSL-81-8 do Xerox PARC, de julho de 1982. Nenhuma cópia online foi consultada para esta página.
+
+</Callout>
+
+## Fontes
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.2, §2.4, §2.4.4, §3.2.1, §3.2.5, §4.1, §4.2 (Tabela 2), §5.
+- James C. Corbett et al., [Spanner: Google's Globally-Distributed Database](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), OSDI '12, §1, §3, §4.1, §4.1.2, §4.2.1.
+- Maurice P. Herlihy e Jeannette M. Wing, [Linearizability: A Correctness Condition for Concurrent Objects](https://doi.org/10.1145/78969.78972), ACM TOPLAS 12(3), julho de 1990, pp. 463–492.
+- Philip A. Bernstein e Nathan Goodman, [Multiversion Concurrency Control: Theory and Algorithms](https://doi.org/10.1145/319996.319998), ACM TODS 8(4), dezembro de 1983.
+- David K. Gifford, *Information Storage in a Decentralized Computer System*, tese de doutorado, Stanford, 1981 (referência 18 do Zanzibar); também Xerox PARC CSL-81-8 (referência 16 do Spanner). Nenhum link verificado.

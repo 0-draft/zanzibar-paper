@@ -1,0 +1,235 @@
+---
+title: "Les systèmes de type Zanzibar comparés"
+description: "SpiceDB, OpenFGA, Permify, Ory Keto, Topaz et Warrant confrontés à l’article, un aspect à la fois."
+section: ecosystem
+order: 0
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Plusieurs projets open source se présentent comme inspirés de Zanzibar ou modelés sur lui. Cette page en confronte six à l’article, un aspect par tableau. Les cellules sont brèves ; les sources de chaque ligne sont indiquées sous chaque tableau. Les faits ont été vérifiés le 2026-11-13 et proviennent du dépôt et de la documentation de chaque projet ; la plupart sont donc rédigés par l’éditeur lui-même.
+
+Les six : [SpiceDB](https://github.com/authzed/spicedb) (AuthZed), [OpenFGA](https://github.com/openfga/openfga) (CNCF), [Permify](https://github.com/Permify/permify) (FusionAuth), [Ory Keto](https://github.com/ory/keto) (Ory), [Topaz](https://github.com/aserto-dev/topaz) (ses mainteneurs, après la cessation d’activité d’Aserto) et [Warrant](https://github.com/warrant-dev/warrant) (WorkOS). Chacun a sa propre page : [SpiceDB](../spicedb/), [OpenFGA](../openfga/), [Permify](../permify/), [Ory Keto](../ory-keto/), [Topaz](../topaz/), [Warrant](../warrant/).
+
+## Langage de schéma
+
+L’article parle de configuration d’espace de noms : des relations dotées de règles de réécriture de userset (§2.3). La figure 1 en écrit une dans une syntaxe textuelle de type protocol buffer ; l’article ne nomme pas le format.
+
+| Système | Langage de schéma | Format |
+| --- | --- | --- |
+| Article | Configuration d’espace de noms | Texte de type Protobuf dans la figure 1 (format non nommé) |
+| SpiceDB | Schema (`definition`, `relation`, `permission`) | Langage propre |
+| OpenFGA | Authorization model (`type`, `define`) | DSL, compilé en JSON |
+| Permify | Permify Schema (`entity`, `relation`, `permission` / `action`, `attribute`, `rule`) | Langage propre |
+| Ory Keto | Ory Permission Language (OPL) | Sous-ensemble de TypeScript |
+| Topaz | Manifest (`types`, `relations`, `permissions`) | YAML, `version: 3` |
+| Warrant | Types d’objets (`inheritIf`, `rules`) | JSON |
+
+Sources : [SpiceDB schema](https://authzed.com/docs/spicedb/concepts/schema) · [OpenFGA configuration language](https://openfga.dev/docs/configuration-language) · [Permify modeling](https://fusionauth.io/permify-docs/getting-started/modeling) · [Ory Permission Language](https://www.ory.com/docs/keto/reference/ory-permission-language) · [Topaz manifest reference](https://www.topaz.sh/docs/directory/manifest-reference) · [Warrant `spec.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)
+
+## Syntaxe des tuples
+
+L’article écrit un tuple sous la forme `object#relation@user`, où l’utilisateur peut lui-même être un userset `object#relation` (§2.1). Les lignes ci-dessous montrent le groupe de Beto en tant que lecteurs du readme, lorsque la documentation donne une forme textuelle.
+
+| Système | Nom | Forme |
+| --- | --- | --- |
+| Article | Relation tuple (tuple de relation) | `doc:readme#viewer@group:eng#member` |
+| SpiceDB | Relationship | `doc:readme#viewer@group:eng#member` |
+| OpenFGA | Relationship tuple | user `group:eng#member`, relation `viewer`, object `doc:readme` |
+| Permify | Relational tuple | `doc:readme#viewer@group:eng#member` |
+| Ory Keto | Relation tuple | `Doc:readme#viewers@Group:eng#members` |
+| Topaz | Relation | Champs `object_type`, `object_id`, `relation`, `subject_type`, `subject_id`, `subject_relation` facultatif |
+| Warrant | Warrant | `[user:1] is an [editor] of [document:docA]` (exemple du README) |
+
+Sources : [SpiceDB relationships](https://authzed.com/docs/spicedb/concepts/relationships) · [OpenFGA concepts](https://openfga.dev/docs/concepts) · [Permify sync data](https://fusionauth.io/permify-docs/getting-started/sync-data) · [Ory Keto relation tuples](https://www.ory.com/docs/keto/concepts/relation-tuples) · [Topaz `common.proto`](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/common/v3/common.proto) · [Warrant README](https://github.com/warrant-dev/warrant)
+
+## Opérateurs de réécriture
+
+Les règles de réécriture de l’article combinent trois feuilles, `_this`, `computed_userset` et `tuple_to_userset`, par l’union, l’intersection et l’exclusion (§2.3.1).
+
+| Système | Union / intersection / exclusion | computed_userset | tuple_to_userset |
+| --- | --- | --- | --- |
+| Article | `union` / `intersection` / `exclusion` | `computed_userset` | `tuple_to_userset` |
+| SpiceDB | `+` / `&` / `-` | Nommer une relation ou une permission | `parent->view` (également `.any()` ; `.all()` calcule une intersection) |
+| OpenFGA | `or` / `and` / `but not` | Nom de relation seul | `viewer from parent` |
+| Permify | `or` / `and` / `not` | Nom seul | Point : `org.admin` |
+| Ory Keto | `\|\|` / `&&` / `!` | `this.permits.x(ctx)` | `.traverse(...)` |
+| Topaz | `\|` / `&` / `-` | Nommer une relation ou une permission | `parent->can_read` |
+| Warrant | `anyOf` / `allOf` / `noneOf` | `inheritIf` | `ofType` + `withRelation` |
+
+Sources : [SpiceDB schema](https://authzed.com/docs/spicedb/concepts/schema) · [OpenFGA equivalent Zanzibar concepts](https://openfga.dev/docs/configuration-language#equivalent-zanzibar-concepts) · [Permify modeling](https://fusionauth.io/permify-docs/getting-started/modeling) · [Ory Permission Language](https://www.ory.com/docs/keto/reference/ory-permission-language) · [Topaz manifest reference](https://www.topaz.sh/docs/directory/manifest-reference) · [Warrant `spec.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)
+
+## Jeton de cohérence et modes
+
+Le zookie de l’article est « an opaque byte sequence encoding a globally meaningful timestamp » (une séquence d’octets opaque encodant un horodatage ayant un sens global) (§2.4) ; une vérification est évaluée sur un instantané qui n’est pas antérieur au zookie qu’elle transporte (§2.2, §2.4.4).
+
+| Système | Jeton | Modes ou comportement |
+| --- | --- | --- |
+| Article | Zookie | Avec zookie : au moins aussi frais ; sans : « a reasonably recent snapshot » (un instantané raisonnablement récent) (§2.4.1) |
+| SpiceDB | ZedToken | `minimize_latency`, `at_least_as_fresh`, `at_exact_snapshot`, `fully_consistent` |
+| OpenFGA | Aucun | `MINIMIZE_LATENCY` (par défaut), `HIGHER_CONSISTENCY` ; cache désactivé par défaut |
+| Permify | Snap Token | Renvoyé par Write, transmis à Check sous la forme `snap_token` ; sans jeton, la dernière transaction |
+| Ory Keto | Champ `snaptoken` | « not implemented yet and has no effect » (pas encore implémenté et sans effet) |
+| Topaz | Aucun documenté | Aucun champ de jeton dans l’API reader |
+| Warrant | En-tête `Warrant-Token` | Le serveur open source ne renvoie aucun jeton et ne réagit qu’à `latest`, qui envoie la lecture à la base de données primaire |
+
+Sources : [SpiceDB consistency](https://authzed.com/docs/spicedb/concepts/consistency) · [OpenFGA consistency](https://openfga.dev/docs/interacting/consistency) · [Permify snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens) · [Keto `check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto) · [Topaz `reader.proto`](https://github.com/aserto-dev/go-directory/blob/main/proto/aserto/directory/reader/v3/reader.proto) · [Warrant `wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go), [`sql.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go), [`warrant/service.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/warrant/service.go)
+
+Quels produits proposent quelque chose à la place du zookie ?
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={520}
+  title="Ce que chaque système utilise à la place du zookie"
+  desc="Le zookie de l’article est au centre. Des flèches pleines le relient aux deux équivalents fonctionnels : le ZedToken de SpiceDB et le Snap Token de Permify. Des lignes en pointillés mènent aux systèmes sans jeton fonctionnel : le serveur open source de Warrant ne comprend que Warrant-Token: latest, OpenFGA n’a pas de jeton, Topaz n’en documente aucun, et Ory Keto possède des champs snaptoken qui ne sont pas implémentés."
+  nodes={[
+    { id: "z", x: 310, y: 150, label: "zookie\n(article §2.4)", kind: "object", on: true },
+    { id: "spice", x: 95, y: 45, label: "SpiceDB\nZedToken", kind: "object" },
+    { id: "permify", x: 310, y: 40, label: "Permify\nSnap Token", kind: "object" },
+    { id: "warrant", x: 525, y: 45, label: "Warrant\nWarrant-Token: latest seul", kind: "object" },
+    { id: "fga", x: 95, y: 255, label: "OpenFGA\naucun", kind: "object" },
+    { id: "topaz", x: 310, y: 260, label: "Topaz\naucun documenté", kind: "object" },
+    { id: "keto", x: 525, y: 255, label: "Ory Keto\nsnaptoken : non implémenté", kind: "object" },
+  ]}
+  edges={[
+    { from: "z", to: "spice", label: "équivalent", on: true },
+    { from: "z", to: "permify", on: true },
+    { from: "z", to: "warrant", dashed: true, dir: "none" },
+    { from: "z", to: "fga", dashed: true, dir: "none" },
+    { from: "z", to: "topaz", dashed: true, dir: "none" },
+    { from: "z", to: "keto", dashed: true, dir: "none" },
+  ]}
+  caption="Trait plein : un jeton que le client récupère à l’issue d’une écriture et peut transmettre, comme avec les zookies. Pointillés : pas de jeton fonctionnel ; le serveur open source de Warrant a un en-tête qui signifie seulement « lire la base primaire », et OpenFGA propose à la place deux modes de cohérence."
+/>
+
+On remarque que seuls les deux liens en trait plein permettent à une application de demander « au moins aussi frais que mon écriture », ce qui protège contre le problème du « nouvel ennemi » dans l’article (§2.2).
+
+## Watch et journal des modifications
+
+Le Watch de l’article diffuse en flux les modifications de tuples issues d’un journal des modifications, avec des zookies de pulsation permettant de reprendre (§2.4.3, §3).
+
+| Système | API | Forme |
+| --- | --- | --- |
+| Article | Watch | Flux, reprise possible avec un zookie |
+| SpiceDB | `Watch` | Flux, reprise possible avec un ZedToken (`changes_through`) |
+| OpenFGA | `ReadChanges` | Lecture paginée avec un jeton de continuation (interrogée périodiquement) |
+| Permify | `Watch` | Flux (`stream WatchResponse`) |
+| Ory Keto | Aucune | Aucun service watch dans les fichiers de protocole |
+| Topaz | Aucune | Aucun service watch dans les fichiers de protocole |
+| Warrant | Aucune | Aucun point d’accès de modifications ou d’événements dans le dépôt |
+
+Sources : [SpiceDB `watch_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto) · [OpenFGA `openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto) · [Permify `service.proto`](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto) · [Keto protos](https://github.com/ory/keto/tree/master/proto/ory/keto) · [Topaz go-directory protos](https://github.com/aserto-dev/go-directory/tree/main/proto/aserto/directory) · [Warrant repository](https://github.com/warrant-dev/warrant)
+
+## Index de type Leopard
+
+Leopard est l’index de l’article pour les groupes volumineux et profondément imbriqués, construit à partir d’instantanés et des mises à jour de Watch (§3.2.4).
+
+| Système | Index précalculé | Remarque |
+| --- | --- | --- |
+| Article | Leopard | Parties service, hors ligne et incrémentale (§3.2.4) |
+| SpiceDB | AuthZed Materialize | Commercial, pour les clients d’AuthZed Dedicated ; « takes inspiration from the Leopard index component » (s’inspire du composant d’index Leopard) |
+| OpenFGA | Aucun documenté | Caches de Check et d’itérateurs |
+| Permify | Aucun documenté | « process-local cache; there is no shared cache layer » (cache local au processus ; il n’y a pas de couche de cache partagée) |
+| Ory Keto | Aucun documenté | |
+| Topaz | Aucun documenté | |
+| Warrant | Aucun documenté | |
+
+Sources : [AuthZed Materialize](https://authzed.com/docs/materialize/getting-started/overview) · [OpenFGA consistency (cache flags)](https://openfga.dev/docs/interacting/consistency) · [Permify cache](https://fusionauth.io/permify-docs/operations/cache) · [Ory Keto docs](https://www.ory.com/docs/keto) · [Topaz architecture](https://www.topaz.sh/docs/architecture) · [Warrant repository](https://github.com/warrant-dev/warrant). « Aucun documenté » signifie que les pages citées ne décrivent aucun index de ce genre, et non que son existence a été exclue.
+
+## Stockage
+
+L’article stocke les tuples, les configurations et le journal des modifications dans Spanner (§3, §3.1).
+
+| Système | Bases de données |
+| --- | --- |
+| Article | Spanner |
+| SpiceDB | CockroachDB, Cloud Spanner, PostgreSQL, MySQL (déconseillé), memdb (développement) |
+| OpenFGA | mémoire (par défaut), PostgreSQL, MySQL, SQLite |
+| Permify | PostgreSQL, mémoire |
+| Ory Keto | PostgreSQL, MySQL, CockroachDB, SQLite (pas pour la production) |
+| Topaz | BoltDB embarqué |
+| Warrant | MySQL, PostgreSQL, SQLite |
+
+Sources : [SpiceDB datastores](https://authzed.com/docs/spicedb/concepts/datastores) · [Configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga) · [Permify configuration](https://fusionauth.io/permify-docs/setting-up/configuration) · [Ory deployment](https://www.ory.com/docs/oss/deployment) · [Topaz architecture](https://www.topaz.sh/docs/architecture) · [Warrant migrations](https://github.com/warrant-dev/warrant/tree/main/migrations/datastore)
+
+## Licence
+
+| Système | Licence | Langage |
+| --- | --- | --- |
+| SpiceDB | Apache-2.0 | Go |
+| OpenFGA | Apache-2.0 | Go |
+| Permify | AGPL-3.0 (Apache-2.0 du 2023-02-14 au 2025-05-12) | Go |
+| Ory Keto | Apache-2.0 | Go |
+| Topaz | Apache-2.0 | Go |
+| Warrant | Apache-2.0 | Go |
+
+Sources : le fichier LICENSE de chaque dépôt, lu via l’API GitHub : [SpiceDB](https://github.com/authzed/spicedb) · [OpenFGA](https://github.com/openfga/openfga) · [Permify](https://github.com/Permify/permify) · [Ory Keto](https://github.com/ory/keto) · [Topaz](https://github.com/aserto-dev/topaz) · [Warrant](https://github.com/warrant-dev/warrant). Historique du fichier LICENSE de Permify, lu à chaque commit qui l’a modifié : Apache-2.0 (2022-07-14), GPL-3.0 (2022-08-25), AGPL-3.0 (2022-08-26), Apache-2.0 (2023-02-14), AGPL-3.0 (2025-05-12).
+
+## Statut
+
+Au 2026-11-13.
+
+| Système | Propriétaire | Dernière version | Statut |
+| --- | --- | --- | --- |
+| SpiceDB | AuthZed | v1.57.1 (2026-11-10) | Actif |
+| OpenFGA | CNCF ; Okta est mainteneur principal | v1.22.1 (2026-10-28) | Actif, CNCF Incubating (passage le 2025-10-28, annoncé le 2025-11-11) |
+| Permify | FusionAuth (acquis le 2025-11-20) | v1.7.6 (2026-11-05) | Actif ; documentation déplacée vers fusionauth.io |
+| Ory Keto | Ory | v26.2.0 (2026-03-20) | Actif |
+| Topaz | Ses mainteneurs, au sein de l’organisation `aserto-dev` | v0.33.27 (2026-11-10) | Actif ; Aserto a cessé son activité en tant qu’entreprise (billet du 2025-04-27) |
+| Warrant | WorkOS | v1.15.1 (2024-06-10) | Aucune version depuis ; non archivé ; warrant.dev affiche « Now WorkOS FGA » (désormais WorkOS FGA) |
+
+Sources : versions et métadonnées des dépôts issues de l’API GitHub pour chacun des dépôts ci-dessus · [CNCF on OpenFGA](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/) · [CNCF project page](https://www.cncf.io/projects/openfga/) · [Auth0 FGA docs](https://docs.fga.dev/fga) · [Permify acquisition post](https://permify.co/post/fusionauth-acquires-permify/) · [FusionAuth post](https://fusionauth.io/blog/fusionauth-acquires-permify) · [Aserto, "The final chapter"](https://www.aserto.com/blog/the-final-chapter-for-aserto) · [warrant.dev](https://warrant.dev)
+
+<Callout kind="note" title="Non vérifié">
+
+La date à laquelle WorkOS a acquis Warrant n’est pas donnée ici : aucune annonce de première main n’a pu être vérifiée. Il n’a pas été vérifié si warrant.dev redirige ou affiche seulement l’avis.
+
+</Callout>
+
+## Lectures connexes
+
+[zanzibar.tech](https://zanzibar.tech) est « The Google Zanzibar Paper, annotated by AuthZed » (l’article Google Zanzibar, annoté par AuthZed) : le texte de l’article accompagné des notes d’AuthZed (« Annotations © 2026 AuthZed, Inc. Zanzibar Paper © USENIX and original authors »). Sa source se trouve sur GitHub dans [authzed/zanzibar-annotated](https://github.com/authzed/zanzibar-annotated). Les annotations sont rédigées par l’entreprise qui développe SpiceDB.
+
+## Sources
+
+- [https://authzed.com/docs/spicedb/concepts/schema](https://authzed.com/docs/spicedb/concepts/schema)
+- [https://authzed.com/docs/spicedb/concepts/relationships](https://authzed.com/docs/spicedb/concepts/relationships)
+- [https://authzed.com/docs/spicedb/concepts/consistency](https://authzed.com/docs/spicedb/concepts/consistency)
+- [https://authzed.com/docs/spicedb/concepts/datastores](https://authzed.com/docs/spicedb/concepts/datastores)
+- [https://authzed.com/docs/materialize/getting-started/overview](https://authzed.com/docs/materialize/getting-started/overview)
+- [https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)
+- [https://openfga.dev/docs/concepts](https://openfga.dev/docs/concepts)
+- [https://openfga.dev/docs/configuration-language](https://openfga.dev/docs/configuration-language)
+- [https://openfga.dev/docs/interacting/consistency](https://openfga.dev/docs/interacting/consistency)
+- [https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)
+- [https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto)
+- [https://fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)
+- [https://fusionauth.io/permify-docs/getting-started/sync-data](https://fusionauth.io/permify-docs/getting-started/sync-data)
+- [https://fusionauth.io/permify-docs/operations/snap-tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)
+- [https://fusionauth.io/permify-docs/operations/cache](https://fusionauth.io/permify-docs/operations/cache)
+- [https://fusionauth.io/permify-docs/setting-up/configuration](https://fusionauth.io/permify-docs/setting-up/configuration)
+- [https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)
+- [https://www.ory.com/docs/keto/reference/ory-permission-language](https://www.ory.com/docs/keto/reference/ory-permission-language)
+- [https://www.ory.com/docs/keto/concepts/relation-tuples](https://www.ory.com/docs/keto/concepts/relation-tuples)
+- [https://www.ory.com/docs/oss/deployment](https://www.ory.com/docs/oss/deployment)
+- [https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)
+- [https://www.topaz.sh/docs/directory/manifest-reference](https://www.topaz.sh/docs/directory/manifest-reference)
+- [https://www.topaz.sh/docs/architecture](https://www.topaz.sh/docs/architecture)
+- [https://github.com/aserto-dev/go-directory/tree/main/proto/aserto/directory](https://github.com/aserto-dev/go-directory/tree/main/proto/aserto/directory)
+- [https://www.aserto.com/blog/the-final-chapter-for-aserto](https://www.aserto.com/blog/the-final-chapter-for-aserto)
+- [https://github.com/warrant-dev/warrant](https://github.com/warrant-dev/warrant)
+- [https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)
+- [https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go)
+- [https://warrant.dev](https://warrant.dev)
+- [https://permify.co/post/fusionauth-acquires-permify/](https://permify.co/post/fusionauth-acquires-permify/)
+- [https://fusionauth.io/blog/fusionauth-acquires-permify](https://fusionauth.io/blog/fusionauth-acquires-permify)
+- [https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
+- [https://www.cncf.io/projects/openfga/](https://www.cncf.io/projects/openfga/)
+- [https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go)
+- [https://docs.fga.dev/fga](https://docs.fga.dev/fga)
+- [https://zanzibar.tech](https://zanzibar.tech)
+- [https://github.com/authzed/zanzibar-annotated](https://github.com/authzed/zanzibar-annotated)

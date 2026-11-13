@@ -1,0 +1,137 @@
+---
+title: "사내 시스템"
+description: "Zanzibar 논문을 바탕으로 만든 두 사내 인가 시스템, Airbnb의 Himeji와 Carta의 AuthZ를 2021년 그 엔지니어들이 기술한 대로 살펴본다."
+section: ecosystem
+order: 7
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "3.1", "3.2.4"]
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+어떤 회사들은 제품을 도입하지 않았다. 논문을 읽고 자체 서비스를 만들었다. 2021년에 두 회사, Airbnb(Himeji)와 Carta(AuthZ)가 상세한 글을 공개했다. 두 시스템 모두 회사 밖에서는 쓸 수 없으므로 여기 나오는 모든 내용은 그 엔지니어들이 쓴 글에서 왔으며, 그 글들보다 새로운 내용은 없다.
+
+<Callout title="이 글들을 읽은 방법">
+글들은 Medium에 있으며, Medium은 이 사이트의 확인 도구에 HTTP 403을 반환했다. 전문은 2026-11-13에 두 게시처의 Medium RSS 피드([Airbnb Engineering 피드](https://medium.com/feed/airbnb-engineering/tagged/authorization), [Building Carta 피드](https://medium.com/feed/building-carta/tagged/authorization))를 통해 읽었으며, 이 피드들은 같은 글을 담고 있다. Himeji에 관한 사실은 [InfoQ의 보도](https://www.infoq.com/news/2021/05/airbnb-himeji)(2021-05-12)와 대조했다. Himeji의 주 저자와의 녹화된 대담([Authorization in Software](https://www.youtube.com/watch?v=TXZFi6Opbkk))도 있지만 사용하지 않았다. 녹화도 그 설명도 읽을 수 없었다.
+</Callout>
+
+## Airbnb Himeji
+
+Alan Yao가 Dipak Pawar, Blair Wu, Abhishek Parmar와 함께 쓴 "Himeji: A Scalable Centralized System for Authorization at Airbnb"는 2021-04-20에 공개되었다([글](https://medium.com/airbnb-engineering/himeji-a-scalable-centralized-system-for-authorization-at-airbnb-341664924574)). Airbnb는 Rails 모놀리스에서 서비스로 옮겨 가는 중이었고, 인가 검사를 데이터 계층에 두기를 원했다. 글은 Himeji를 "a centralized authorization system based on Zanzibar, which is called from the data layer"(데이터 계층에서 호출되는, Zanzibar 기반의 중앙 집중식 인가 시스템)라고 부른다. Himeji는 "exposes a check API for data services to perform authorization checks"(데이터 서비스가 인가 검사를 수행할 수 있도록 check API를 제공한다).
+
+### 모델
+
+- "Similar to Zanzibar, the basic unit of storage for Himeji is a tuple in the form entity # relation @ principal."(Zanzibar와 마찬가지로 Himeji의 기본 저장 단위는 entity # relation @ principal 형태의 튜플이다.) 엔터티는 삼중항 "(entity type : entity id : entity part)"(엔터티 타입 : 엔터티 ID : 엔터티 부분)이다.
+- 글의 예시 튜플: "LISTING : 10 # OWNER @ User(123)". 이 표기법으로 Anne이 readme를 소유하는 것은 `DOC : readme # OWNER @ User(anne)`가 된다. 이 줄은 설명을 위한 것이며 글에서 온 것이 아니다.
+- 규칙은 "a YAML-based configuration language that allows for the resolution of permissions checks via set algebra"(집합 대수로 권한 검사를 해석할 수 있게 하는 YAML 기반 설정 언어)로 작성된다. 글의 예는 listing의 `WRITE` 검사를 `WRITE`와 `OWNER`의 합집합으로, `READ`를 `READ`와 `WRITE`의 합집합으로 해석한다. 논문의 동심원 관계(§2.3.1, 그림 1)다.
+- *참조 튜플(reference tuple)*은 관계를 지정하지 않고 두 엔터티를 연결한다. 따라갈 관계는 설정에서 온다. "Where this approach differs from Zanzibar is that such a tuple does not contain a relation."(이 방식이 Zanzibar와 다른 점은 그런 튜플이 관계를 포함하지 않는다는 것이다.) 두 엔터티 타입 사이의 관계는 거의 달라지지 않으므로, 글은 이렇게 하면 N×M개 대신 약 N개의 튜플을 저장한다고 말한다.
+- Himeji는 쓰기 시점에 팬아웃한다. "Instead of fanning out at read time, we write all permissions data when resources are mutated"(읽기 시점에 팬아웃하는 대신, 리소스가 변경될 때 모든 권한 데이터를 쓴다)이며, 그 이유는 "given our read-heavy workload"(읽기가 많은 작업 부하이기 때문)다.
+
+### 아키텍처
+
+검사는 Himeji를 어떻게 지나가는가?
+
+<Graph
+  width={620}
+  height={280}
+  title="Airbnb의 글에 나오는 Himeji의 세 계층"
+  desc="데이터 서비스는 오케스트레이션 계층의 check API를 호출한다. 오케스트레이션 계층은 설정에 따라 데이터를 가져오며, 각 조회를 일관된 해싱으로 캐시 샤드에 라우팅한다. 각 캐시 샤드는 가용 영역마다 인스턴스 하나씩 복제되며, 미스일 때 데이터 계층에서 로드한다. 데이터 계층은 논리적으로 샤딩된 Amazon Aurora 데이터베이스다. 데이터베이스에서 발행된 변경이 캐시 샤드를 무효화한다."
+  nodes={[
+    { id: "svc", x: 90, y: 60, label: "데이터 서비스", kind: "client" },
+    { id: "orch", x: 310, y: 60, label: "오케스트레이션\n계층", kind: "server" },
+    { id: "cache", x: 310, y: 215, label: "캐시 샤드\nAZ당 복제본 1", kind: "server" },
+    { id: "db", x: 535, y: 215, label: "Amazon Aurora\n샤딩", kind: "store" },
+  ]}
+  edges={[
+    { from: "svc", to: "orch", label: "check" },
+    { from: "orch", to: "cache", label: "일관된 해싱" },
+    { from: "cache", to: "db", label: "미스일 때 로드" },
+    { from: "db", to: "orch", label: "변경이 무효화", dashed: true, labelOffset: 12 },
+  ]}
+  caption="노랑: Himeji 서버. 초록: 저장소. 파랑: 호출자. 점선: 무효화 이벤트. 글이 경로를 자세히 보여 주지 않으므로 Himeji 계층까지로 그렸다."
+/>
+
+글이 가장 중요한 변경이라고 부르는 분리에 주목하라. Himeji는 "Separate the request orchestration tier from the caching tier"(요청 오케스트레이션 계층을 캐싱 계층과 분리)할 것이며, 그러면 캐시를 재시작하지 않고 오케스트레이션 코드를 바꿀 수 있다. 나머지는 글에서 가져온 것이다.
+
+- 캐싱 계층은 "sharded and replicated (one instance per AZ per shard)"(샤딩되고 복제된다(샤드당 AZ당 인스턴스 하나))이며, "Each shard is assigned a set of data to own via consistent hashing"(각 샤드는 일관된 해싱으로 소유할 데이터 집합을 할당받는다), "We target a ~98% hit rate on the cache."(캐시 히트율 약 98%를 목표로 한다.)
+- 캐시 샤드는 "based on published mutations from the databases"(데이터베이스에서 발행된 변경에 기반하여) 무효화된다. InfoQ는 변경 데이터 캡처 도구가 Apache Kafka를 통해 발행하는 Airbnb의 SpinalTap이라고 밝힌다([InfoQ](https://www.infoq.com/news/2021/05/airbnb-himeji)). 글은 이름을 밝히는 대신 별도의 글로 링크한다.
+- 저장소: "Use Amazon Aurora for database storage as part of our cloud journey, which differs from Zanzibar's usage of Spanner."(클라우드 전환의 일환으로 데이터베이스 저장소에 Amazon Aurora를 사용하며, 이는 Zanzibar가 Spanner를 사용하는 것과 다르다.)
+- "We implement the same reliability (hedging, tiered caching) and load shedding features as Zanzibar for availability."(가용성을 위해 Zanzibar와 같은 신뢰성(헤징, 계층형 캐싱) 및 부하 차단 기능을 구현한다.) 논문은 이를 §3.2.5부터 §3.2.7에서 기술한다.
+- 프로덕션에서 약 1년이 지난 뒤 보고된 결과: 가용성 약 99.999%, P50 1.8 ms, P95 7 ms, P99 12 ms, 처리량은 2020년 3월 0에서 2021년 3월 초당 85만 엔터티로. InfoQ도 같은 가용성, P99, 처리량 수치를 보도한다.
+
+글은 일관성 토큰을 기술하지 않는다. Himeji에 zookie 같은 것이 있는지는 읽은 출처에 나와 있지 않다.
+
+## Carta AuthZ
+
+Carta의 Aaron Tainter는 두 편의 글을 공개했다. 2021-06-11의 "AuthZ: Carta's highly scalable permissions system"([1부](https://medium.com/building-carta/authz-cartas-highly-scalable-permissions-system-782a7f2c840f))과 2021-09-03의 "User authorization in less than 10 milliseconds"([2부](https://medium.com/building-carta/user-authorization-in-less-than-10-milliseconds-f20d277fec47))다. 2부는 이 시스템을 "AuthZ, based on Google's Zanzibar"(Google의 Zanzibar에 기반한 AuthZ)라고 부른다.
+
+### 모델과 API
+
+- "A RelationTuple is a tuple consisting of an actor, relation, and object."(RelationTuple은 행위자, 관계, 객체로 이루어진 튜플이다.) Anne이 readme를 소유하는 것은 RelationTuple 하나다. 2부는 검사를 `AuthZ.Check("Employee:1", "View", "Grade:X")`로 쓴다.
+- "Consumers combine RelationTuples using a domain-specific language."(소비자는 도메인 특화 언어로 RelationTuple을 결합한다.) 글들은 그 언어를 보여 주지 않는다.
+- "We introduced namespaces to separate domain-level permissions."(도메인 수준의 권한을 분리하기 위해 네임스페이스를 도입했다.) 서비스는 쓰기 권한이 있는 네임스페이스에만 쓸 수 있으며, 그렇지 않으면 "AuthZ rejects the update and throws an error"(AuthZ는 갱신을 거부하고 오류를 낸다). 이 네임스페이스는 팀 사이의 접근 경계이지, 논문의 객체 타입별 설정(§2.3)이 아니다.
+- 처음에는 "There were only three endpoints"(엔드포인트가 셋뿐이었다). Add, Remove, Check다. 행위자에 대한 리소스를 나열하는 쿼리 API는 나중에 생겼다.
+- 대량 변경은 Mustache 언어의 템플릿으로 작성되며, "AuthZ injects data into"(AuthZ가 데이터를 주입한) 뒤 "a bulk update event"(대량 갱신 이벤트)를 실행한다.
+
+### 인덱스와 티켓
+
+AuthZ는 그래프를 순회하는 대신 미리 계산된 인덱스로 검사에 답한다. "Traversing the graph is expensive, so AuthZ maintains a custom secondary index."(그래프 순회는 비용이 크므로 AuthZ는 맞춤형 보조 인덱스를 유지한다.) 인덱스는 두 집합을 유지한다. Actor Index Set("the direct connections from actor leaf nodes", 행위자 리프 노드로부터의 직접 연결)과 Object Index Set("the direct and indirect connections to each object node", 각 객체 노드로의 직접 및 간접 연결)이다. 2부는 "(Google's Zanzibar paper calls them Group2Group and Member2Group)"(Google의 Zanzibar 논문은 이를 Group2Group과 Member2Group이라고 부른다)이라고 덧붙인다. Leopard의 두 집합 유형이다(§3.2.4).
+
+인덱스는 비동기로 구축되므로, 소비자에게는 자신의 변경이 도착했는지 알 방법이 필요하다. 그것이 *티켓*의 역할이다. "During an update, AuthZ issues a Ticket (synonymous with a Zookie in Zanzibar) to the consumer."(갱신 중에 AuthZ는 소비자에게 티켓(Zanzibar의 Zookie와 같은 뜻)을 발급한다.) "A Ticket is an opaque token which represents the time at which the change was committed to AuthZ."(티켓은 변경이 AuthZ에 커밋된 시각을 나타내는 불투명한 토큰이다.)
+
+인덱스가 따라잡기 전에 소비자가 티켓으로 검사하면 어떻게 되는가?
+
+<Swimlane
+  lanes={["소비자", "AuthZ", "인덱스 워커"]}
+  timeLabel="시간"
+  title="Carta AuthZ 티켓"
+  desc="소비자가 RelationTuple을 추가한다. AuthZ는 이를 커밋하고 티켓을 반환한다. 워커가 인덱스 변경을 구축하기 시작한다. 커밋 타임스탬프가 티켓 이하인 RelationTuple이 아직 처리되지 않은 상태에서 소비자가 티켓으로 검사하므로, AuthZ는 요청을 거부한다. 워커의 결과가 인덱스에 병합된 뒤 소비자가 재시도하여 갱신된 인덱스로부터 답을 받는다."
+  events={[
+    { lane: 0, t: 0, label: "RelationTuple\n추가", kind: "write" },
+    { lane: 1, t: 0, label: "커밋,\n티켓 발급", kind: "write" },
+    { lane: 2, t: 1, label: "인덱스 변경\n구축", kind: "note" },
+    { lane: 0, t: 1, label: "Check\n+ 티켓", kind: "read" },
+    { lane: 1, t: 1, label: "미처리 튜플\n≤ 티켓: 거부", kind: "bad" },
+    { lane: 2, t: 2, label: "인덱스에\n병합", kind: "write" },
+    { lane: 0, t: 3, label: "Check 재시도\n+ 티켓", kind: "read" },
+    { lane: 1, t: 3, label: "갱신된 인덱스로\n답함", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [2, 1], dashed: true },
+    { from: [0, 1], to: [1, 1] },
+    { from: [0, 3], to: [1, 3] },
+  ]}
+  caption="AuthZ는 기다리지 않고 거부하며, 소비자가 재시도한다. 반면 논문의 Check는 zookie보다 이르지 않은 스냅샷에서 평가한다(§2.4.4)."
+/>
+
+티켓이 어디에서 확인되는지에 주목하라. "AuthZ rejects requests when there are RelationTuples with commit timestamps less than or equal to the ticket provided by the consumer"(소비자가 제공한 티켓 이하의 커밋 타임스탬프를 가진 RelationTuple이 있으면 AuthZ는 요청을 거부한다)이며, 소비자는 "can try again later"(나중에 다시 시도할 수 있다). 2부의 추가 세부는 다음과 같다.
+
+- "Several concurrent workers build the custom index asynchronously to keep API calls fast for our consumers."(소비자를 위해 API 호출을 빠르게 유지하도록 여러 동시 워커가 맞춤형 인덱스를 비동기로 구축한다.) 변경은 "take a few hundred milliseconds to propagate through the system"(시스템 전체에 전파되는 데 몇백 밀리초가 걸린다).
+- "AuthZ spawns three workers to build index changes for each commit."(AuthZ는 커밋마다 인덱스 변경을 구축할 워커 셋을 띄운다.) 결과는 중간 저장소에서 대기하다가 "when all commits before a timestamp have finished processing"(어떤 타임스탬프 이전의 모든 커밋 처리가 끝나면) 인덱스에 병합된다.
+- "AuthZ stores consumer-created RelationTuples in a datastore"(AuthZ는 소비자가 만든 RelationTuple을 데이터 저장소에 저장하고), "AuthZ maintains the full changelog of commit events in secondary storage"(AuthZ는 커밋 이벤트의 전체 변경 로그를 보조 저장소에 유지한다). 논문의 변경 로그(§3.1.2)와 같다. 글들은 데이터베이스 제품의 이름을 밝히지 않는다.
+- "Including network latency, the median permission check takes about 7 milliseconds. At the 95th percentile, we check permissions in 12 milliseconds."(네트워크 지연 시간을 포함하여 권한 검사의 중앙값은 약 7밀리초다. 95번째 백분위수에서는 12밀리초에 권한을 검사한다.)
+
+## 나란히 비교
+
+여기서 읽은 글들이 말하지 않는 칸에는 "명시 없음"이라고 적었다.
+
+| 논문 | Airbnb Himeji (2021) | Carta AuthZ (2021) |
+| --- | --- | --- |
+| 튜플 `object#relation@user` (§2.1) | `entity # relation @ principal`, 그리고 관계 없는 참조 튜플 | RelationTuple: 행위자, 관계, 객체 |
+| 재작성을 가진 네임스페이스 설정 (§2.3.1) | YAML 설정, 집합 대수 | 도메인 특화 언어(공개되지 않음) |
+| zookie (§2.2) | 명시 없음 | 티켓, "synonymous with a Zookie"(Zookie와 같은 뜻) |
+| Leopard (§3.2.4) | 명시 없음. 대신 쓰기 시점 팬아웃 | 워커가 구축하는 Actor 및 Object Index Set |
+| 캐싱 (§3.2.5) | 샤딩되고 복제된 인메모리 캐시, 목표 히트율 약 98% | 명시 없음 |
+| Spanner (§3.1) | Amazon Aurora | 명시 없음 |
+| 보고된 지연 시간 | P95 7 ms, P99 12 ms | 중앙값 7 ms, P95 12 ms |
+
+## 출처
+
+- Airbnb, "Himeji: A Scalable Centralized System for Authorization at Airbnb" (2021-04-20): [medium.com/airbnb-engineering/…341664924574](https://medium.com/airbnb-engineering/himeji-a-scalable-centralized-system-for-authorization-at-airbnb-341664924574), read through [the Airbnb Engineering authorization feed](https://medium.com/feed/airbnb-engineering/tagged/authorization)
+- InfoQ, "Airbnb Builds Himeji - a Scalable Centralized Authorization System" (2021-05-12): [infoq.com/news/2021/05/airbnb-himeji](https://www.infoq.com/news/2021/05/airbnb-himeji)
+- Carta, "AuthZ: Carta's highly scalable permissions system" (2021-06-11): [medium.com/building-carta/…782a7f2c840f](https://medium.com/building-carta/authz-cartas-highly-scalable-permissions-system-782a7f2c840f)
+- Carta, "User authorization in less than 10 milliseconds" (2021-09-03): [medium.com/building-carta/…f20d277fec47](https://medium.com/building-carta/user-authorization-in-less-than-10-milliseconds-f20d277fec47), both read through [the Building Carta authorization feed](https://medium.com/feed/building-carta/tagged/authorization)
+- Authorization in Software, conversation with Alan Yao (not used): [youtube.com/watch?v=TXZFi6Opbkk](https://www.youtube.com/watch?v=TXZFi6Opbkk)

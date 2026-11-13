@@ -1,0 +1,247 @@
+---
+title: "Leopard：グループのインデックス"
+description: "Zanzibar が深く入れ子になったグループのメンバーシップを 1 回の集合の積で答える仕組みと、それが書き込みのたびに払うコスト。"
+section: guide
+part: mechanisms
+order: 7
+checked: "2026-11-13"
+paper: ["3.2.4", "4.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar は通常、オブジェクトからユーザーへとタプルを 1 回ずつ検索しながらたどることで Check に答える。ほとんどのデータではこれで速い。しかし何段にも入れ子になったグループでは速くない。Zanzibar はそうしたチェックを、入れ子を事前計算したインデックスである Leopard に任せる。
+
+## 入れ子が遅い理由
+
+共通の例を拡張する。`group:eng` は `group:product` の中にあり、`group:product` は `group:all` の中にあり、readme は `group:all` 全体に共有されているとする。Beto が readme を閲覧できることを知るには、何回の検索が必要か。
+
+<Graph
+  width={640}
+  height={380}
+  title="入れ子になったグループの連鎖"
+  desc="user:beto は group:eng のメンバーであり、group:eng のメンバーは group:product のメンバーであり、group:product のメンバーは group:all のメンバーであり、group:all のメンバーは doc:readme の閲覧者である。Beto のアクセスのチェックは doc:readme から始まり、1 ステップごとに 1 つのオブジェクトを読む。doc:readme、group:all、group:product、group:eng の 4 回の読み取りが順に行われる。"
+  nodes={[
+    { id: "doc", x: 200, y: 30, label: "doc:readme", kind: "object", mono: true },
+    { id: "all", x: 200, y: 110, label: "group:all", kind: "group", mono: true },
+    { id: "prod", x: 200, y: 190, label: "group:product", kind: "group", mono: true },
+    { id: "eng", x: 200, y: 270, label: "group:eng", kind: "group", mono: true, on: true },
+    { id: "beto", x: 200, y: 350, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "n1", x: 470, y: 30, label: "1. doc:readme を読む: 閲覧者は group:all", kind: "note" },
+    { id: "n2", x: 470, y: 110, label: "2. group:all を読む: group:product を含む", kind: "note" },
+    { id: "n3", x: 470, y: 190, label: "3. group:product を読む: group:eng を含む", kind: "note" },
+    { id: "n4", x: 470, y: 270, label: "4. group:eng を読む: Beto はメンバー", kind: "note" },
+  ]}
+  edges={[
+    { from: "all", to: "doc", label: "viewer" },
+    { from: "prod", to: "all", label: "member" },
+    { from: "eng", to: "prod", label: "member" },
+    { from: "beto", to: "eng", label: "member", on: true },
+  ]}
+  caption="各ステップが次のステップのオブジェクトを決めるので、4 回の読み取りを同時に始めることはできない。各オブジェクトは別々のサーバーにあることもある (アーキテクチャのページを参照)。"
+/>
+
+図の背後にあるタプルは次のとおりである。
+
+```text
+doc:readme#viewer@group:all#member
+group:all#member@group:product#member
+group:product#member@group:eng#member
+group:eng#member@user:beto
+```
+
+ステップ *n* はステップ *n* − 1 が返るまで始められないことに注意されたい。論文はこれをポインタ追跡と呼び、"can be expensive when indirect ACLs or groups are deep or wide" (間接 ACL やグループが深い場合や広い場合にはコストが高くなりうる) と述べている (§3.2.3)。広さも問題になる。`group:all` が 100 個の子グループを持っていれば、ステップ 2 は 100 通りに分岐する。そこで次のようになる。"Recursive pointer chasing during check evaluation has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups. For selected namespaces that exhibit such structure, Zanzibar handles checks using Leopard, a specialized index that supports efficient set computation." (チェック評価中の再帰的なポインタ追跡では、深く入れ子になったグループや多数の子グループを持つグループに対して低レイテンシを維持するのが難しい。そのような構造を示す選ばれた名前空間について、Zanzibar は効率的な集合演算をサポートする専用のインデックスである Leopard を用いてチェックを処理する。) (§3.2.4)
+
+## 2 種類の集合
+
+Leopard は "a collection of named sets using `(T, s, e)` tuples, where *T* is an enum representing the set type and *s* and *e* are 64-bit integers representing the set ID and the element ID" (`(T, s, e)` タプルを用いた名前付き集合の集まり。ここで *T* は集合の種類を表す列挙型、*s* と *e* は集合 ID と要素 ID を表す 64 ビット整数である) を格納する (§3.2.4)。グループのメンバーシップには 2 種類の集合を使う。
+
+- `GROUP2GROUP(s)`：祖先グループ *s* の「*直接または間接の*」("*directly or indirectly*") サブグループであるグループ。
+- `MEMBER2GROUP(s)`：ユーザー *s* が「*直接の*」("*direct*") メンバーであるグループ。
+
+例では、これらの集合は何を保持しているか。
+
+<Graph
+  width={640}
+  height={330}
+  title="例における GROUP2GROUP と MEMBER2GROUP"
+  desc="GROUP2GROUP(group:all) は group:all、group:product、group:eng。GROUP2GROUP(group:product) は group:product と group:eng。GROUP2GROUP(group:eng) は group:eng。MEMBER2GROUP(user:beto) は group:eng。MEMBER2GROUP(user:anne) は空。"
+  nodes={[
+    { id: "g1", x: 125, y: 40, label: "GROUP2GROUP(group:all)", kind: "object", mono: true },
+    { id: "g2", x: 125, y: 100, label: "GROUP2GROUP(group:product)", kind: "object", mono: true },
+    { id: "g3", x: 125, y: 160, label: "GROUP2GROUP(group:eng)", kind: "object", mono: true },
+    { id: "m1", x: 125, y: 240, label: "MEMBER2GROUP(user:beto)", kind: "object", mono: true },
+    { id: "m2", x: 125, y: 300, label: "MEMBER2GROUP(user:anne)", kind: "object", mono: true },
+    { id: "s1", x: 455, w: 330, y: 40, label: "{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "s2", x: 455, w: 330, y: 100, label: "{ group:product, group:eng }", kind: "group", mono: true },
+    { id: "s3", x: 455, w: 330, y: 160, label: "{ group:eng }", kind: "group", mono: true },
+    { id: "s4", x: 455, w: 330, y: 240, label: "{ group:eng }", kind: "group", mono: true, on: true },
+    { id: "s5", x: 455, w: 330, y: 300, label: "{ }", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "g1", to: "s1" },
+    { from: "g2", to: "s2" },
+    { from: "g3", to: "s3" },
+    { from: "m1", to: "s4", on: true },
+    { from: "m2", to: "s5" },
+  ]}
+  caption="GROUP2GROUP は平坦化されている。eng は 2 段下にあるが、group:all には group:eng が載っている。MEMBER2GROUP は平坦化されておらず、直接のメンバーシップだけを載せる。各グループは自身の GROUP2GROUP 集合にも描いてある。これは論文に書かれていない。下の注を参照。"
+/>
+
+非対称性に注意されたい。入れ子はすべて `GROUP2GROUP` に畳み込まれているので、ユーザー側はユーザーが直接追加された場所だけを記録すればよい。論文の言葉では、"Flattening group-to-group paths allows reachability to be efficently evaluated by Leopard" (グループからグループへの経路を平坦化することで、Leopard は到達可能性を効率的に評価できる) (§3.2.4)。
+
+<Callout kind="warn" title="グループは自分自身を含むか">
+論文は `GROUP2GROUP(s)` を *s* のサブグループであるグループと定義しており、*s* 自身がその集合に含まれるかどうかは述べていない。*G* の直接のメンバーが下のテストに合格するには、*G* が `GROUP2GROUP(G)` に含まれるか、別途処理される必要がある。図は前者を仮定している。これは推測であり、論文が述べていることではない。
+</Callout>
+
+## メンバーシップは空でない積集合である
+
+"To evaluate whether user *U* is a member of group *G*, we check whether" (ユーザー *U* がグループ *G* のメンバーであるかを評価するには、次が成り立つかをチェックする) (§3.2.4)
+
+```text
+(MEMBER2GROUP(U) ∩ GROUP2GROUP(G)) ≠ ∅
+```
+
+つまり、ユーザーが直接追加されたグループのいずれかが *G* の下のどこかにもあるか、ということである。`group:all` について、Beto と Anne ではどうなるか。
+
+<Graph
+  width={640}
+  height={330}
+  title="積集合としてのメンバーシップ"
+  desc="MEMBER2GROUP(user:beto)、すなわち group:eng と、GROUP2GROUP(group:all)、すなわち group:all、group:product、group:eng の積集合は group:eng であり、空でないので Beto は group:all のメンバーである。MEMBER2GROUP(user:anne)、すなわち空集合と、同じ集合の積集合は空集合なので、Anne はメンバーではない。"
+  nodes={[
+    { id: "mb", x: 190, y: 50, label: "MEMBER2GROUP(user:beto)\n{ group:eng }", kind: "group", mono: true },
+    { id: "ga", x: 190, y: 130, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "rb", x: 530, y: 90, label: "∩ = { group:eng }\n空でない: メンバー", kind: "object", on: true },
+    { id: "ma", x: 190, y: 220, label: "MEMBER2GROUP(user:anne)\n{ }", kind: "group", mono: true },
+    { id: "gb", x: 190, y: 295, label: "GROUP2GROUP(group:all)\n{ group:all, group:product, group:eng }", kind: "group", mono: true },
+    { id: "ra", x: 530, y: 257, label: "∩ = { }\n空: メンバーでない", kind: "object" },
+  ]}
+  edges={[
+    { from: "mb", to: "rb", on: true },
+    { from: "ga", to: "rb", on: true },
+    { from: "ma", to: "ra" },
+    { from: "gb", to: "ra" },
+  ]}
+  caption="入れ子の深さにかかわらず、2 回の検索と 1 回の積集合で済む。Beto は含まれ、Anne は含まれない。"
+/>
+
+最初の図の 4 回の逐次読み取りは、2 回の集合の検索と 1 回の積集合になった。元の問いに答え切るには、Zanzibar は依然として `group:all#member` を指す readme のタプルを読む。Leopard が取り除くのはそこから下の深さである。論文は Check が通常の評価と Leopard への問い合わせにどう分けられるかを詳しく書いていないので、この分け方は §3.2.4 の読み取りであり、引用ではない。
+
+## ソート済みリスト上の積集合
+
+積集合はどれほど安いのか。"Index tuples are stored as ordered lists of integers in a structure such as a skip list, thus allowing for efficient union and intersections among sets. For example, evaluating the intersection between two sets, *A* and *B*, requires only O(min(|A|, |B|)) skip-list seeks." (インデックスタプルはスキップリストのような構造の中に整数の順序付きリストとして格納され、それにより集合間の和集合と積集合を効率的に計算できる。たとえば、2 つの集合 *A* と *B* の積集合を評価するのに必要なのは O(min(|A|, |B|)) 回のスキップリストのシークだけである。) (§3.2.4)
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={520}
+  title="短いソート済みリストと長いリストの積集合"
+  desc="リスト A は 17、42、90 を持つ。リスト B は 3、8、17、21、30、42、55、61、77、84、93、99 を持つ。A の各要素について、B で 1 回シークして、それより小さくない最初の要素を見つける。17 は 17 を、42 は 42 を見つけ、90 は 93 に着地し、これは一致しない。積集合は 17 と 42 であり、3 回のシークで見つかる。"
+  nodes={[
+    { id: "la", x: 30, y: 50, label: "A", kind: "note" },
+    { id: "lb", x: 30, y: 200, label: "B", kind: "note" },
+    { id: "a1", x: 182, y: 50, label: "17", mono: true, w: 38, on: true },
+    { id: "a2", x: 320, y: 50, label: "42", mono: true, w: 38, on: true },
+    { id: "a3", x: 527, y: 50, label: "90", mono: true, w: 38 },
+    { id: "b0", x: 90, y: 200, label: "3", mono: true, w: 38 },
+    { id: "b1", x: 136, y: 200, label: "8", mono: true, w: 38 },
+    { id: "b2", x: 182, y: 200, label: "17", mono: true, w: 38, on: true },
+    { id: "b3", x: 228, y: 200, label: "21", mono: true, w: 38 },
+    { id: "b4", x: 274, y: 200, label: "30", mono: true, w: 38 },
+    { id: "b5", x: 320, y: 200, label: "42", mono: true, w: 38, on: true },
+    { id: "b6", x: 366, y: 200, label: "55", mono: true, w: 38 },
+    { id: "b7", x: 412, y: 200, label: "61", mono: true, w: 38 },
+    { id: "b8", x: 458, y: 200, label: "77", mono: true, w: 38 },
+    { id: "b9", x: 504, y: 200, label: "84", mono: true, w: 38 },
+    { id: "b10", x: 550, y: 200, label: "93", mono: true, w: 38 },
+    { id: "b11", x: 596, y: 200, label: "99", mono: true, w: 38 },
+  ]}
+  edges={[
+    { from: "a1", to: "b2", label: "シーク 1: 一致", on: true },
+    { from: "a2", to: "b5", label: "シーク 2: 一致", on: true },
+    { from: "a3", to: "b10", label: "シーク 3: 不一致", dashed: true },
+  ]}
+  caption="A に 3 要素、B で 3 回のシーク。B の 12 要素を 1 つずつ走査することはない。各シークを速くしているスキップリストの上位レベルは描いていない。"
+/>
+
+作業量は短いほうのリストに従うことに注意されたい。ユーザーが少数のグループの直接のメンバーにすぎないなら、`MEMBER2GROUP(U)` は短く、`GROUP2GROUP(G)` が巨大でもテストは安いままである。論文は集合のサイズを示していないので、この場合は仮定である。インデックスは "is sharded by element IDs" (要素 ID でシャーディングされ)、シャードは "are usually served entirely from memory" (通常すべてメモリから提供される) (§3.2.4)。
+
+## 3 つの部分
+
+"The Leopard system consists of three discrete parts: a serving system capable of consistent and low-latency operations across sets; an offline, periodic index building system; and an online real-time layer capable of continuously updating the serving system as tuple changes occur." (Leopard システムは 3 つの独立した部分から成る。集合をまたいで一貫性のある低レイテンシな操作が可能な提供システム、オフラインで定期的に動くインデックス構築システム、そしてタプルの変更に応じて提供システムを継続的に更新できるオンラインのリアルタイム層である。) (§3.2.4) これらはどうつながっているのか。
+
+<Graph
+  width={640}
+  height={350}
+  title="Leopard の 3 つの部分"
+  desc="オフラインのインデックスビルダーは Zanzibar のタプルと設定のスナップショットを読み、インデックスのシャードを生成する。シャードは複製され、Leopard の提供システムに入れ替えられる。並行して、差分インデクサーは Zanzibar の Watch ストリームを読み、タイムスタンプ付きの更新を提供システムの差分層に書き込む。aclserver は提供システムに問い合わせ、提供システムはクエリのタイムスタンプにおいて差分層をオフラインのインデックスに重ねる。"
+  nodes={[
+    { id: "snap", x: 85, y: 60, label: "タプル + 設定の\nスナップショット", kind: "store" },
+    { id: "build", x: 310, y: 60, label: "オフラインの\nインデックスビルダー\n(定期実行)", kind: "server" },
+    { id: "serve", x: 480, y: 185, label: "Leopard の提供\nオフラインのインデックス\n+ 差分層", kind: "server", on: true },
+    { id: "watch", x: 85, y: 300, label: "Watch API", kind: "server" },
+    { id: "inc", x: 290, y: 300, label: "差分\nインデクサー", kind: "server" },
+    { id: "acl", x: 560, y: 315, label: "aclservers", kind: "server" },
+  ]}
+  edges={[
+    { from: "snap", to: "build" },
+    { from: "build", to: "serve", label: "新しいシャード" },
+    { from: "watch", to: "inc", label: "タプルの変更" },
+    { from: "inc", to: "serve", label: "(T, s, e, t, d)", labelOffset: -22 },
+    { from: "acl", to: "serve", label: "問い合わせ", dir: "both" },
+  ]}
+  caption="オフラインの経路は完全だが古い。差分の経路は新しいが、最後のスナップショット以降の変更しか含まない。提供システムが両者を統合する。"
+/>
+
+- **オフラインのインデックスビルダー。** これは "generates index shards from a snapshot of Zanzibar relation tuples and configs, and replicates the shards globally. It respects userset rewrite rules and recursively expands edges in an ACL graph to form Leopard index tuples." (Zanzibar のリレーションタプルと設定のスナップショットからインデックスのシャードを生成し、シャードをグローバルに複製する。ユーザーセット書き換えルールを尊重し、ACL グラフの辺を再帰的に展開して Leopard のインデックスタプルを形成する。) サーバーは "swap old shards with new ones when they become available" (新しいシャードが利用可能になると古いシャードと入れ替える)。
+- **差分層。** オフラインのインデックスだけでは "cannot do so at a fresh and consistent snapshot" (新しく一貫したスナップショットでそれを行うことはできない) ので、サーバーは "an incremental layer that indexes all updates since the offline snapshot" (オフラインのスナップショット以降のすべての更新をインデックス化する差分層) を保持する。各更新は `(T, s, e, t, d)` タプルであり、"where *t* is the timestamp of the update and *d* is a deletion marker" (*t* は更新のタイムスタンプ、*d* は削除マーカーである)。"Updates with timestamps less than or equal to the query timestamp are merged on top of the offline index during query processing." (クエリのタイムスタンプ以下のタイムスタンプを持つ更新は、クエリ処理中にオフラインのインデックスの上に統合される。)
+- **供給。** "the Leopard incremental indexer calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications and transforms the updates into a temporally ordered stream of Leopard tuple additions, updates, and deletions." (Leopard の差分インデクサーは Zanzibar の Watch API を呼び出して、時間順に並んだ Zanzibar のタプル変更のストリームを受け取り、その更新を、時間順に並んだ Leopard タプルの追加、更新、削除のストリームに変換する。)
+
+この一覧の引用はすべて §3.2.4 からである。更新はタイムスタンプを持ち、クエリのタイムスタンプまで統合されるので、Leopard の答えは Check の他の部分と同じスナップショットを反映できる。論文が述べる差分層の目的は "To support consistent ACL evaluation" (一貫した ACL 評価をサポートするため) である。
+
+## コスト：1 回の書き込みで多数のインデックス更新
+
+平坦化の代償は書き込み時に払われる。eng が product に追加される前に戻り、`group:eng` が自身のサブグループ `group:infra` と `group:web` を持つとする。ここで誰かが eng を product に追加する。インデックスタプルはいくつ変わるか。
+
+<Graph
+  width={640}
+  height={380}
+  title="1 回のタプル書き込みが多数のインデックス更新にファンアウトする"
+  desc="タプル group:product#member@group:eng#member を追加すると、group:eng、group:infra、group:web が group:product と group:all の両方の新しい子孫になる。差分インデクサーはこの 1 つのタプルを 6 つの GROUP2GROUP の追加に変換する。product に eng、infra、web が加わり、all に eng、infra、web が加わる。"
+  nodes={[
+    { id: "t", x: 110, y: 40, label: "group:product#member\n@group:eng#member", kind: "store", mono: true },
+    { id: "inc", x: 110, y: 190, label: "差分\nインデクサー", kind: "server" },
+    { id: "e1", x: 520, y: 30, w: 190, label: "+ G2G(product, eng)", kind: "group", mono: true },
+    { id: "e2", x: 520, y: 94, w: 190, label: "+ G2G(product, infra)", kind: "group", mono: true },
+    { id: "e3", x: 520, y: 158, w: 190, label: "+ G2G(product, web)", kind: "group", mono: true },
+    { id: "e4", x: 520, y: 222, w: 190, label: "+ G2G(all, eng)", kind: "group", mono: true },
+    { id: "e5", x: 520, y: 286, w: 190, label: "+ G2G(all, infra)", kind: "group", mono: true },
+    { id: "e6", x: 520, y: 350, w: 190, label: "+ G2G(all, web)", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "t", to: "inc", label: "1 回の書き込み" },
+    { from: "inc", to: "e1" },
+    { from: "inc", to: "e2" },
+    { from: "inc", to: "e3" },
+    { from: "inc", to: "e4" },
+    { from: "inc", to: "e5" },
+    { from: "inc", to: "e6" },
+  ]}
+  caption="Zanzibar のタプル 1 つに対して Leopard のタプル 6 つ (group: の接頭辞は省略)。product のすべての祖先 (product、all) と eng のすべての子孫 (eng、infra、web) の組み合わせである。MEMBER2GROUP は変わらない。"
+/>
+
+個数は一方の側の祖先の数と他方の側の子孫の数の積なので、深さと広さの両方に応じて増える。これを計算するために、"Generating updates for the GROUP2GROUP tuples requires the incremental indexer to maintain group-to-group membership for denormalizing the effects of a relation tuple update to potentially multiple index updates." (GROUP2GROUP タプルの更新を生成するには、差分インデクサーがグループ間のメンバーシップを保持し、1 つのリレーションタプルの更新の影響を、潜在的に複数のインデックス更新へと非正規化する必要がある。) Google の規模では "In practice, a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events." (実際には、Zanzibar のタプルの追加や削除 1 つが、潜在的に数万の個別の Leopard タプルイベントを生むことがある。) (§3.2.4)
+
+削除は図より微妙である。インデックスタプルを削除できるのは、2 つのグループをつなぐ他の経路が残っていない場合に限られる。インデクサーがそれをどう判断するかは、論文に書かれていない。
+
+これは Leopard が例外である理由でもある。他の部分では "Zanzibar avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)" (Zanzibar はストレージの非正規化を避け、正規化されたデータのみに依存する (§3.2.4 で述べた場合を除く)) (§3.2.5)、Leopard は "that exhibit such structure" (そのような構造を示す) 選ばれた名前空間にのみ使われる (§3.2.4)。
+
+## 本番環境での実績
+
+§4.4 より、7 日間について。"The Leopard index is performing 1.56M QPS at the median, or 2.22M QPS at the 99th percentile" (Leopard インデックスは中央値で 1.56M QPS、99 パーセンタイルで 2.22M QPS を処理している)、そして "Leopard servers respond in fewer than 150 μsec at the median, or under 1 msec at the 99th percentile." (Leopard サーバーは中央値で 150 μs 未満、99 パーセンタイルで 1 ms 未満で応答する。) 差分層は "writes roughly 500 index updates per second at the median, and approximately 1.5K updates per second at the 99th percentile." (中央値で毎秒約 500 件、99 パーセンタイルで毎秒約 1.5K 件のインデックス更新を書き込む。) Leopard への呼び出しは、Spanner への呼び出しと同様にヘッジされる (§3.2.7)。
+
+## 出典
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3.2.3, §3.2.4, §3.2.5, §3.2.7, §4.4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

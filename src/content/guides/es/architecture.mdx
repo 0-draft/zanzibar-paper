@@ -1,0 +1,370 @@
+---
+title: "Arquitectura, de una comprobación a Spanner"
+description: "Los servidores y las bases de datos que hay detrás de Zanzibar, seguidos a través de una única solicitud Check y del flujo de Watch."
+section: guide
+part: mechanisms
+order: 5
+checked: "2026-11-13"
+paper: ["3", "3.1", "3.2.5", "3.2.6", "3.2.7", "4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar es un conjunto de servidores situado delante de un conjunto de bases de datos Spanner. Esta página nombra las piezas, sigue luego una solicitud Check a través de ellas y después examina cómo se disponen los datos en disco. Las cifras del final son las que el artículo da para producción en 2018.
+
+## Las piezas
+
+¿Qué cajas hay y en qué sentido fluyen los datos entre ellas? El artículo responde con su Figura 2. La versión siguiente conserva sus colores (clientes en azul, servidores en amarillo, bases de datos Spanner en verde) y prescinde del detalle.
+
+<Graph
+  width={640}
+  height={400}
+  minWidth={560}
+  title="Arquitectura de Zanzibar, simplificada"
+  desc="Los clientes envían Check, Read, Expand y Write a los aclservers de un clúster de servicio de Zanzibar; el watchserver se dibuja fuera del clúster, como en el artículo. Los aclservers cargan las configuraciones de los espacios de nombres desde Spanner, leen y escriben tuplas de relación en una base de datos Spanner por espacio de nombres y añaden cada escritura al registro de cambios, también en Spanner. Un watchserver sigue el final del registro de cambios y transmite los cambios a los clientes (la API Watch) y a Leopard (la Figura 2 del artículo dibuja Leopard como un sistema de indexación separado). Una canalización periódica fuera de línea lee las bases de datos de tuplas, vuelca instantáneas y elimina las versiones antiguas; Leopard construye su índice a partir de esas instantáneas y responde a cálculos de conjuntos para los aclservers."
+  groups={[
+    { x: 178, y: 28, w: 184, h: 112, label: "Clúster de servicio de Zanzibar" },
+    { x: 425, y: 20, w: 210, h: 262, label: "Spanner" },
+  ]}
+  nodes={[
+    { id: "cl", x: 55, y: 90, label: "clientes", kind: "client" },
+    { id: "acl", x: 270, y: 90, label: "aclservers", kind: "server" },
+    { id: "watch", x: 270, y: 250, label: "watchserver", kind: "server" },
+    { id: "wcl", x: 55, y: 250, label: "clientes", kind: "client" },
+    { id: "cfg", x: 531, y: 70, label: "configuraciones de\nespacios de nombres", kind: "store" },
+    { id: "tup", x: 531, y: 150, label: "tuplas de relación\n(una BD por\nespacio de nombres)", kind: "store" },
+    { id: "log", x: 495, y: 248, label: "registro de cambios", kind: "store" },
+    { id: "pipe", x: 585, y: 360, label: "canalización\nfuera de línea\n(periódica)", kind: "server" },
+    { id: "leo", x: 120, y: 360, label: "Leopard", kind: "server" },
+  ]}
+  edges={[
+    { from: "cl", to: "acl", label: "Check, Read,\nExpand, Write", dir: "both" },
+    { from: "cfg", to: "acl", label: "carga" },
+    { from: "acl", to: "tup", label: "lectura, escritura", dir: "both", labelOffset: 12 },
+    { from: "acl", to: "log", label: "añade", labelOffset: -12 },
+    { from: "log", to: "watch", label: "sigue" },
+    { from: "watch", to: "wcl", label: "Watch" },
+    { from: "watch", to: "leo", label: "cambios" },
+    { from: "tup", to: "pipe", label: "volcado,\nGC", dir: "both", labelOffset: -24 },
+    { from: "pipe", to: "leo", label: "instantáneas" },
+    { from: "leo", to: "acl", label: "cálculo de\nconjuntos", labelOffset: -34 },
+  ]}
+  caption="Redibujada y simplificada a partir de la Figura 2 del artículo. Las flechas indican el sentido del flujo de datos. Los clientes aparecen dos veces solo para separar las líneas: los mismos clientes llaman a los aclservers y se suscriben a Watch."
+/>
+
+Obsérvese que los clientes hablan con dos tipos de servidor. Los `aclservers` responden a los cuatro tipos de solicitud; los `watchservers` solo transmiten cambios. En palabras del artículo, los `aclservers` "are organized in clusters and respond to Check, Read, Expand, and Write requests" (están organizados en clústeres y responden a solicitudes Check, Read, Expand y Write), mientras que los `watchservers` "tail the changelog and serve a stream of namespace changes to clients in near real time" (siguen el final del registro de cambios y sirven a los clientes un flujo de cambios de los espacios de nombres casi en tiempo real) (§3). Leopard es un índice para grupos grandes y profundamente anidados; tiene [su propia página](../leopard/).
+
+La canalización fuera de línea produce "dumps of the relation tuples in each namespace at a known snapshot timestamp" (volcados de las tuplas de relación de cada espacio de nombres en una marca de tiempo de instantánea conocida) y elimina "tuple versions older than a threshold configured per namespace" (las versiones de tuplas más antiguas que un umbral configurado por espacio de nombres) (§3).
+
+## Una comprobación, paso a paso
+
+La solicitud que se va a seguir: ¿es Beto lector del readme? En el ejemplo de referencia, los lectores del readme incluyen a los miembros de `group:eng`, y Beto es uno de ellos, así que la respuesta es sí. Zanzibar tiene que averiguarlo leyendo dos objetos, `doc:readme` y `group:eng`.
+
+### Llega a cualquier servidor, que reparte el trabajo
+
+¿Qué servidor hace el trabajo? Cualquiera de ellos puede aceptar la solicitud, y el trabajo se reparte después por objeto.
+
+<Graph
+  width={640}
+  height={260}
+  title="Una comprobación se reparte por un clúster"
+  desc="Un cliente envía Check al aclserver A. El servidor A pregunta al aclserver B, que se ocupa de doc:readme, si Beto es lector del readme. El servidor B encuentra que los miembros de group:eng son lectores y pregunta al aclserver C, que se ocupa de group:eng, si Beto es miembro. Las respuestas vuelven por las mismas flechas hasta A, que responde al cliente."
+  nodes={[
+    { id: "cl", x: 60, y: 130, label: "cliente", kind: "client" },
+    { id: "a", x: 240, y: 130, label: "aclserver A\nrecibe Check", kind: "server" },
+    { id: "b", x: 480, y: 60, label: "aclserver B\nclave: doc:readme", kind: "server", on: true },
+    { id: "c", x: 480, y: 210, label: "aclserver C\nclave: group:eng", kind: "server", on: true },
+  ]}
+  edges={[
+    { from: "cl", to: "a", label: "Check", dir: "both" },
+    { from: "a", to: "b", label: "¿lector del readme?", dir: "both", labelOffset: -12 },
+    { from: "b", to: "c", label: "¿miembro de eng?", dir: "both" },
+  ]}
+  caption="Check(user:beto, viewer, doc:readme). Las respuestas vuelven por las mismas flechas; A responde al cliente."
+/>
+
+El servidor A no necesitaba ser responsable de ninguno de los dos objetos. El artículo describe exactamente esta forma: "Requests arrive at any server in a cluster and that server fans out the work to other servers in the cluster as necessary. Those servers may in turn contact other servers to compute intermediate results. The initial server gathers the final result and returns it to the client." (Las solicitudes llegan a cualquier servidor de un clúster y ese servidor reparte el trabajo entre otros servidores del clúster según sea necesario. Esos servidores pueden, a su vez, contactar con otros servidores para calcular resultados intermedios. El servidor inicial reúne el resultado final y lo devuelve al cliente.) (§3)
+
+### El hashing consistente elige al servidor par
+
+¿Cómo supo A que debía preguntar a B por el readme? Los servidores de un clúster forman una única caché distribuida: "Cache entries are distributed across Zanzibar servers with consistent hashing" (las entradas de la caché se distribuyen entre los servidores de Zanzibar mediante hashing consistente) (§3.2.5). El esquema procede de [Karger et al. (STOC '97)](https://people.csail.mit.edu/karger/Papers/web.pdf), que el artículo cita como [20]. Para la mayoría de los espacios de nombres, la clave de reenvío se calcula a partir del ID de objeto (§3.2.5).
+
+<Graph
+  width={640}
+  height={350}
+  title="Claves de reenvío asignadas a un anillo de servidores"
+  desc="Cuatro aclservers, A, B, C y D, están en un anillo. Las solicitudes doc:readme#viewer y doc:readme#owner se calculan ambas con el hash del objeto doc:readme y van al servidor B. group:eng#member va al servidor C. folder:A#viewer va al servidor D."
+  nodes={[
+    { id: "A", x: 320, y: 60, label: "aclserver A", kind: "server" },
+    { id: "B", x: 420, y: 165, label: "aclserver B", kind: "server" },
+    { id: "C", x: 320, y: 270, label: "aclserver C", kind: "server" },
+    { id: "D", x: 220, y: 165, label: "aclserver D", kind: "server" },
+    { id: "kv", x: 545, y: 50, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "ko", x: 545, y: 275, label: "doc:readme#owner", kind: "object", mono: true },
+    { id: "kg", x: 130, y: 325, label: "group:eng#member", kind: "object", mono: true },
+    { id: "kf", x: 100, y: 60, label: "folder:A#viewer", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "A", to: "B", dir: "none" },
+    { from: "B", to: "C", dir: "none" },
+    { from: "C", to: "D", dir: "none" },
+    { from: "D", to: "A", dir: "none" },
+    { from: "kv", to: "B", label: "hash(doc:readme)", dashed: true, on: true, labelOffset: -14 },
+    { from: "ko", to: "B", label: "hash(doc:readme)", dashed: true, on: true, labelOffset: 14 },
+    { from: "kg", to: "C", label: "hash(group:eng)", dashed: true, labelOffset: 14 },
+    { from: "kf", to: "D", label: "hash(folder:A)", dashed: true, labelOffset: -12 },
+  ]}
+  caption="Las dos solicitudes del readme van a B porque la clave es el objeto, no la relación. El anillo es la imagen clásica del hashing consistente; el artículo no dice qué variante usa Zanzibar."
+/>
+
+Obsérvese que `viewer` y `owner` sobre el readme coinciden en el mismo servidor. Ese es el sentido de usar el objeto como clave: "processing a check on ⟨*object#relation*⟩ often involves indirect ACL checks on other relations of the same object and reading relation tuples of the object. These checks and reads can be processed by the same server since they share the same forwarding key with the parent check request." (procesar una comprobación sobre ⟨*object#relation*⟩ suele implicar comprobaciones de ACL indirectas sobre otras relaciones del mismo objeto y la lectura de tuplas de relación del objeto. Esas comprobaciones y lecturas puede procesarlas el mismo servidor, ya que comparten la misma clave de reenvío con la solicitud de comprobación padre.) (§3.2.5) Karger et al. diseñan el hashing consistente de modo que, cuando se añade o se retira una caché, solo tenga que moverse la fracción mínima de objetos necesaria para mantener la carga equilibrada, y por eso resulta adecuado para una caché.
+
+Para las claves calientes, el artículo añade que utiliza [Slicer](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya) "to help distribute hot keys to multiple servers" (para ayudar a distribuir las claves calientes entre varios servidores) (§3.2.5).
+
+### Ambos extremos de una llamada guardan la respuesta en caché
+
+¿Qué ocurre cuando muchos servidores preguntan a la vez a C por `group:eng`, por ejemplo porque una página de resultados de búsqueda comprueba decenas de documentos compartidos todos con eng?
+
+<Graph
+  width={640}
+  height={300}
+  title="Las cachés del llamante y del llamado forman un árbol"
+  desc="Tres aclservers, A, D y E, cada uno con una caché, preguntan al aclserver C si un usuario es miembro de group:eng. El servidor C tiene su propia caché y solo lee las tuplas de group:eng en Spanner cuando hay un fallo de caché."
+  nodes={[
+    { id: "a", x: 100, y: 60, label: "aclserver A\n+ caché", kind: "server" },
+    { id: "d", x: 100, y: 150, label: "aclserver D\n+ caché", kind: "server" },
+    { id: "e", x: 100, y: 240, label: "aclserver E\n+ caché", kind: "server" },
+    { id: "c", x: 340, y: 150, label: "aclserver C\n+ caché", kind: "server", on: true },
+    { id: "db", x: 570, y: 150, label: "tuplas de grupo\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "a", to: "c", label: "¿miembro de eng?" },
+    { from: "d", to: "c" },
+    { from: "e", to: "c" },
+    { from: "c", to: "db", label: "si hay fallo", on: true },
+  ]}
+  caption="Un acierto en un llamante ahorra una RPC a C. Un acierto en C ahorra una lectura de Spanner."
+/>
+
+Las cachés de los llamantes y la del llamado se apilan en un árbol: "To handle hot forwarding keys, we cache results at both the caller and the callee of internal RPCs, effectively forming cache trees." (Para gestionar las claves de reenvío calientes, almacenamos en caché los resultados tanto en el llamante como en el llamado de las RPC internas, con lo que, en la práctica, se forman árboles de cachés.) (§3.2.5) Las claves de caché incluyen la marca de tiempo de la instantánea, y las marcas de tiempo se "rounded up to a coarse granularity, such as one or ten seconds" (redondean al alza a una granularidad gruesa, como uno o diez segundos), de modo que la mayoría de las solicitudes recientes comparten entradas (§3.2.5). En producción, la caché de comprobaciones tenía "a 10% hit rate on the delegate’s side" (una tasa de aciertos del 10% en el lado del delegado) y "a 2% hit rate" (una tasa de aciertos del 2%) en el lado del delegante; el artículo señala que, por bajas que parezcan estas tasas, "they prevent 500K internal RPCs per second from creating hot spots" (evitan que 500K RPC internas por segundo creen puntos calientes) (§4.4).
+
+### La tabla de bloqueos agrupa las solicitudes idénticas
+
+Una caché solo ayuda cuando ya contiene la respuesta. Si llegan muchas solicitudes idénticas antes de que termine la primera, todas fallarían en la caché e irían todas a Spanner: una [estampida de caché](https://en.wikipedia.org/wiki/Cache_stampede) (la referencia [3] del artículo). ¿Cómo lo evita C?
+
+<Swimlane
+  lanes={["solicitud 1", "aclserver C", "solicitud 2", "Spanner"]}
+  laneWidth={140}
+  rowHeight={58}
+  timeLabel="tiempo"
+  title="Una tabla de bloqueos deja pasar una de varias solicitudes idénticas"
+  desc="La solicitud 1 pide a C la clave de caché K; C falla en la caché y registra K en su tabla de bloqueos. La solicitud 2 pide la misma clave y se la hace esperar. C lee las filas de Spanner una sola vez, rellena la caché y libera la entrada. Las dos solicitudes reciben la respuesta."
+  events={[
+    { lane: 0, t: 0, label: "pide la clave K", kind: "read" },
+    { lane: 1, t: 0, label: "fallo: bloquea K", kind: "write" },
+    { lane: 2, t: 1, label: "pide la clave K", kind: "read" },
+    { lane: 1, t: 1, label: "K bloqueada:\nespera", kind: "note" },
+    { lane: 1, t: 2, label: "lee una vez", kind: "read" },
+    { lane: 3, t: 2, label: "filas", kind: "read" },
+    { lane: 1, t: 3, label: "rellena la caché", kind: "good" },
+    { lane: 0, t: 4, label: "respuesta", kind: "good" },
+    { lane: 2, t: 4, label: "respuesta", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [2, 1], to: [1, 1] },
+    { from: [1, 2], to: [3, 2] },
+    { from: [1, 3], to: [0, 4] },
+    { from: [1, 3], to: [2, 4] },
+  ]}
+  caption="La solicitud 2 se bloquea en lugar de ir a Spanner. Solo se emite una lectura para la clave K."
+/>
+
+El artículo: "we maintain a *lock table* on each server to track outstanding reads and checks. Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated." (mantenemos una *tabla de bloqueos* en cada servidor para registrar las lecturas y comprobaciones en curso. De entre las solicitudes que comparten la misma clave de caché, solo una empezará a procesarse; el resto se bloquea hasta que la caché se rellena.) (§3.2.5) En las comprobaciones, la tabla de bloqueos ahorró "an additional 12%" (un 12% adicional) en el lado del delegado y "an additional 3%" (un 3% adicional) en el lado del delegante (§4.4).
+
+Más tarde llegaron dos mejoras (§3.2.5). Para un objeto muy popular, Zanzibar lee y almacena en caché *todas* las tuplas de ⟨*object#relation*⟩ de una vez, "trading read bandwidth for cacheability" (cambiando ancho de banda de lectura por capacidad de caché). Y como una subcomprobación cancelada deja vacía su clave de caché, retrasa la "eager cancellation when there are waiters on the corresponding lock table entry" (cancelación anticipada cuando hay solicitudes en espera en la entrada correspondiente de la tabla de bloqueos).
+
+### Las lecturas a Spanner se agrupan
+
+Tómese ahora una comprobación que afecta a varias relaciones de un mismo objeto: ¿es Chen lector del readme? Con la configuración de la Figura 1 del artículo, `viewer` incluye `editor`, `editor` incluye `owner`, y los lectores de la carpeta `parent` son lectores del documento. Así que el servidor B tiene que leer cuatro conjuntos de tuplas del readme.
+
+<Graph
+  width={640}
+  height={300}
+  title="Las lecturas de las hojas de una comprobación comparten un grupo"
+  desc="Evaluar si Chen es lector de doc:readme requiere las tuplas viewer, editor, owner y parent del readme. Las cuatro hojas se evalúan a la vez en el aclserver B, que agrupa sus lecturas antes de enviarlas a la base de datos doc de Spanner."
+  nodes={[
+    { id: "v", x: 110, y: 50, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "e", x: 110, y: 117, label: "doc:readme#editor", kind: "object", mono: true },
+    { id: "o", x: 110, y: 184, label: "doc:readme#owner", kind: "object", mono: true },
+    { id: "p", x: 110, y: 251, label: "doc:readme#parent", kind: "object", mono: true },
+    { id: "b", x: 350, y: 150, label: "aclserver B\nagrupa las lecturas", kind: "server", on: true },
+    { id: "db", x: 575, y: 150, label: "tuplas de doc\n(Spanner)", kind: "store" },
+  ]}
+  edges={[
+    { from: "v", to: "b" },
+    { from: "e", to: "b" },
+    { from: "o", to: "b" },
+    { from: "p", to: "b" },
+    { from: "b", to: "db", label: "menos RPC", on: true },
+  ]}
+  caption="Check(user:chen, viewer, doc:readme). Las cuatro hojas empiezan a la vez; sus lecturas salen juntas."
+/>
+
+Las hojas se ejecutan de forma concurrente: "we evaluate all leaf nodes of the boolean expression tree concurrently. When the outcome of one node determines the result of a subtree, evaluation of other nodes in the subtree is cancelled." (evaluamos concurrentemente todos los nodos hoja del árbol de expresiones booleanas. Cuando el resultado de un nodo determina el resultado de un subárbol, se cancela la evaluación de los demás nodos del subárbol.) (§3.2.3) Sus lecturas se agrupan: "We apply a pooling mechanism to group reads for the same ACL check to minimize the number of read RPCs to Spanner." (Aplicamos un mecanismo de agrupación para reunir las lecturas de una misma comprobación de ACL y minimizar el número de RPC de lectura a Spanner.) (§3.2.3) La tupla parent apunta entonces a `folder:A`, y `folder:A#viewer` se reenvía al servidor responsable de `folder:A`, donde se encuentra a Chen. El artículo no dice en cuántas RPC se convierte un grupo; no va más allá de “menos”.
+
+La disposición de las tuplas lo abarata: el orden de la clave primaria "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair" (nos permite buscar todas las tuplas de relación de un ID de objeto o de un par *(ID de objeto, relación)* dado) (§3.1.1, véase [Almacenamiento](#almacenamiento) más abajo).
+
+### Las lecturas lentas de Spanner se cubren con hedging
+
+Algunas lecturas serán lentas por motivos que nada tienen que ver con la solicitud. Para las llamadas a Spanner y a Leopard, Zanzibar utiliza solicitudes de cobertura (hedging), según [Dean y Barroso, "The Tail at Scale" (CACM, 2013)](https://research.google/pubs/the-tail-at-scale/), la referencia [16] del artículo. ¿Cuándo sale la segunda solicitud?
+
+<Swimlane
+  lanes={["aclserver", "réplica 1 de Spanner", "réplica 2 de Spanner"]}
+  laneWidth={180}
+  rowHeight={58}
+  timeLabel="tiempo"
+  title="Una lectura de cobertura diferida"
+  desc="El aclserver envía una lectura a la réplica 1 de Spanner, que es lenta. Tras el retardo de cobertura, el aclserver envía la misma lectura a la réplica 2. La réplica 2 responde primero; el aclserver utiliza esa respuesta y cancela la lectura en la réplica 1."
+  events={[
+    { lane: 0, t: 0, label: "envía la lectura", kind: "read" },
+    { lane: 1, t: 0, label: "lenta", kind: "bad" },
+    { lane: 0, t: 1, label: "pasó el retardo", kind: "note" },
+    { lane: 2, t: 1, label: "misma lectura", kind: "read" },
+    { lane: 2, t: 2, label: "respuesta", kind: "good" },
+    { lane: 0, t: 3, label: "usa la primera\nrespuesta", kind: "good" },
+    { lane: 1, t: 4, label: "cancelada", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [0, 1], to: [2, 1], label: "cobertura" },
+    { from: [2, 2], to: [0, 3] },
+    { from: [0, 3], to: [1, 4], label: "cancela", dashed: true },
+  ]}
+  caption="La solicitud de cobertura solo se envía cuando ya se sabe que la primera lectura es lenta."
+/>
+
+El hedging consiste en que "we send the same request to multiple servers, use whichever response comes back first, and cancel the other requests" (enviamos la misma solicitud a varios servidores, utilizamos la respuesta que llegue primero y cancelamos las demás solicitudes) (§3.2.7). La segunda solicitud espera: "we first send one request and defer sending hedged requests until the initial request is known to be slow" (primero enviamos una solicitud y diferimos el envío de las solicitudes de cobertura hasta que se sabe que la solicitud inicial es lenta), con un retardo fijado por un estimador de la "*N*th percentile latency based on recent measurements" (latencia del percentil *N* basada en mediciones recientes) (§3.2.7). En producción, "1% of Spanner reads, or 200K reads per second, benefit from hedging" (el 1% de las lecturas de Spanner, o 200K lecturas por segundo, se benefician del hedging) (§4.4).
+
+<Callout kind="note" title="No entre aclservers">
+Zanzibar no aplica hedging a sus propias llamadas internas. Las comprobaciones difieren en coste: "Hedging check requests would result in duplicating the most expensive workloads and, ironically, worsening latency." (Aplicar hedging a las solicitudes de comprobación supondría duplicar las cargas de trabajo más costosas y, paradójicamente, empeorar la latencia.) (§3.2.7) En su lugar, recurre a las réplicas y a la monitorización para evitar los servidores lentos.
+</Callout>
+
+### Cada cliente tiene sus límites
+
+Un servicio compartido tiene que impedir que un cliente ralentice a los demás. §3.2.6 enumera cuatro límites:
+
+- CPU: el coste de cada RPC se mide en "generic *cpu-seconds*" (*segundos de CPU* genéricos); cada cliente tiene un límite global de CPU, y "its RPCs will be throttled if it exceeds the limit *and* there is no spare capacity in the overall system." (sus RPC se limitarán si supera el límite *y* no hay capacidad sobrante en el sistema en su conjunto).
+- RPC en curso: cada servidor limita el total y el número por cliente.
+- Spanner: "the maximum number of concurrent reads per *(object, client)* and per client on each Spanner server." (el número máximo de lecturas concurrentes por *(objeto, cliente)* y por cliente en cada servidor de Spanner).
+- Tablas de bloqueos: "different lock table keys for requests from different clients" (claves distintas de la tabla de bloqueos para las solicitudes de clientes distintos), de modo que la limitación que Spanner aplica a un cliente no bloquee a otro.
+
+## La ruta de Watch
+
+Las escrituras alimentan también un flujo. ¿Adónde va un cambio después de que Anne escriba una tupla?
+
+<Graph
+  width={640}
+  height={330}
+  title="De una escritura al flujo de Watch"
+  desc="Un cliente envía un Write a un aclserver. En una sola transacción de Spanner, el aclserver escribe la tupla en la base de datos del espacio de nombres doc y una entrada en un fragmento del registro de cambios. El watchserver sigue el final del registro de cambios y transmite el cambio a los clientes de Watch y al indexador incremental de Leopard."
+  nodes={[
+    { id: "w", x: 60, y: 70, label: "cliente\nWrite", kind: "client" },
+    { id: "acl", x: 230, y: 70, label: "aclserver", kind: "server" },
+    { id: "tup", x: 470, y: 40, label: "tuplas de doc", kind: "store" },
+    { id: "log", x: 470, y: 140, label: "fragmento del\nregistro de cambios", kind: "store", on: true },
+    { id: "watch", x: 470, y: 240, label: "watchserver", kind: "server", on: true },
+    { id: "cl", x: 300, y: 300, label: "clientes de Watch", kind: "client" },
+    { id: "leo", x: 580, y: 300, label: "indexador\nde Leopard", kind: "server" },
+  ]}
+  edges={[
+    { from: "w", to: "acl", label: "tupla" },
+    { from: "acl", to: "tup", label: "misma txn", labelOffset: -10 },
+    { from: "acl", to: "log", label: "misma txn", labelOffset: 10 },
+    { from: "log", to: "watch", label: "sigue", on: true },
+    { from: "watch", to: "cl", label: "cambios" },
+    { from: "watch", to: "leo" },
+  ]}
+  caption="La tupla y su entrada en el registro de cambios se confirman en una sola transacción, así que el flujo no puede perder una escritura ni mostrar una que no se confirmó."
+/>
+
+"Every Zanzibar write is committed to both the tuple storage and the changelog shard in a single transaction." (Cada escritura de Zanzibar se confirma tanto en el almacenamiento de tuplas como en el fragmento del registro de cambios en una única transacción.) El servidor de Spanner que aloja el fragmento del registro de cambios actúa como coordinador de la transacción "to minimize blocking of changelog reads on pending transactions" (para minimizar el bloqueo de las lecturas del registro de cambios por transacciones pendientes) (§3.1.2). Leopard es uno de los consumidores de este flujo: su indexador incremental "calls Zanzibar’s Watch API to receive a temporally ordered stream of Zanzibar tuple modifications" (llama a la API Watch de Zanzibar para recibir un flujo ordenado temporalmente de modificaciones de tuplas de Zanzibar) (§3.2.4).
+
+## Almacenamiento
+
+¿Qué bases de datos hay y qué aspecto tiene una fila? Hay tres tipos (§3).
+
+<Graph
+  width={640}
+  height={300}
+  title="Las bases de datos Spanner de Zanzibar"
+  desc="Una base de datos por espacio de nombres contiene tuplas de relación: aquí doc, group y folder. Una única base de datos de configuraciones de espacios de nombres contiene las configuraciones y un registro de cambios de las actualizaciones de configuración. Una única base de datos de registro de cambios, compartida por todos los espacios de nombres, registra las actualizaciones de tuplas. Los aclservers leen y escriben las bases de datos de tuplas, cargan y vigilan la base de datos de configuraciones y añaden entradas al registro de cambios."
+  nodes={[
+    { id: "doc", x: 90, y: 60, label: "tuplas de doc", kind: "store" },
+    { id: "grp", x: 90, y: 150, label: "tuplas de group", kind: "store" },
+    { id: "fol", x: 90, y: 240, label: "tuplas de folder", kind: "store" },
+    { id: "acl", x: 320, y: 150, label: "aclservers", kind: "server" },
+    { id: "cfg", x: 520, y: 60, label: "configuraciones de\nespacios de nombres\n(+ su registro de cambios)", kind: "store" },
+    { id: "log", x: 520, y: 240, label: "registro de cambios\n(todos los espacios\nde nombres)", kind: "store" },
+  ]}
+  edges={[
+    { from: "acl", to: "doc", dir: "both" },
+    { from: "acl", to: "grp", label: "lectura, escritura", dir: "both" },
+    { from: "acl", to: "fol", dir: "both" },
+    { from: "cfg", to: "acl", label: "carga, vigila" },
+    { from: "acl", to: "log", label: "añade" },
+  ]}
+  caption="Una base de datos de tuplas por espacio de nombres (izquierda), una base de datos de configuraciones y un registro de cambios compartidos por todos los espacios de nombres (derecha)."
+/>
+
+**Bases de datos de tuplas.** "We store relation tuples of each namespace in a separate database, where each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*." (Almacenamos las tuplas de relación de cada espacio de nombres en una base de datos separada, donde cada fila se identifica mediante la clave primaria *(ID de fragmento, ID de objeto, relación, usuario, marca de tiempo de confirmación)*.) (§3.1.1) Como la marca de tiempo de confirmación forma parte de la clave, las versiones antiguas se conservan en sus propias filas, "so that we can evaluate checks and reads at any timestamp within the garbage collection window" (para que podamos evaluar comprobaciones y lecturas en cualquier marca de tiempo dentro de la ventana de recolección de basura). Las tuplas del ejemplo de referencia quedarían en las bases de datos `doc` y `group` así:
+
+| Base de datos | ID de fragmento | ID de objeto | relación | usuario | marca de tiempo de confirmación |
+| --- | --- | --- | --- | --- | --- |
+| `doc` | *s*(readme) | `readme` | `owner` | `user:anne` | *t*₁ |
+| `doc` | *s*(readme) | `readme` | `parent` | `folder:A#...` | *t*₂ |
+| `doc` | *s*(readme) | `readme` | `viewer` | `group:eng#member` | *t*₃ |
+| `group` | *s*(eng) | `eng` | `member` | `user:beto` | *t*₄ |
+
+Las filas de un mismo objeto se ordenan juntas; el artículo dice que este orden de la clave "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair" (nos permite buscar todas las tuplas de relación de un ID de objeto o de un par *(ID de objeto, relación)* dado). "Usually the shard ID is determined solely by the object ID" (normalmente, el ID de fragmento se determina únicamente a partir del ID de objeto); para los grupos con muchísimos miembros puede "computed from both object ID and user" (calcularse a partir del ID de objeto y del usuario) (§3.1.1). El artículo no da la función de fragmentación, así que *s*(…) es un marcador de posición, y tampoco se describe la codificación exacta de la columna de usuario.
+
+**Registro de cambios.** Una base de datos para todos los espacios de nombres, con clave *(ID de fragmento del registro de cambios, marca de tiempo, ID único de actualización)*, "where a changelog shard is randomly selected for each write" (donde se selecciona al azar un fragmento del registro de cambios para cada escritura) (§3.1.2).
+
+**Configuraciones de los espacios de nombres.** Una base de datos con dos tablas: las configuraciones, "keyed by namespace IDs" (con los ID de los espacios de nombres como clave), y "a changelog of config updates" (un registro de cambios de las actualizaciones de configuración), "keyed by commit timestamps" (con las marcas de tiempo de confirmación como clave). Un servidor carga todas las configuraciones al arrancar y después sigue ese registro de cambios (§3.1.3).
+
+**Replicación.** "Replicas exist in dozens of locations around the world, with multiple replicas per region. The 5 voting replicas are in eastern and central United States, in 3 different metropolitan areas to isolate failures but within 25 milliseconds of each other so that Paxos transactions commit quickly." (Hay réplicas en decenas de ubicaciones de todo el mundo, con múltiples réplicas por región. Las 5 réplicas con voto están en el este y el centro de Estados Unidos, en 3 áreas metropolitanas distintas para aislar los fallos, pero a menos de 25 milisegundos entre sí para que las transacciones Paxos se confirmen con rapidez.) (§3.1.4) Spanner se describe en [Corbett et al. (OSDI '12)](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), la referencia [15] del artículo.
+
+## Cifras operativas
+
+El §4 del artículo da estas cifras. Los picos por API y las latencias proceden de periodos de 7 días de diciembre de 2018 (§4, §4.2); el artículo no vincula las demás cifras a un periodo concreto. Cada celda se cita tal como está escrita.
+
+| Qué | Las palabras del artículo | § |
+| --- | --- | --- |
+| Tiempo en producción | "more than 5 years" (más de 5 años) | 4 |
+| Espacios de nombres | "more than 1,500 namespaces defined by hundreds of client applications" (más de 1,500 espacios de nombres definidos por cientos de aplicaciones cliente) | 4 |
+| Tuplas | "more than 2 trillion relation tuples that occupy close to 100 terabytes" (más de 2 billones de tuplas de relación que ocupan cerca de 100 terabytes) | 4 |
+| Replicación | "fully replicated in more than 30 locations around the world" (totalmente replicados en más de 30 ubicaciones de todo el mundo) | 4 |
+| Carga de los clientes | "more than 10 million client queries per second (QPS)" (más de 10 millones de consultas de clientes por segundo) | 4 |
+| Pico por API | "Check requests peak at roughly 4.2M QPS, Read at 8.2M, Expand at 760K, and Write at 25K" (las solicitudes Check alcanzan un pico de unas 4.2M QPS, Read de 8.2M, Expand de 760K y Write de 25K) | 4 |
+| Servidores | "more than 10,000 servers organized in several dozen clusters around the world" (más de 10,000 servidores organizados en varias decenas de clústeres de todo el mundo) | 4 |
+| Servidores por clúster | "from fewer than 100 to more than 1,000, with the median near 500" (de menos de 100 a más de 1,000, con una mediana cercana a 500) | 4 |
+| Latencia de Check Safe | "At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively." (En los percentiles 50, 95, 99 y 99.9 alcanza picos de unos 3, 11, 20 y 93 ms, respectivamente.) | 4.2 |
+| Disponibilidad | "above 99.999% over the past 3 years of operation at Google" (superior al 99.999% durante los últimos 3 años de funcionamiento en Google) | 4.3 |
+| RPC internas | "22 million internal “delegated” RPCs per second, split about evenly between reads and checks" (22 millones de RPC internas “delegadas” por segundo, repartidas casi a partes iguales entre lecturas y comprobaciones) | 4.4 |
+| Búsquedas en caché | "approximately 200 million lookups per second at peak, 150 million from checks and 50 million from reads" (aproximadamente 200 millones de búsquedas por segundo en el pico, 150 millones de comprobaciones y 50 millones de lecturas) | 4.4 |
+| Lecturas a Spanner | "only 20 million read RPCs per second to Spanner" (solo 20 millones de RPC de lectura por segundo a Spanner) | 4.4 |
+| Latencia de lectura de Spanner | "0.5 msec at the median, and 2 msec at the 95th percentile" (0.5 ms en la mediana y 2 ms en el percentil 95) | 4.4 |
+| Lecturas con hedging | "1% of Spanner reads, or 200K reads per second, benefit from hedging" (el 1% de las lecturas de Spanner, o 200K lecturas por segundo, se benefician del hedging) | 4.4 |
+
+Obsérvese la proporción de las últimas filas: 200 millones de búsquedas en caché por segundo frente a 20 millones de RPC de lectura a Spanner, unas diez búsquedas en memoria por cada lectura enviada al almacenamiento.
+
+## Fuentes
+
+- Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, §3, §3.1, §3.2.3, §3.2.5–§3.2.7, §4: [https://www.usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- Karger et al., "Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the World Wide Web", STOC '97 (ref. [20] del artículo): [https://people.csail.mit.edu/karger/Papers/web.pdf](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- Dean y Barroso, "The Tail at Scale", Communications of the ACM 56(2), 2013 (ref. [16] del artículo): [https://research.google/pubs/the-tail-at-scale/](https://research.google/pubs/the-tail-at-scale/)
+- "Cache stampede", Wikipedia, citada por el artículo (ref. [3]): [https://en.wikipedia.org/wiki/Cache_stampede](https://en.wikipedia.org/wiki/Cache_stampede)
+- Adya et al., "Slicer: Auto-sharding for datacenter applications", OSDI '16 (ref. [12] del artículo): [https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya)
+- Corbett et al., "Spanner: Google's globally-distributed database", OSDI '12 (ref. [15] del artículo): [https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)

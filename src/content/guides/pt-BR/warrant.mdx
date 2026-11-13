@@ -1,0 +1,198 @@
+---
+title: "Warrant"
+description: "Um serviço de autorização inspirado no Zanzibar cujo repositório de código aberto está parado desde meados de 2024, depois que a WorkOS adquiriu a empresa e deu continuidade ao produto como WorkOS FGA."
+section: ecosystem
+order: 6
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4"]
+product:
+  name: Warrant
+  maintainer: WorkOS (acquired 2024)
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/warrant-dev/warrant
+  docs: https://workos.com/docs/fga
+  status: "Inativo como código aberto; continua como WorkOS FGA"
+  latest: v1.15.1 (2024-06-10)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+O Warrant é um serviço de autorização escrito em Go. Seu README descreve "a relationship based access control (ReBAC) engine (inspired by Google Zanzibar)" (um mecanismo de controle de acesso baseado em relacionamentos (ReBAC), inspirado no Google Zanzibar) que também cobre regras baseadas em papéis e em atributos, e escreve um relacionamento como `[user:1] is an [editor] of [document:docA]` ([README](https://github.com/warrant-dev/warrant)). Um relacionamento armazenado é chamado de *warrant*.
+
+A WorkOS adquiriu o Warrant em 2024. A data, 2024-04-23, vem de uma publicação da WorkOS no X ([publicação](https://x.com/WorkOS/status/1782774170146791776)): o X não serviu a página ao verificador deste site, então a data foi decodificada a partir do ID da publicação, e o texto da publicação ("Today, we are excited to announce the acquisition of @warrant_dev", hoje temos o prazer de anunciar a aquisição do @warrant_dev) foi visto apenas em um resultado de busca. Nenhuma publicação de blog da própria WorkOS foi encontrada. O site do Warrant agora diz "Warrant —> Now WorkOS FGA" ([warrant.dev](https://warrant.dev)), e o README aponta para a documentação do WorkOS FGA.
+
+## O artigo e o Warrant lado a lado
+
+O site de documentação do Warrant não existe mais, então esta tabela foi montada a partir do código aberto.
+
+| No artigo | No Warrant (código aberto) |
+| --- | --- |
+| Configuração de namespace (§2.3) | Um tipo de objeto: JSON com `type` e `relations`, sendo cada relação uma regra ([spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)) |
+| Tupla de relação `object#relation@user` (§2.1) | Um warrant: `objectType`, `objectId`, `relation` e um `subject` com `objectType`, `objectId` e uma `relation` opcional |
+| `_this` | Warrants diretos, que uma verificação sempre tenta primeiro ("1. Check for direct warrant match", 1. procurar correspondência com um warrant direto, [check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go)) |
+| `computed_userset` | `{ "inheritIf": "owner" }` |
+| `tuple_to_userset` | `{ "inheritIf": "viewer", "ofType": "folder", "withRelation": "parent" }` |
+| União, interseção, exclusão | `inheritIf` definido como `anyOf`, `allOf` ou `noneOf`, com `rules` aninhadas |
+| Zookie (§2.2, §2.4) | O cabeçalho `Warrant-Token`; o servidor de código aberto age apenas sobre o valor `latest` (ver Consistência) ([wookie.go](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go)) |
+| Check (§2.4.4) | `POST /v2/check` (também `/v2/authorize`) |
+| Read (§2.4.1) | `GET /v2/warrants`; `GET /v2/query` para consultas sobre o grafo |
+| Write (§2.4.2) | `POST /v2/warrants`, `DELETE /v2/warrants` |
+| Watch (§2.4.3) | Nenhum |
+| Expand (§2.4.5) | Nenhum |
+| Leopard (§3.2.4) | Nenhum |
+| Spanner (§3.1) | MySQL, PostgreSQL ou SQLite, com uma réplica de leitura opcional |
+
+## O exemplo em curso como tipos de objeto
+
+A Figura 1 do artigo torna os donos editores, os editores visualizadores, e os visualizadores da pasta pai visualizadores do documento (§2.3.1). No Warrant, cada tipo de objeto lista suas relações; um objeto vazio `{}` significa “apenas warrants diretos”, e `inheritIf` acrescenta uma regra.
+
+```json
+[
+  { "type": "group", "relations": { "member": {} } },
+  { "type": "folder", "relations": { "viewer": {} } },
+  {
+    "type": "doc",
+    "relations": {
+      "parent": {},
+      "owner": {},
+      "editor": { "inheritIf": "owner" },
+      "viewer": {
+        "inheritIf": "anyOf",
+        "rules": [
+          { "inheritIf": "editor" },
+          { "inheritIf": "viewer", "ofType": "folder", "withRelation": "parent" }
+        ]
+      }
+    }
+  }
+]
+```
+
+Não há entrada `user`: o servidor cria um tipo de objeto `user` embutido em sua migração inicial do banco de dados ([migração](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql)). A regra com `ofType` e `withRelation` encontra os warrants `doc:readme#parent@folder:…` e verifica `viewer` em cada pasta encontrada, como no código de verificação (`getMatchingSubjectsBySubjectType` em [check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go)).
+
+<Callout title="Conferido com o código, não executado">
+Estes tipos de objeto seguem a estrutura aceita pelo servidor de código aberto em 2026-11-13: o tipo `RelationRule` em [spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go) e os fixtures de teste dos mantenedores, como [tests/v2/authz.json](https://github.com/warrant-dev/warrant/blob/main/tests/v2/authz.json). Eles não foram enviados a um servidor Warrant. O WorkOS FGA, o produto que dá continuidade ao Warrant, é configurado de outra forma (ver Situação).
+</Callout>
+
+Os cinco warrants do exemplo em curso, como corpos de `POST /v2/warrants`:
+
+```json
+{ "objectType": "doc", "objectId": "readme", "relation": "owner", "subject": { "objectType": "user", "objectId": "anne" } }
+{ "objectType": "group", "objectId": "eng", "relation": "member", "subject": { "objectType": "user", "objectId": "beto" } }
+{ "objectType": "doc", "objectId": "readme", "relation": "viewer", "subject": { "objectType": "group", "objectId": "eng", "relation": "member" } }
+{ "objectType": "doc", "objectId": "readme", "relation": "parent", "subject": { "objectType": "folder", "objectId": "A" } }
+{ "objectType": "folder", "objectId": "A", "relation": "viewer", "subject": { "objectType": "user", "objectId": "chen" } }
+```
+
+Qual warrant e qual regra decidem a relação `viewer` de cada pessoa com o readme?
+
+<Graph
+  width={600}
+  height={260}
+  title="O exemplo em curso como warrants do Warrant"
+  desc="Cinco warrants. O user anne é owner do doc readme. O user beto é member do group eng. group eng#member é viewer do doc readme. A folder A é parent do doc readme. O user chen é viewer da folder A. O caminho de Chen pela folder A está destacado: ele é resolvido pela regra com ofType folder e withRelation parent."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer (#member)", dashed: true },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Anne: owner → editor → viewer por inheritIf. Beto: um warrant cujo sujeito é group:eng#member. Chen: a regra ofType/withRelation. Tracejado: um sujeito com relação."
+/>
+
+## Arquitetura
+
+Qual banco de dados responde a uma requisição?
+
+<Graph
+  width={600}
+  height={240}
+  title="Implantação do Warrant, a partir do código aberto"
+  desc="O seu serviço chama um único serviço HTTP do Warrant. As escritas, e as leituras que carregam Warrant-Token latest, vão para o banco de dados SQL primário. As demais leituras vão para o pool de leitura quando um DSN de leitura está configurado."
+  nodes={[
+    { id: "app", x: 90, y: 120, label: "Seu serviço", kind: "client" },
+    { id: "w", x: 300, y: 120, label: "Serviço HTTP\nWarrant", kind: "server" },
+    { id: "primary", x: 500, y: 50, label: "Banco primário", kind: "store" },
+    { id: "replica", x: 500, y: 190, label: "Banco de leitura\n(opcional)", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "w", label: "/v2/check, /v2/warrants" },
+    { from: "w", to: "primary", label: "escritas, latest" },
+    { from: "w", to: "replica", label: "outras leituras", dashed: true },
+  ]}
+  caption="Amarelo: o serviço Warrant. Verde: bancos de dados. Azul: o chamador. Tracejado: usado apenas quando um DSN de leitura está definido."
+/>
+
+- Um único serviço Go serve a API HTTP ([router.go](https://github.com/warrant-dev/warrant/blob/main/pkg/service/router.go)).
+- As configurações de MySQL e PostgreSQL recebem um `dsn` e um `readerDsn` opcional ([config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)); o SQLite também é suportado, "in-memory or file" (em memória ou em arquivo) ([README](https://github.com/warrant-dev/warrant)).
+- A regra para escolher um pool é um comentário em [sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go): usar o pool de escrita se a chamada for uma escrita, se não houver leitor, se o contexto "contains 'latest' wookie" (contém o wookie 'latest') ou se o código dentro do servidor tiver definido uma substituição pelo pool de escrita; caso contrário, usar o pool de leitura.
+
+## Consistência
+
+O código do Warrant chama seu token de *wookie* ([wookie](https://github.com/warrant-dev/warrant/tree/main/pkg/wookie)). Um tipo `Token` contém um ID, uma versão e um timestamp, mas o servidor de código aberto nunca envia um ao cliente: o serviço de warrants retorna `nil` nessa posição e os handlers HTTP o ignoram ([warrant/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/warrant/service.go), [warrant/handlers.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/warrant/handlers.go)). O que o servidor de fato lê é o cabeçalho de requisição `Warrant-Token`, e apenas um valor altera o comportamento: `latest`.
+
+O que `Warrant-Token: latest` muda para uma verificação logo após uma escrita?
+
+<Swimlane
+  lanes={["Seu serviço", "Warrant", "Banco primário", "Banco de leitura"]}
+  timeLabel="tempo"
+  laneWidth={140}
+  title="Warrant-Token: latest"
+  desc="O serviço escreve o warrant doc:readme viewer group:eng#member; ele vai para o banco de dados primário. Uma verificação sem o cabeçalho é lida do banco de leitura. Uma verificação com Warrant-Token latest é lida do banco primário, que já contém a escrita."
+  events={[
+    { lane: 0, t: 0, label: "POST\n/v2/warrants", kind: "write" },
+    { lane: 2, t: 0, label: "warrant\nescrito", kind: "write" },
+    { lane: 0, t: 1, label: "check sem\ncabeçalho", kind: "read" },
+    { lane: 3, t: 1, label: "lido do pool\nde leitura", kind: "note" },
+    { lane: 0, t: 2, label: "check com\nlatest", kind: "read" },
+    { lane: 2, t: 2, label: "lido do\nprimário", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [0, 1], to: [3, 1] },
+    { from: [0, 2], to: [2, 2] },
+  ]}
+  caption="O zookie do artigo nomeia um snapshot (§2.4); latest apenas nomeia um banco de dados."
+/>
+
+O próprio README diz que baixa latência com alta vazão "requires running Warrant as a distributed service with the use of Warrant-Tokens (also referred to as Zookies in Google Zanzibar)" (exige executar o Warrant como um serviço distribuído com o uso de Warrant-Tokens, também chamados de Zookies no Google Zanzibar), e que "this open source version of Warrant is only capable of handling low-to-moderate throughput" (esta versão de código aberto do Warrant só é capaz de lidar com vazão baixa a moderada) ([README](https://github.com/warrant-dev/warrant), de autoria do fornecedor). Seu link sobre Warrant-Tokens agora leva à visão geral do WorkOS FGA, que não os descreve.
+
+Observe a diferença em relação ao artigo. Um zookie define um limite inferior, o que permite ao Zanzibar "to choose any timestamp fresher than the one encoded in a zookie" (escolher qualquer timestamp mais atual do que o codificado em um zookie) e servir a maioria das verificações "at a default staleness with already replicated data" (com uma defasagem padrão, usando dados já replicados) (§2.2). `latest` não contém nenhum ponto no tempo: ele desloca a leitura para o primário, que é a cópia mais atual, mas abre mão da réplica.
+
+## Diferenças em relação ao artigo
+
+- **Sem tokens de snapshot** no servidor de código aberto, como visto acima.
+- **RBAC e ABAC embutidos.** Tipos de objeto embutidos para papéis, permissões, tenants, faixas de preço e funcionalidades, e condições de política sobre warrants ([README](https://github.com/warrant-dev/warrant), [migração](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql)).
+- **Uma linguagem de consulta.** `GET /v2/query` responde a perguntas de listagem que o Read e o Expand do artigo não respondem ([handlers de consulta](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/query/handlers.go)).
+- **Sem Watch, Expand ou Leopard**, e um único primário SQL em vez do Spanner (§3.1).
+
+## Situação
+
+- Código aberto: primeira versão v0.1.0 em 2023-02-23; última versão v1.15.1 em 2024-06-10; último commit em 2025-12-05, uma alteração no README; não arquivado; cerca de 1,3 mil estrelas ([versões](https://github.com/warrant-dev/warrant/releases), API do GitHub, 2026-11-13).
+- Empresa: adquirida pela WorkOS, anúncio no X em 2024-04-23 (ver acima; a publicação em si não pôde ser carregada).
+- Produto: WorkOS FGA. Sua documentação atual não menciona o Warrant nem o Zanzibar. Ela apresenta o FGA como uma extensão do RBAC da WorkOS: "You configure resource types in the WorkOS Dashboard" (você configura os tipos de recurso no WorkOS Dashboard), e o FGA "can be adopted incrementally, with no data migration or confusing schema DSL" (pode ser adotado de forma incremental, sem migração de dados nem uma DSL de schema confusa) ([documentação do WorkOS FGA](https://workos.com/docs/fga), de autoria do fornecedor). O JSON de tipos de objeto desta página é o formato do código aberto, não o do WorkOS FGA.
+
+## Fontes
+
+- Repositório e README do Warrant: [github.com/warrant-dev/warrant](https://github.com/warrant-dev/warrant)
+- Especificação de tipos de objeto: [pkg/authz/objecttype/spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)
+- Mecanismo de verificação: [pkg/authz/check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go)
+- Tokens: [pkg/wookie](https://github.com/warrant-dev/warrant/tree/main/pkg/wookie)
+- Pools de banco de dados: [pkg/database/sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go), [pkg/config/config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)
+- Tipos de objeto padrão: [000002_create_default_obj_types.up.sql](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql)
+- Fixtures de teste: [tests/v2/authz.json](https://github.com/warrant-dev/warrant/blob/main/tests/v2/authz.json)
+- Site: [warrant.dev](https://warrant.dev)
+- Publicação da WorkOS no X: [x.com/WorkOS/status/1782774170146791776](https://x.com/WorkOS/status/1782774170146791776)
+- Documentação do WorkOS FGA: [workos.com/docs/fga](https://workos.com/docs/fga)

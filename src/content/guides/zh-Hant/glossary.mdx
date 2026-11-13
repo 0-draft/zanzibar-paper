@@ -1,0 +1,165 @@
+---
+title: "術語表"
+description: "讀者在 Zanzibar 論文中會遇到的每一個術語，以淺白的文字說明，並指向解說它的導覽頁面與論文章節。"
+section: guide
+part: reference
+order: 16
+checked: "2026-11-13"
+paper: []
+---
+
+術語依英文字母順序排列。論文設定語言中的程式碼名稱（`_this`、`computed_userset`、`tuple_to_userset`）在排序時忽略底線。範例使用貫穿全站的範例：Anne、Beto 與 Chen；位於 `folder:A` 中的 `doc:readme`；`group:eng`。
+
+## A–C
+
+<dl>
+  <dt id="acl">ACL</dt>
+  <dd>存取控制清單（access control list）：允許對某個物件執行某項操作的使用者集合。在 Zanzibar 中，ACL 並不是以一份清單儲存，而是以許多筆關係元組儲存。延伸閱讀：<a href="../access-control-models/">存取控制模型</a>、§1、§2.1。</dd>
+  <dt id="aclserver">aclserver</dt>
+  <dd>Zanzibar 的主要伺服器類型。回應 Check、Read、Expand 與 Write，並將工作扇出至其叢集中的其他 aclserver。延伸閱讀：<a href="../architecture/">架構</a>、§3。</dd>
+  <dt id="at-least-as-fresh">至少一樣新（at-least-as-fresh）</dt>
+  <dd>zookie 的規則：Zanzibar 可以在任何不早於 zookie 時間戳記的快照上評估，而不只限於那個確切的時間戳記。正是這份自由，讓它能以本地副本處理大多數請求。延伸閱讀：<a href="../consistency/">一致性</a>、§2.2。</dd>
+  <dt id="bounded-staleness">有界陳舊度（bounded staleness）</dt>
+  <dd>快照讀取可以比「現在」舊，但不能舊於某個界限。在 Zanzibar 中，這個界限就是客戶端送出的 zookie。Spanner 直接提供這項功能：客戶端給出陳舊度的上限，由 Spanner 挑選時間戳記（<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner 論文</a>，§4.1）。延伸閱讀：<a href="../consistency/">一致性</a>、§2.2。</dd>
+  <dt id="cache-stampede">快取踩踏（cache stampede）</dt>
+  <dd>許多同時發生、針對同一個尚未快取之結果的請求，在快取填入之前全部同時湧向儲存層。Zanzibar 以鎖定表防止此情況。論文引用 <a href="https://en.wikipedia.org/wiki/Cache_stampede">Wikipedia 條目</a>作為此術語的出處（參考文獻 [3]）。延伸閱讀：<a href="../architecture/">架構</a>、§3.2.5。</dd>
+  <dt id="changelog">變更日誌（changelog）</dt>
+  <dd>一個存放元組更新歷史紀錄的 Spanner 資料庫，與每一次元組寫入在同一筆交易中寫入。Watch 從它讀取。延伸閱讀：<a href="../architecture/">架構</a>、§3.1.2。</dd>
+  <dt id="check">Check</dt>
+  <dd>詢問某位使用者是否屬於使用者集合 ⟨<em>object#relation</em>⟩ 的 API 呼叫，例如「Chen 是 <code>doc:readme</code> 的檢視者嗎？」。在不早於給定 zookie 的快照上評估。延伸閱讀：<a href="../relation-tuples/#將-check-視為圖搜尋">關係元組</a>、§2.4.4、§3.2.3。</dd>
+  <dt id="computed-userset"><code>computed_userset</code></dt>
+  <dd>改寫規則的一種葉節點，取用同一物件上另一個關係的使用者集合，例如「每位編輯者都是檢視者」。延伸閱讀：<a href="../relation-tuples/#命名空間設定">關係元組</a>、§2.3.1。</dd>
+  <dt id="consistent-hashing">一致性雜湊（consistent hashing）</dt>
+  <dd>一種將鍵分配給伺服器的方法，使新增或移除一台伺服器時只會移動一小部分的鍵。Zanzibar 用它將快取項目分散到叢集中的各台伺服器。由 <a href="https://people.csail.mit.edu/karger/Papers/web.pdf">Karger 等人（STOC 1997）</a>為網頁快取而提出。延伸閱讀：<a href="../architecture/">架構</a>、§3.2.5。</dd>
+  <dt id="content-change-check">內容變更檢查（content-change check）</dt>
+  <dd>使用者即將儲存新內容時送出的 Check。它不攜帶 zookie，在最新快照上評估，並傳回一個 zookie，由客戶端與新的內容版本一併儲存。延伸閱讀：<a href="../consistency/">一致性</a>、§2.2、§2.4.4。</dd>
+</dl>
+
+## D–H
+
+<dl>
+  <dt id="denormalization">反正規化（denormalization）</dt>
+  <dd>儲存衍生資料的預先計算副本（例如攤平的群組對群組成員資格），而不是從原始列計算。Zanzibar 在儲存層避免反正規化，只在 Leopard 中使用。延伸閱讀：<a href="../leopard/">Leopard</a>、§3.2.4、§3.2.5。</dd>
+  <dt id="exclusion">排除（exclusion）</dt>
+  <dd>改寫規則的一種運算子：屬於某個使用者集合、但不屬於另一個使用者集合的使用者。延伸閱讀：<a href="../relation-tuples/#命名空間設定">關係元組</a>、§2.3.1。</dd>
+  <dt id="expand">Expand</dt>
+  <dd>依循改寫規則，以樹的形式傳回 ⟨<em>object#relation</em>⟩ 之有效使用者集合的 API 呼叫。葉節點是使用者 ID 或使用者集合；中間節點是聯集、交集或排除。延伸閱讀：<a href="../relation-tuples/#read-與-expand">關係元組</a>、§2.4.5。</dd>
+  <dt id="external-consistency">外部一致性（external consistency）</dt>
+  <dd>若更新 x 發生在更新 y 之前，即使兩者是在系統之外協調的，x 所獲得的時間戳記也會小於 y。Zanzibar 從 Spanner 取得這項特性。論文引用 Gifford 1981 年的史丹佛大學博士論文作為此術語的出處（參考文獻 [18]）；<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner</a> 的表述是：若 T1 在 T2 開始之前提交，則 T1 的提交時間戳記小於 T2 的提交時間戳記。延伸閱讀：<a href="../consistency/">一致性</a>、§2.2。</dd>
+  <dt id="fan-out">扇出（fan-out）</dt>
+  <dd>一個請求變成許多子請求，例如 aclserver 將一次 Check 的各部分送往其叢集中的其他伺服器。延伸閱讀：<a href="../architecture/">架構</a>、§3、§3.2.5。</dd>
+  <dt id="heartbeat-zookie">心跳 zookie（heartbeat zookie）</dt>
+  <dd>每個 Watch 回應中所附的 zookie，標示串流已推進到哪裡，讓客戶端能從該處繼續。延伸閱讀：§2.4.3。</dd>
+  <dt id="hedging">對沖（hedging）</dt>
+  <dd>在得知第一台伺服器回應緩慢後，將同一個請求送往第二台伺服器，採用先抵達的回覆並取消另一個。Zanzibar 對送往 Spanner 與 Leopard 的呼叫進行對沖，但不對其自身伺服器之間的呼叫進行對沖。此技術說明於 Dean 與 Barroso 的 <a href="https://research.google/pubs/the-tail-at-scale/">"The Tail at Scale"</a>（CACM，2013）。延伸閱讀：<a href="../architecture/">架構</a>、§3.2.7。</dd>
+  <dt id="hot-spot">熱點（hot spot）</dt>
+  <dd>流量遠多於其他項目、可能使存放它的伺服器過載的鍵、物件或群組，例如被許多 ACL 共用的熱門群組。延伸閱讀：<a href="../architecture/">架構</a>、§3.2.5。</dd>
+</dl>
+
+## I–N
+
+<dl>
+  <dt id="intersection">交集（intersection）</dt>
+  <dd>改寫規則的一種運算子：同時屬於數個使用者集合中每一個的使用者。延伸閱讀：<a href="../relation-tuples/#命名空間設定">關係元組</a>、§2.3.1。</dd>
+  <dt id="leopard">Leopard</dt>
+  <dd>用於深層巢狀或極寬群組的索引系統。它將群組成員資格攤平為整數集合，使成員資格檢查變成集合交集，並透過 Watch 保持最新。延伸閱讀：<a href="../leopard/">Leopard</a>、§3.2.4。</dd>
+  <dt id="lock-table">鎖定表（lock table）</dt>
+  <dd>每台伺服器上記錄進行中之讀取與檢查的表。共用同一個快取鍵的請求中，只有一個會執行；其餘的等待其結果。延伸閱讀：<a href="../architecture/">架構</a>、§3.2.5。</dd>
+  <dt id="lock-tuple">鎖定元組（lock tuple）</dt>
+  <dd>一筆一般的關係元組，客戶端在每次寫入某個物件時都會 touch 它，使寫入能以「自讀取以來沒有其他人寫入」為條件。延伸閱讀：§2.4.2。</dd>
+  <dt id="namespace">命名空間（namespace）</dt>
+  <dd>由客戶端定義的物件種類，例如 <code>doc</code> 或 <code>folder</code>，也就是 <code>doc:readme</code> 中冒號之前的部分。每個命名空間的元組存放在各自的資料庫中。延伸閱讀：<a href="../relation-tuples/#命名空間設定">關係元組</a>、§2.1、§2.3、§3.1.1。</dd>
+  <dt id="namespace-config">命名空間設定（namespace config）</dt>
+  <dd>單一命名空間的設定：其各個關係（每個關係可選擇性地帶有一條使用者集合改寫規則），以及分片等儲存參數。延伸閱讀：<a href="../relation-tuples/#命名空間設定">關係元組</a>、§2.3、§3.1.3。</dd>
+  <dt id="new-enemy-problem">「new enemy」問題（new enemy problem）</dt>
+  <dd>由於檢查忽略了兩次 ACL 變更之間的順序，或套用了比內容更舊的 ACL，而將內容顯示給已從其 ACL 中移除的人。延伸閱讀：<a href="../consistency/">一致性</a>、§2.2。</dd>
+</dl>
+
+## O–R
+
+<dl>
+  <dt id="object">物件（object）</dt>
+  <dd>受保護的對象，寫作 ⟨<em>namespace</em>⟩:⟨<em>object_id</em>⟩，例如 <code>doc:readme</code>。延伸閱讀：<a href="../relation-tuples/#文法">關係元組</a>、§2.1。</dd>
+  <dt id="paxos">Paxos</dt>
+  <dd>一種共識協定，即使部分副本故障，也能讓一組副本對每一次寫入達成共識。論文將 Zanzibar 儲存層的五個投票副本放置在彼此相距 25 毫秒以內的位置，讓 Paxos 交易能快速提交。參見 Lamport 的 <a href="https://lamport.azurewebsites.net/pubs/paxos-simple.pdf">"Paxos Made Simple"</a>（2001）。延伸閱讀：<a href="../architecture/">架構</a>、§3.1.4。</dd>
+  <dt id="pointer-chasing">指標追蹤（pointer chasing）</dt>
+  <dd>以一次一步地追蹤使用者集合來回答 Check：從 readme 的檢視者到 <code>group:eng#member</code>，再到該群組的成員，依此類推。群組很深或很寬時會很慢。延伸閱讀：<a href="../relation-tuples/#將-check-視為圖搜尋">關係元組</a>、<a href="../leopard/">Leopard</a>、§3.2.3、§3.2.4。</dd>
+  <dt id="read">Read</dt>
+  <dd>傳回符合一個或多個元組集合之儲存元組的 API 呼叫。它不套用改寫規則。延伸閱讀：<a href="../relation-tuples/#read-與-expand">關係元組</a>、§2.4.1。</dd>
+  <dt id="recent-request">Recent 請求（Recent request）</dt>
+  <dd>參見 <a href="#safe-and-recent-requests">Safe／Recent 請求</a>。延伸閱讀：<a href="../consistency/">一致性</a>、§4.1。</dd>
+  <dt id="relation">關係（relation）</dt>
+  <dd>物件與使用者之間、或兩個物件之間（例如 <code>parent</code> 將文件連結到其資料夾）的具名關係，例如 <code>owner</code>、<code>viewer</code>、<code>member</code> 或 <code>parent</code>。定義於命名空間設定中。延伸閱讀：<a href="../relation-tuples/#文法">關係元組</a>、§2.1、§2.3。</dd>
+  <dt id="relation-tuple">關係元組（relation tuple）</dt>
+  <dd>一則儲存的事實，⟨<em>object</em>⟩#⟨<em>relation</em>⟩@⟨<em>user</em>⟩，例如 <code>doc:readme#owner@user:anne</code>。這是 Zanzibar 儲存的唯一一種權限資料。延伸閱讀：<a href="../relation-tuples/">關係元組</a>、§2.1。</dd>
+  <dt id="replica">副本（replica）</dt>
+  <dd>資料在某一地點的一份複本。Zanzibar 的資料被複製到數十個地點，讓大多數讀取都能就近處理。延伸閱讀：<a href="../architecture/">架構</a>、§3.1.4。</dd>
+</dl>
+
+## S
+
+<dl>
+  <dt id="safe-and-recent-requests">Safe／Recent 請求（Safe / Recent requests）</dt>
+  <dd>論文依 zookie 的新舊程度對請求所做的區分。Safe 請求攜帶超過 10 秒的 zookie，通常可在區域內處理；Recent 請求攜帶較新的 zookie，經常需要一次跨區域往返。延伸閱讀：<a href="../consistency/">一致性</a>、§4.1。</dd>
+  <dt id="shard">分片（shard）</dt>
+  <dd>資料庫或索引中被分開儲存與服務的一部分。元組的分片 ID 通常來自其物件 ID；對於非常大的群組，則來自物件 ID 與使用者。延伸閱讀：<a href="../architecture/">架構</a>、§3.1.1、§3.2.4。</dd>
+  <dt id="snapshot-read">快照讀取（snapshot read）</dt>
+  <dd>一種讀取，所看到的資料庫恰好是某一時間戳記當下的狀態：包含該時間點及之前的所有寫入，不含之後的任何寫入。Zanzibar 在單一快照上評估每一次 Check。Spanner 將其定義為 "a read in the past that executes without locking"（在過去某一時間點執行、不需鎖定的讀取）（<a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner 論文</a>，§4.1）。延伸閱讀：<a href="../consistency/">一致性</a>、§2.2。</dd>
+  <dt id="spanner">Spanner</dt>
+  <dd>Google 的全球分散式資料庫。Zanzibar 將元組、命名空間設定與變更日誌存放在其中，並依賴其時間戳記來達成一致性。說明於 <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Corbett 等人，OSDI 2012</a>。延伸閱讀：<a href="../consistency/">一致性</a>、<a href="../architecture/">架構</a>、§2.2、§3。</dd>
+</dl>
+
+## T
+
+<dl>
+  <dt id="tail-latency">尾端延遲（tail latency）</dt>
+  <dd>最慢那部分請求的延遲，例如第 99 或第 99.9 百分位。它之所以重要，是因為一頁搜尋結果可能需要數十到數百次檢查。參見 Dean 與 Barroso 的 <a href="https://research.google/pubs/the-tail-at-scale/">"The Tail at Scale"</a>（CACM，2013）。延伸閱讀：<a href="../architecture/#緩慢的-spanner-讀取會被對沖">架構</a>、§1、§3.2.7、§4.2、§4.5。</dd>
+  <dt id="this"><code>_this</code></dt>
+  <dd>改寫規則的一種葉節點，傳回儲存的元組中針對此物件與關係的使用者，包括這些元組所指向的使用者集合。關係沒有規則時的預設行為。延伸閱讀：<a href="../relation-tuples/#命名空間設定">關係元組</a>、§2.3.1。</dd>
+  <dt id="timestamp-quantization">時間戳記量化（timestamp quantization）</dt>
+  <dd>將評估時間戳記向上取整到較粗的間隔（例如 1 秒或 10 秒），讓許多請求共用同一個時間戳記，進而共用快取項目。這不會削弱一致性：zookie 只設定下限，而在未來時間戳記上進行的 Spanner 快照讀取，會等到 TrueTime 越過該時間戳記為止（§3.2.5）。延伸閱讀：<a href="../architecture/">架構</a>、<a href="../consistency/">一致性</a>、§2.2、§3.2.5。</dd>
+  <dt id="truetime">TrueTime</dt>
+  <dd>Spanner 的時鐘機制，為每一次寫入賦予一個反映因果順序、微秒解析度的時間戳記。正是它讓 Zanzibar 的時間戳記具有意義。<code>TT.now()</code> 傳回一個保證包含真實時間的區間；參見 <a href="https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf">Spanner 論文</a>（OSDI 2012）§3。延伸閱讀：<a href="../consistency/">一致性</a>、§2.2、§3.2.5。</dd>
+  <dt id="tupleset">元組集合（tupleset）</dt>
+  <dd>儲存元組的選取器：單一元組鍵，或某個物件 ID 或使用者集合的所有元組，並可選擇性地限定為單一關係。由 Read 與 <code>tuple_to_userset</code> 使用。延伸閱讀：<a href="../relation-tuples/#read-與-expand">關係元組</a>、§2.4.1。</dd>
+  <dt id="tuple-to-userset"><code>tuple_to_userset</code></dt>
+  <dd>改寫規則的一種葉節點，讀取物件的部分元組，並從每一筆計算出一個使用者集合，例如「查找 readme 的上層資料夾並取其檢視者」。延伸閱讀：<a href="../relation-tuples/#命名空間設定">關係元組</a>、§2.3.1。</dd>
+</dl>
+
+## U–W
+
+<dl>
+  <dt id="union">聯集（union）</dt>
+  <dd>改寫規則的一種運算子：屬於數個使用者集合中任一個的使用者。論文圖 1 中 <code>viewer</code> 的三個分支都以聯集結合。延伸閱讀：<a href="../relation-tuples/#命名空間設定">關係元組</a>、§2.3.1。</dd>
+  <dt id="user">使用者（user）</dt>
+  <dd>元組的第三個部分：單一使用者 ID 或一個使用者集合。延伸閱讀：<a href="../relation-tuples/#文法">關係元組</a>、§2.1。</dd>
+  <dt id="userset">使用者集合（userset）</dt>
+  <dd>一個 ⟨<em>object</em>⟩#⟨<em>relation</em>⟩ 配對，代表對該物件具有該關係的所有使用者，例如 <code>group:eng#member</code>。它讓一筆元組能將存取權授予一個群組，也讓群組能包含群組。延伸閱讀：<a href="../relation-tuples/#使用者集合指向群組的元組">關係元組</a>、§2.1。</dd>
+  <dt id="userset-rewrite-rule">使用者集合改寫規則（userset rewrite rule）</dt>
+  <dd>關係設定的一部分：一個從物件 ID 對應到使用者集合運算式樹的函式，由 <code>_this</code>、<code>computed_userset</code> 與 <code>tuple_to_userset</code> 以聯集、交集與排除組合而成。延伸閱讀：<a href="../relation-tuples/#命名空間設定">關係元組</a>、§2.3.1。</dd>
+  <dt id="userset-tree">使用者集合樹（userset tree）</dt>
+  <dd>Expand 的結果：葉節點是使用者 ID 或使用者集合，中間節點是集合運算子。延伸閱讀：<a href="../relation-tuples/#read-與-expand">關係元組</a>、§2.4.5。</dd>
+  <dt id="watch">Watch</dt>
+  <dd>從某個 zookie 開始，依時間戳記順序串流傳送一個或多個命名空間之元組變更的 API 呼叫。用來讓次要索引（例如 Leopard）保持最新。延伸閱讀：<a href="../architecture/#watch-路徑">架構</a>、§2.4.3。</dd>
+  <dt id="watchserver">watchserver</dt>
+  <dd>透過持續追蹤變更日誌尾端來回應 Watch 的伺服器類型。延伸閱讀：<a href="../architecture/">架構</a>、§3。</dd>
+  <dt id="write">Write</dt>
+  <dd>新增或移除元組的 API 呼叫。會改寫某個物件所有元組的客戶端，先進行一次讀取，再進行一次以鎖定元組未變更為條件的寫入。延伸閱讀：<a href="../architecture/#watch-路徑">架構</a>（一次寫入會觸及哪些東西）、§2.4.2。</dd>
+</dl>
+
+## Z
+
+<dl>
+  <dt id="zookie">zookie</dt>
+  <dd>編碼了一個時間戳記的不透明權杖。客戶端從內容變更檢查取得 zookie（Read 與 Write 的回應也會攜帶 zookie），將它與內容一併儲存，並在之後的檢查中送出，使這些檢查在至少一樣新的快照上評估。延伸閱讀：<a href="../consistency/">一致性</a>、§2.2、§2.4。</dd>
+</dl>
+
+## 資料來源
+
+- J. C. Corbett et al., "Spanner: Google's Globally-Distributed Database", OSDI '12, [PDF](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
+- D. Karger et al., "Consistent Hashing and Random Trees", STOC '97, [PDF](https://people.csail.mit.edu/karger/Papers/web.pdf)
+- J. Dean and L. A. Barroso, "The Tail at Scale", CACM 56(2), 2013, [research.google](https://research.google/pubs/the-tail-at-scale/)
+- L. Lamport, "Paxos Made Simple", ACM SIGACT News 32(4), 2001, [PDF](https://lamport.azurewebsites.net/pubs/paxos-simple.pdf)
+- D. K. Gifford, "Information Storage in a Decentralized Computer System", PhD thesis, Stanford University, 1981（論文參考文獻 [18]；未查核線上版本）
+- "Cache stampede", Wikipedia, [en.wikipedia.org](https://en.wikipedia.org/wiki/Cache_stampede)（論文所引用的出處）
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

@@ -1,0 +1,198 @@
+---
+title: "Warrant"
+description: "Zanzibar に着想を得た認可サービス。WorkOS が会社を買収し WorkOS FGA として製品を継続して以降、オープンソースのリポジトリは 2024 年半ばから動きがない。"
+section: ecosystem
+order: 6
+checked: "2026-11-13"
+paper: ["2.1", "2.3.1", "2.4"]
+product:
+  name: Warrant
+  maintainer: WorkOS (acquired 2024)
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/warrant-dev/warrant
+  docs: https://workos.com/docs/fga
+  status: "オープンソースとしては休止中、WorkOS FGA として継続"
+  latest: v1.15.1 (2024-06-10)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+Warrant は Go で書かれた認可サービスである。README は Warrant を "a relationship based access control (ReBAC) engine (inspired by Google Zanzibar)" (Google Zanzibar に着想を得た、関係ベースのアクセス制御 (ReBAC) エンジン) と説明し、ロールベースや属性ベースのルールも扱えるとしている。関係は `[user:1] is an [editor] of [document:docA]` のように書く ([README](https://github.com/warrant-dev/warrant))。格納された関係は *warrant* と呼ばれる。
+
+WorkOS は 2024 年に Warrant を買収した。日付の 2024-04-23 は、X 上の WorkOS の投稿による ([投稿](https://x.com/WorkOS/status/1782774170146791776))。X はこのサイトの確認ツールにページを返さなかったため、日付は投稿の ID から復号したものであり、投稿の本文 ("Today, we are excited to announce the acquisition of @warrant_dev"、本日、@warrant_dev の買収を発表できることを嬉しく思う) は検索結果でしか確認できていない。WorkOS 自身のブログ記事は見つからなかった。Warrant のウェブサイトは現在 "Warrant —> Now WorkOS FGA" (Warrant は現在 WorkOS FGA) と表示しており ([warrant.dev](https://warrant.dev))、README は WorkOS FGA のドキュメントにリンクしている。
+
+## 論文と Warrant の対応
+
+Warrant のドキュメントサイトはなくなっているため、この表はオープンソースのコードから作成した。
+
+| 論文 | Warrant (オープンソース) |
+| --- | --- |
+| 名前空間設定 (§2.3) | オブジェクト型: `type` と `relations` を持つ JSON で、各関係が 1 つのルールである ([spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)) |
+| リレーションタプル `object#relation@user` (§2.1) | warrant: `objectType`、`objectId`、`relation`、および `objectType`、`objectId`、省略可能な `relation` を持つ `subject` |
+| `_this` | 直接の warrant。チェックは常にこれを最初に試す ("1. Check for direct warrant match"、1. 直接の warrant の一致を確認する、[check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go)) |
+| `computed_userset` | `{ "inheritIf": "owner" }` |
+| `tuple_to_userset` | `{ "inheritIf": "viewer", "ofType": "folder", "withRelation": "parent" }` |
+| 和集合、積集合、除外 | `inheritIf` に `anyOf`、`allOf`、`noneOf` を指定し、入れ子の `rules` を書く |
+| zookie (§2.2, §2.4) | `Warrant-Token` ヘッダー。オープンソースのサーバーは値 `latest` にのみ反応する (「一貫性」を参照) ([wookie.go](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go)) |
+| Check (§2.4.4) | `POST /v2/check` (`/v2/authorize` も) |
+| Read (§2.4.1) | `GET /v2/warrants`。グラフに対するクエリには `GET /v2/query` |
+| Write (§2.4.2) | `POST /v2/warrants`、`DELETE /v2/warrants` |
+| Watch (§2.4.3) | なし |
+| Expand (§2.4.5) | なし |
+| Leopard (§3.2.4) | なし |
+| Spanner (§3.1) | MySQL、PostgreSQL、SQLite。任意でリードレプリカを使える |
+
+## オブジェクト型で書いた共通の例
+
+論文の図 1 は、所有者を編集者に、編集者を閲覧者に、親フォルダの閲覧者をそのドキュメントの閲覧者にする (§2.3.1)。Warrant では各オブジェクト型がその関係を列挙する。空のオブジェクト `{}` は「直接の warrant のみ」を意味し、`inheritIf` がルールを追加する。
+
+```json
+[
+  { "type": "group", "relations": { "member": {} } },
+  { "type": "folder", "relations": { "viewer": {} } },
+  {
+    "type": "doc",
+    "relations": {
+      "parent": {},
+      "owner": {},
+      "editor": { "inheritIf": "owner" },
+      "viewer": {
+        "inheritIf": "anyOf",
+        "rules": [
+          { "inheritIf": "editor" },
+          { "inheritIf": "viewer", "ofType": "folder", "withRelation": "parent" }
+        ]
+      }
+    }
+  }
+]
+```
+
+`user` の項目はない。サーバーは最初のデータベースマイグレーションで組み込みの `user` オブジェクト型を作成するからである ([マイグレーション](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql))。`ofType` と `withRelation` を持つルールは、warrant `doc:readme#parent@folder:…` を探し、見つかった各フォルダについて `viewer` をチェックする。これはチェックのコード ([check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go) の `getMatchingSubjectsBySubjectType`) のとおりである。
+
+<Callout title="コードと照合済み、実行はしていない">
+これらのオブジェクト型は、2026-11-13 時点でオープンソースのサーバーが受け付ける構造に従っている。参照したのは [spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go) の `RelationRule` 型と、[tests/v2/authz.json](https://github.com/warrant-dev/warrant/blob/main/tests/v2/authz.json) などのメンテナーによるテストフィクスチャである。Warrant サーバーには送っていない。Warrant を継続する製品である WorkOS FGA は、設定の仕方が異なる (「現状」を参照)。
+</Callout>
+
+共通の例の 5 つの warrant を、`POST /v2/warrants` のボディとして示す。
+
+```json
+{ "objectType": "doc", "objectId": "readme", "relation": "owner", "subject": { "objectType": "user", "objectId": "anne" } }
+{ "objectType": "group", "objectId": "eng", "relation": "member", "subject": { "objectType": "user", "objectId": "beto" } }
+{ "objectType": "doc", "objectId": "readme", "relation": "viewer", "subject": { "objectType": "group", "objectId": "eng", "relation": "member" } }
+{ "objectType": "doc", "objectId": "readme", "relation": "parent", "subject": { "objectType": "folder", "objectId": "A" } }
+{ "objectType": "folder", "objectId": "A", "relation": "viewer", "subject": { "objectType": "user", "objectId": "chen" } }
+```
+
+各人の readme に対する `viewer` 関係を決めるのは、どの warrant とどのルールか。
+
+<Graph
+  width={600}
+  height={260}
+  title="Warrant の warrant で表した共通の例"
+  desc="5 つの warrant。user anne は doc readme の owner である。user beto は group eng の member である。group eng#member は doc readme の viewer である。folder A は doc readme の parent である。user chen は folder A の viewer である。Chen からフォルダ A を経る経路が強調されており、これは ofType が folder で withRelation が parent のルールによって解決される。"
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer (#member)", dashed: true },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Anne: inheritIf による owner → editor → viewer。Beto: 主体が group:eng#member の warrant。Chen: ofType/withRelation のルール。破線は関係付きの主体を表す。"
+/>
+
+## アーキテクチャ
+
+リクエストに答えるのはどのデータベースか。
+
+<Graph
+  width={600}
+  height={240}
+  title="オープンソースのコードから見た Warrant のデプロイ"
+  desc="あなたのサービスは 1 つの Warrant HTTP サービスを呼び出す。書き込みと、Warrant-Token latest を伴う読み取りは、プライマリの SQL データベースに向かう。それ以外の読み取りは、reader の DSN が設定されていれば reader プールに向かう。"
+  nodes={[
+    { id: "app", x: 90, y: 120, label: "あなたのサービス", kind: "client" },
+    { id: "w", x: 300, y: 120, label: "Warrant\nHTTP サービス", kind: "server" },
+    { id: "primary", x: 500, y: 50, label: "プライマリ DB", kind: "store" },
+    { id: "replica", x: 500, y: 190, label: "Reader DB\n(任意)", kind: "store" },
+  ]}
+  edges={[
+    { from: "app", to: "w", label: "/v2/check, /v2/warrants" },
+    { from: "w", to: "primary", label: "書き込み、latest" },
+    { from: "w", to: "replica", label: "その他の読み取り", dashed: true },
+  ]}
+  caption="黄: Warrant サービス。緑: データベース。青: 呼び出し側。破線: reader の DSN が設定されたときだけ使われる。"
+/>
+
+- 1 つの Go サービスが HTTP API を提供する ([router.go](https://github.com/warrant-dev/warrant/blob/main/pkg/service/router.go))。
+- MySQL と PostgreSQL の設定は `dsn` と省略可能な `readerDsn` を受け取る ([config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go))。SQLite もサポートされており、"in-memory or file" (インメモリまたはファイル) で使える ([README](https://github.com/warrant-dev/warrant))。
+- プールを選ぶ規則は [sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go) のコメントにある。呼び出しが書き込みの場合、reader がない場合、コンテキストが "contains 'latest' wookie" ('latest' の wookie を含む) 場合、またはサーバー内部のコードが writer の上書きを設定した場合は writer を使い、それ以外は reader を使う。
+
+## 一貫性
+
+Warrant のコードはそのトークンを *wookie* と呼ぶ ([wookie](https://github.com/warrant-dev/warrant/tree/main/pkg/wookie))。`Token` 型は ID、バージョン、タイムスタンプを保持するが、オープンソースのサーバーはそれをクライアントに一度も送らない。warrant サービスはその位置で `nil` を返し、HTTP ハンドラーはそれを無視する ([warrant/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/warrant/service.go)、[warrant/handlers.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/warrant/handlers.go))。サーバーが実際に読むのはリクエストヘッダー `Warrant-Token` であり、挙動を変える値は `latest` の 1 つだけである。
+
+書き込み直後のチェックに対して、`Warrant-Token: latest` は何を変えるのか。
+
+<Swimlane
+  lanes={["あなたのサービス", "Warrant", "プライマリ DB", "Reader DB"]}
+  timeLabel="時間"
+  laneWidth={140}
+  title="Warrant-Token: latest"
+  desc="サービスが warrant doc:readme viewer group:eng#member を書き込み、それはプライマリデータベースに向かう。ヘッダーなしのチェックは reader データベースから読まれる。Warrant-Token latest 付きのチェックはプライマリデータベースから読まれ、そこにはすでに書き込みがある。"
+  events={[
+    { lane: 0, t: 0, label: "POST\n/v2/warrants", kind: "write" },
+    { lane: 2, t: 0, label: "warrant を\n書き込み", kind: "write" },
+    { lane: 0, t: 1, label: "ヘッダーなしの\nチェック", kind: "read" },
+    { lane: 3, t: 1, label: "reader プール\nから読む", kind: "note" },
+    { lane: 0, t: 2, label: "latest 付きの\nチェック", kind: "read" },
+    { lane: 2, t: 2, label: "プライマリ\nから読む", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [0, 1], to: [3, 1] },
+    { from: [0, 2], to: [2, 2] },
+  ]}
+  caption="論文の zookie はスナップショットを指定する (§2.4)。latest が指定するのはデータベースだけである。"
+/>
+
+README 自身が、高スループットでの低レイテンシは "requires running Warrant as a distributed service with the use of Warrant-Tokens (also referred to as Zookies in Google Zanzibar)" (Warrant-Token (Google Zanzibar では Zookie とも呼ばれる) を用いて、Warrant を分散サービスとして動かす必要がある) と述べ、"this open source version of Warrant is only capable of handling low-to-moderate throughput" (このオープンソース版の Warrant が処理できるのは低から中程度のスループットだけである) としている ([README](https://github.com/warrant-dev/warrant)、ベンダー自身による記述)。Warrant-Token についてのリンクは、現在は WorkOS FGA の一般的な概要ページにつながっており、そこには Warrant-Token の説明はない。
+
+論文との違いに注意してほしい。zookie は下限を定めるものであり、それによって Zanzibar は "to choose any timestamp fresher than the one encoded in a zookie" (zookie にエンコードされたものより新しい任意のタイムスタンプを選択) でき、ほとんどのチェックを "at a default staleness with already replicated data" (既に複製済みのデータを用いてデフォルトの古さで) 処理できる (§2.2)。`latest` には時点が含まれていない。読み取りをプライマリに移すだけであり、プライマリは最も新しいコピーではあるが、レプリカの利点を手放すことになる。
+
+## 論文との違い
+
+- **スナップショットトークンがない。** オープンソースのサーバーには、上で述べたとおりない。
+- **RBAC と ABAC が組み込まれている。** ロール、権限、テナント、料金プラン、機能のための組み込みオブジェクト型と、warrant に付けるポリシー条件がある ([README](https://github.com/warrant-dev/warrant)、[マイグレーション](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql))。
+- **クエリ言語。** `GET /v2/query` は、論文の Read と Expand が答えない一覧の問いに答える ([query handlers](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/query/handlers.go))。
+- **Watch、Expand、Leopard がない。** また Spanner (§3.1) ではなく、単一の SQL プライマリを使う。
+
+## 現状
+
+- オープンソース: 最初のリリースは 2023-02-23 の v0.1.0。最後のリリースは 2024-06-10 の v1.15.1。最後のコミットは 2025-12-05 の README の変更。アーカイブはされていない。スター数は約 1.3k ([releases](https://github.com/warrant-dev/warrant/releases)、GitHub API、2026-11-13)。
+- 会社: WorkOS が買収し、2024-04-23 に X で発表された (上記参照。投稿そのものは読み込めなかった)。
+- 製品: WorkOS FGA。現在のドキュメントは Warrant にも Zanzibar にも触れていない。FGA を WorkOS RBAC の拡張として紹介しており、"You configure resource types in the WorkOS Dashboard" (リソース型は WorkOS Dashboard で設定する)、FGA は "can be adopted incrementally, with no data migration or confusing schema DSL" (データ移行もわかりにくいスキーマ DSL もなしに、段階的に導入できる) としている ([WorkOS FGA docs](https://workos.com/docs/fga)、ベンダー自身による記述)。このページのオブジェクト型の JSON はオープンソース版の形式であり、WorkOS FGA の形式ではない。
+
+## 出典
+
+- Warrant リポジトリと README: [github.com/warrant-dev/warrant](https://github.com/warrant-dev/warrant)
+- オブジェクト型の仕様: [pkg/authz/objecttype/spec.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/objecttype/spec.go)
+- チェックエンジン: [pkg/authz/check/service.go](https://github.com/warrant-dev/warrant/blob/main/pkg/authz/check/service.go)
+- トークン: [pkg/wookie](https://github.com/warrant-dev/warrant/tree/main/pkg/wookie)
+- データベースのプール: [pkg/database/sql.go](https://github.com/warrant-dev/warrant/blob/main/pkg/database/sql.go)、[pkg/config/config.go](https://github.com/warrant-dev/warrant/blob/main/pkg/config/config.go)
+- デフォルトのオブジェクト型: [000002_create_default_obj_types.up.sql](https://github.com/warrant-dev/warrant/blob/main/migrations/datastore/postgres/000002_create_default_obj_types.up.sql)
+- テストフィクスチャ: [tests/v2/authz.json](https://github.com/warrant-dev/warrant/blob/main/tests/v2/authz.json)
+- ウェブサイト: [warrant.dev](https://warrant.dev)
+- X 上の WorkOS の投稿: [x.com/WorkOS/status/1782774170146791776](https://x.com/WorkOS/status/1782774170146791776)
+- WorkOS FGA ドキュメント: [workos.com/docs/fga](https://workos.com/docs/fga)

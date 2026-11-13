@@ -1,0 +1,290 @@
+---
+title: "當關係不夠用時"
+description: "論文的元組無法表達的事物（時間、網路、金額、到期），以及 SpiceDB 的 caveat、OpenFGA 的條件與情境元組，和 Permify 的屬性如何將它們補回來。"
+section: guide
+part: practice
+order: 11
+checked: "2026-11-13"
+paper: ["2.1", "2.4.4", "2.4.5", "3.1.1"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+有些規則與誰和什麼有關係無關。「只限辦公室網路」、「只限上班時間」、「只限 1,000 以下的轉帳」、「只到星期五為止」：每一條都取決於關於請求或時鐘的事實。論文沒有辦法寫出這些規則。以其概念為基礎的產品各自以不同的方式加入了這種能力。本頁說明這個缺口為何存在、三個產品加入了什麼，以及何時將規則保留在應用程式中比較好。
+
+貫穿全站的範例：Anne、Beto 與 Chen（`user:anne`、`user:beto`、`user:chen`）；位於 `folder:A` 中的文件 `doc:readme`；群組 `group:eng`。Anne 擁有 readme，Beto 屬於 eng，eng 的成員可檢視 readme，Chen 可檢視資料夾 A。本頁所依據的關係模式見[建模頁面](../modeling/)。
+
+## 元組無法表達的事
+
+論文的元組由四個部分組成，此外別無其他。其文法為 ⟨*object*⟩ ‘#’ ⟨*relation*⟩ ‘@’ ⟨*user*⟩，且 "the primary keys required to identify a relation tuple are ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, and ⟨*user*⟩"（識別一筆關係元組所需的主鍵為 ⟨*namespace*⟩、⟨*object_id*⟩、⟨*relation*⟩ 與 ⟨*user*⟩）（§2.1）。在儲存層中，"each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*"（每一列以主鍵 *（分片 ID、物件 ID、關係、使用者、提交時間戳記）* 識別）（§3.1.1）。論文沒有描述其他欄位：沒有到期時間、沒有條件，也沒有使用者或物件的屬性。
+
+請求這一側同樣狹窄。"A check request specifies a userset, represented by ⟨*object#relation*⟩, a putative user, often represented by an authentication token, and a zookie corresponding to the desired object version"（Check 請求會指定一個以 ⟨*object#relation*⟩ 表示的使用者集合、一位推定的使用者（通常以驗證權杖表示），以及一個對應於所需物件版本的 zookie）（§2.4.4）。沒有任何欄位用來放呼叫者的 IP 位址、一天中的時段或交易金額。
+
+一次 Check 攜帶了什麼，又缺少什麼？
+
+<Graph
+  width={620}
+  height={250}
+  minWidth={520}
+  title="論文的 Check 請求攜帶的內容"
+  desc="一個客戶端方框將 Check 請求送往一個 Zanzibar 伺服器方框。請求攜帶三樣東西，畫在左側的方框中：使用者集合 doc:readme#view、使用者 user:chen，以及一個 zookie。右側有一個標示為「不在論文的請求中」的虛線群組，內含三則註記：呼叫者的 IP 位址、目前時間，以及交易金額。伺服器只從儲存層讀取關係元組。"
+  groups={[{ x: 400, y: 10, w: 210, h: 140, label: "不在論文的請求中" }]}
+  nodes={[
+    { id: "client", x: 90, y: 200, label: "客戶端", kind: "client" },
+    { id: "srv", x: 310, y: 200, label: "Zanzibar 伺服器", kind: "server" },
+    { id: "store", x: 520, y: 200, label: "關係元組", kind: "store" },
+    { id: "us", x: 90, y: 40, label: "userset\ndoc:readme#view", kind: "object", mono: true, on: true },
+    { id: "u", x: 90, y: 120, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "z", x: 250, y: 40, label: "zookie", kind: "object", on: true },
+    { id: "ip", x: 505, y: 55, label: "呼叫者的 IP 位址", kind: "note" },
+    { id: "time", x: 505, y: 85, label: "目前時間", kind: "note" },
+    { id: "amt", x: 505, y: 115, label: "交易金額", kind: "note" },
+  ]}
+  edges={[
+    { from: "client", to: "srv", label: "Check", on: true },
+    { from: "srv", to: "store", label: "讀取" },
+  ]}
+  caption="被標出的三項輸入就是整個請求（§2.4.4）。虛線框中的事實在請求中無處可放，也沒有任何元組能存放它們（§2.1）。"
+/>
+
+請注意，答案只能取決於儲存的元組，以及 zookie 所選定的快照。這正是答案得以快取並保持一致的原因，也正是它排除了針對請求之條件的原因。
+
+有些需求可以勉強轉為關係。到期可以由一個在時間到時刪除元組的工作來完成，代價是存取權會一直持續到該工作執行為止。一組允許的網路可以是一個物件，由應用程式將呼叫者與之建立關係。轉帳上限則做不到：金額並不是任何人會與之建立關係的物件。論文沒有討論任何這類變通做法。
+
+## SpiceDB caveat
+
+SpiceDB 將條件附加在關係上。"Caveats are expressions that can return true or false, and they can be attached (by name) to relationships"（caveat 是可以傳回真或假的運算式，可以（依名稱）附加到關係上）；"a caveat definition includes a name, one or more well-typed parameters, and a CEL expression returning a boolean value"（caveat 定義包含一個名稱、一個或多個型別明確的參數，以及一個傳回布林值的 CEL 運算式）（[caveats 文件](https://authzed.com/docs/spicedb/concepts/caveats)）。CEL 是 Google 的 [Common Expression Language](https://github.com/google/cel-spec)。參數型別包括 `int`、`string`、`duration`、`timestamp`、`list<T>`、`map<T>`，以及 SpiceDB 專有的 `ipaddress`。
+
+假設 Chen 只能從辦公室網路檢視資料夾 A，並經由它檢視 readme。依照 caveats 頁面上的範例，caveat 以及可以攜帶它的關係如下：
+
+```text
+definition user {}
+
+caveat has_valid_ip(user_ip ipaddress, allowed_range string) {
+  user_ip.in_cidr(allowed_range)
+}
+
+definition folder {
+    relation viewer: user | user with has_valid_ip
+    permission view = viewer
+}
+```
+
+*SpiceDB schema；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+`user | user with has_valid_ip` 讓同一個關係能同時存放一般的與附帶 caveat 的關係；"to make the caveat **required**, the `user |` can be removed"（若要讓 caveat 成為**必要**，可以移除 `user |`）（caveats 文件）。關係 `folder:A#viewer@user:chen` 寫入時附帶 caveat 名稱 `has_valid_ip` 及其部分情境，此處為 `allowed_range` = `10.20.30.0/24`。其餘的 `user_ip` 則在每次 `CheckPermission` 呼叫時，透過其 `context` 欄位傳入。當兩者都提供了值時，"the values in the Relationship take precedence over those in the CheckPermissionRequest"（Relationship 中的值優先於 CheckPermissionRequest 中的值）（caveats 文件）。
+
+哪一條邊攜帶了條件？
+
+<Graph
+  width={600}
+  height={200}
+  minWidth={480}
+  title="貫穿全站範例中附帶 caveat 的關係"
+  desc="user:chen 有一條被標出的 viewer 邊指向 folder:A，標示著 has_valid_ip 與 allowed_range 10.20.30.0/24。folder:A 有一條 parent 邊指向 doc:readme。user:anne 有一條一般的 owner 邊指向 doc:readme。"
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 155, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "folder", x: 330, y: 155, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 520, y: 100, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "chen", to: "folder", label: "viewer\nwith has_valid_ip\n10.20.30.0/24", on: true },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="只有一條邊是有條件的。Anne 的路徑沒有 caveat，因此她的檢查永遠不需要情境。"
+/>
+
+### 三種答案，而不是兩種
+
+附帶 caveat 的檢查可能以既非「是」也非「否」的結果結束。API 定義了三種結果：`PERMISSIONSHIP_NO_PERMISSION`、`PERMISSIONSHIP_HAS_PERMISSION`，以及 `PERMISSIONSHIP_CONDITIONAL_PERMISSION`，後者 "indicates that the subject has the requested permission on the resource, but only if a caveat condition is met. The `partial_caveat_info` field in the response should contain the missing context fields that must be provided to fully evaluate the caveat"（表示主體對資源具有所請求的權限，但僅在符合 caveat 條件時才成立。回應中的 `partial_caveat_info` 欄位應包含為完整評估 caveat 而必須提供的缺漏情境欄位）（[`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)）。caveats 頁面的說法是 "required context is missing to determine permissionship"（缺少判定權限所需的情境）。在 SpiceDB 內部，節點之間 dispatch 的子問題也帶有同樣的第三種狀態 `CAVEATED_MEMBER`，與 `MEMBER` 及 `NOT_MEMBER` 並列（[`dispatch.proto`](https://github.com/authzed/spicedb/blob/main/proto/internal/dispatch/v1/dispatch.proto)）。
+
+應用程式忘了傳 IP 位址時會發生什麼事？
+
+<Swimlane
+  lanes={["應用程式", "SpiceDB", "儲存的關係"]}
+  title="需要情境的附帶 caveat 檢查"
+  desc="第 1 列：應用程式針對 user:chen、view、doc:readme 送出 CheckPermission，未附情境。第 2 列：SpiceDB 沿著 parent->view 到達 folder:A，找到附帶 caveat has_valid_ip 與 allowed_range 10.20.30.0/24 的關係 folder:A#viewer@user:chen。第 3 列：缺少 user_ip，因此 SpiceDB 回答 PERMISSIONSHIP_CONDITIONAL_PERMISSION，並指出缺少 user_ip。第 4 列：應用程式以情境 user_ip 10.20.30.7 再次檢查。第 5 列：in_cidr 為真，SpiceDB 回答 PERMISSIONSHIP_HAS_PERMISSION。"
+  timeLabel="時間"
+  laneWidth={190}
+  rowHeight={84}
+  events={[
+    { lane: 0, t: 0, label: "CheckPermission\nchen · view · readme\n情境：無", kind: "read" },
+    { lane: 1, t: 1, label: "parent->view\n到達 folder:A", kind: "read" },
+    { lane: 2, t: 1, label: "folder:A#viewer\n@user:chen\nhas_valid_ip", kind: "note", mono: true },
+    { lane: 1, t: 2, label: "缺少 user_ip\nCONDITIONAL_PERMISSION\n缺少：user_ip", kind: "bad" },
+    { lane: 0, t: 3, label: "再次 CheckPermission\n情境：\nuser_ip 10.20.30.7", kind: "read" },
+    { lane: 1, t: 4, label: "in_cidr → true\nHAS_PERMISSION", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 1], label: "檢查" },
+    { from: [1, 1], to: [2, 1], label: "讀取" },
+    { from: [1, 2], to: [0, 3], label: "有條件", dashed: true },
+    { from: [0, 3], to: [1, 4], label: "重新檢查" },
+  ]}
+  caption="CONDITIONAL_PERMISSION 既不是授權也不是拒絕。回應會指出缺少了什麼，讓呼叫者可以補上後重試；把它當成「是」的應用程式就有漏洞。"
+/>
+
+請注意，儲存的關係已經存有一半的情境。應用程式只需提供它在請求當下才知道的部分。
+
+### 會到期的關係
+
+到期是 caveat 的常見用途。AuthZed 關於這個主題的文章表示，許多使用者只想要到期功能，並介紹了一種內建形式：關係可以帶有選擇性的到期時間，而 schema 以 `use expiration` 與 `with expiration` 啟用。該文章指出，它以實驗性功能的形式在 SpiceDB v1.40 推出，需透過 `--enable-experimental-relationship-expiration` 啟用（[AuthZed 部落格，2025-02-13](https://authzed.com/blog/the-evolution-of-expiration)）。
+
+```text
+use expiration
+
+definition folder {
+    relation viewer: user | user with expiration
+    permission view = viewer
+}
+```
+
+*SpiceDB schema；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+[會到期關係的文件](https://authzed.com/docs/spicedb/concepts/expiring-relationships)在 `WriteRelationships` 上以 `OptionalExpiresAt`（RFC 3339）設定時間，並給出兩個優於 caveat 的理由：caveat "requires clients to provide the `now` timestamp"（需要客戶端提供 `now` 時間戳記），而且 "expired caveats are not automatically garbage collected"（已到期的 caveat 不會被自動垃圾回收）。到期的關係一到期就不再計入，但在到期之前快取的子結果仍可能在其快取時間窗內被提供；其列稍後由垃圾回收移除（依同一頁面，預設為 24 小時後）。該頁面一處寫版本為「v1.40」，另一處寫「v1.4.0」；部落格文章寫的是 v1.40。此功能在目前的版本中是否仍標示為實驗性，未經查核。
+
+## OpenFGA 條件
+
+OpenFGA 透過型別限制將條件附加到元組上。以下是[條件指南](https://openfga.dev/docs/modeling/conditions)中的模型，換上貫穿全站範例的型別：
+
+```text
+model
+  schema 1.1
+
+type user
+
+type group
+  relations
+    define member: [user]
+
+type doc
+  relations
+    define viewer: [user, group#member, user with non_expired_grant]
+
+condition non_expired_grant(current_time: timestamp, grant_time: timestamp, grant_duration: duration) {
+  current_time < grant_time + grant_duration
+}
+```
+
+*OpenFGA DSL；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+元組 `user:chen`、`viewer`、`doc:readme` 寫入時附帶條件名稱 `non_expired_grant`，以及由 `grant_time` 與 `grant_duration` 構成的情境（指南的範例使用 `2023-01-01T00:00:00Z` 與 `10m`）。每次 Check 都傳入 `current_time`。指南的兩次檢查展示了結果：在 `00:09:50` 時 allowed 為 `true`，在 `00:10:01` 時為 `false`。與 SpiceDB 一樣，儲存的情境與請求的情境會 "merged together into a single evaluation context"（合併為單一評估情境），且 "persisted context has higher precedence than request context"（持久化的情境優先於請求情境）（條件指南）。
+
+與 SpiceDB 有兩點不同。缺少情境是錯誤，而不是第三種答案："If you don't provide the current_time in the context, the Check and ListObjects operations will fail"（如果你沒有在情境中提供 current_time，Check 與 ListObjects 操作將會失敗），錯誤訊息為 "failed to evaluate relationship condition 'non_expired_grant': context is missing parameters '[current_time]'"（[OpenFGA 部落格，2023-11-06](https://openfga.dev/blog/conditional-tuples-announcement)）。此外還有文件記載的限制：儲存的情境 "is limited to 32KB in size"（大小上限為 32KB），且伺服器強制執行 "a maximum Google CEL expression evaluation cost of 100 (by default)"（Google CEL 運算式評估成本上限為 100（預設））（條件指南）。同一篇部落格文章指出此功能始於 OpenFGA 1.4.0-rc1。
+
+### 情境元組
+
+OpenFGA 也讓請求可以自帶元組。情境元組是 "a tuple that can be added to a Check request, and only exists within the context of that particular request"（可以加入 Check 請求、且只存在於該特定請求情境中的元組）；情境元組 "are not persisted in the store"（不會持久化到儲存區中）（[情境與時間型授權指南](https://openfga.dev/docs/modeling/contextual-time-based-authorization)）。該指南將允許的 IP 範圍與時段建模為物件（`ip-address-range`、`timeslot`），並隨檢查送出 `user:anne` `user` `timeslot:12_13`；分行不允許的時段會傳回 `{"allowed":false}`。
+
+套用到貫穿全站的範例：資料夾 A 只能從辦公室網路檢視。應用程式根據呼叫者的位址判定 Chen 位於 `network:office`，並以情境元組表達這一點。
+
+```text
+type network
+  relations
+    define user: [user]
+
+type folder
+  relations
+    define allowed_network: [network]
+    define viewer: [user, group#member]
+    define can_view: viewer and user from allowed_network
+```
+
+*OpenFGA DSL；依 2026-11-13 時的文件語法撰寫；未執行驗證器。*
+
+哪些邊是儲存的，哪些只為這次請求而存在？
+
+<Graph
+  width={600}
+  height={220}
+  minWidth={480}
+  title="情境元組補足了交集"
+  desc="user:chen 有一條儲存的 viewer 邊指向 folder:A。network:office 有一條儲存的 allowed_network 邊指向 folder:A。一條被標出、標示為 user（情境）的虛線邊從 user:chen 指向 network:office：它只存在於這次 Check 請求中。有了它，交集的兩個子節點都成立。"
+  nodes={[
+    { id: "chen", x: 80, y: 110, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "net", x: 300, y: 185, label: "network:office", kind: "object", mono: true, on: true },
+    { id: "folder", x: 520, y: 110, label: "folder:A", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "folder", label: "viewer（已儲存）", on: true },
+    { from: "chen", to: "net", label: "user\n（情境，\n僅限此請求）", dashed: true, on: true },
+    { from: "net", to: "folder", label: "allowed_network\n（已儲存）", on: true },
+  ]}
+  caption="can_view = viewer ∩ (allowed_network → user)。虛線邊來自應用程式，而非儲存層；沒有它，交集就不成立。"
+/>
+
+請注意 IP 比對發生在哪裡：在應用程式中，於呼叫之前。情境元組是把事實移入請求，而不是把邏輯移入服務。該指南也列出了它們的適用範圍：Check 與 ListObjects 支援情境元組，但它們 "are not supported on read, expand and other endpoints"（不支援 read、expand 及其他端點），而以元組變更建立的搜尋索引要與它們結合 "will not be trivial"（並不容易）。這段陳述出自 2026-11-13 擷取的指南內容；之後的版本可能已擴大支援範圍。
+
+## Permify 屬性與規則
+
+Permify 於 2025-11-20 宣布被 FusionAuth 收購（[Permify，2025-11-20](https://permify.co/post/fusionauth-acquires-permify/)），它在實體上儲存屬性，而不是在關係上儲存條件。其 schema 有 `attribute` 與 `rule`，文件表示 "we design our schema language based on"（我們的 schema 語言以……為基礎設計）CEL（[Permify ABAC 文件](https://fusionauth.io/permify-docs/use-cases/abac)）。以下是 Permify [建模指南](https://fusionauth.io/permify-docs/getting-started/modeling)中的範例：
+
+```text
+entity organization {
+    relation admin @user
+    attribute ip_range string[]
+    permission view = check_ip_range(ip_range) or admin
+}
+
+rule check_ip_range(ip_range string[]) {
+    context.data.ip in ip_range
+}
+```
+
+*Permify schema；照抄自 2026-11-13 時文件中的範例；未執行驗證器。*
+
+`ip_range` 是組織的一個儲存屬性；`context.data.ip` 則隨檢查請求傳入。金額也符合同樣的形狀；ABAC 頁面的銀行範例中有 `permission withdraw = check_balance(balance) and owner`。在所引用的頁面中，找不到 `context.data` 缺少值時 Permify 檢查會傳回什麼，因此本頁不予陳述。
+
+## 並列比較
+
+| | 論文 | SpiceDB | OpenFGA | Permify |
+| --- | --- | --- | --- | --- |
+| 條件存放在哪裡 | 無處存放：元組只有四個部分（§2.1） | 在關係上：schema 中以 `with` 允許的具名 caveat | 在元組上：型別限制中以 `with` 允許的具名條件 | 在權限所呼叫的 `rule` 中，作用於實體的 `attribute` 與請求情境 |
+| 運算式語言 | 無 | CEL | CEL | 「以 CEL 為基礎」 |
+| 請求當下的事實 | 無；Check 攜帶使用者集合、使用者與 zookie（§2.4.4） | `CheckPermission` 上的 `context` | Check 上的 `context`；情境元組 | `context`（`context.data`） |
+| 儲存值與請求值 | 不適用 | 以關係為準 | 以持久化的情境為準 | 未經查證 |
+| 缺少情境 | 不適用 | `PERMISSIONSHIP_CONDITIONAL_PERMISSION`，並附上缺少的欄位 | 請求以錯誤失敗 | 未經查證 |
+| 到期 | 刪除元組（客戶端的工作） | `with expiration`（v1.40），或 caveat | 針對 `current_time` 的條件 | 未經查證 |
+
+各格的出處見上方各節。
+
+## Cedar 如何為 Zanzibar 分類
+
+Cedar 是一種政策語言，其論文描述它原生支援 RBAC 與 ABAC。該論文（Cutler et al., "Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)", [arXiv:2403.04651v2](https://arxiv.org/abs/2403.04651), 2024-03-08）在其相關研究（§6）中提到 Zanzibar。它稱 Zanzibar 為 "a highly scalable, relationship-based access control (ReBAC) system"（一套高度可擴展的以關係為基礎的存取控制（ReBAC）系統），並說 "Zanzibar supports RBAC and ReBAC with a natural syntax, and with policy validation"（Zanzibar 以自然的語法並搭配政策驗證支援 RBAC 與 ReBAC）、"forbid-style policies are supported by expressing one relationship in terms of non-membership in some other relation"（forbid 形式的政策，是透過以「不屬於另一個關係」來表達某個關係而支援的），以及 "it does not support ABAC, string matching, or search."（它不支援 ABAC、字串比對或搜尋。）它對 Cedar 的描述則相反："Cedar natively supports RBAC and ABAC, can encode ReBAC, and supports forbid policies."（Cedar 原生支援 RBAC 與 ABAC，可以編碼 ReBAC，並支援 forbid 政策。）
+
+Cedar 論文描述的是 2019 年的 Zanzibar 論文；其實驗使用 OpenFGA，並將其介紹為 "a recently developed language for specifying relationship-based access control (ReBAC) [43] policies"（一種最近開發、用於指定以關係為基礎的存取控制（ReBAC）[43] 政策的語言），其中參考文獻 43 即 Zanzibar 論文（§1）。上述的 caveat 與條件是產品的擴充，不在該論文的分類範圍內。其「forbid 形式」那句話，就是[建模頁面](../modeling/#封鎖清單排除)上的排除模式。
+
+## 何時將規則保留在應用程式中
+
+授權服務中的條件並非沒有代價。本節是本頁的建議，並非論文或廠商的主張。
+
+- **事實只存在於請求中。** 轉帳金額或呼叫者的 IP 是應用程式最先知道的。將它作為情境傳入是可行的，但服務只會評估它；無法儲存、列出或稽核它。像「金額不超過 1,000」這樣的規則，由應用程式在關係檢查之後檢查往往更簡單，也能讓授權服務的答案保持可快取。
+- **列出與建立索引需要儲存的事實。** 論文的 Expand 之所以存在，是為了讓客戶端能 "build efficient search indices for access-controlled content"（為受存取控制的內容建構高效率的搜尋索引）（§2.4.5）。取決於請求的授權無法事先建立索引；OpenFGA 的指南對情境元組也是這麼說的，而 SpiceDB 的檢查在呼叫者提供情境之前，可能會傳回 `CONDITIONAL_PERMISSION`。
+- **時間限制屬於儲存層。** 到期是授權的特性，而不是請求的特性。內建的到期功能（SpiceDB）或儲存元組上的條件（OpenFGA）讓它緊鄰授權存放，使「上週二誰能檢視 readme」這類稽核能看到它。
+- **經常變動的屬性作為情境比作為元組便宜。** 每當使用者的位置或文件的狀態改變就寫入一筆元組，會讓每一次變更都成為雙重寫入。以請求情境評估的條件可以避免這一點，代價是必須信任呼叫者送出正確的值。
+
+<Callout kind="paper" title="論文中的對應">
+
+元組文法及其主鍵：§2.1。儲存列的鍵：§3.1.1。Check 請求的三項輸入：§2.4.4。Expand 與搜尋索引：§2.4.5。論文沒有關於條件或屬性的章節；本頁第一節之後的內容描述的都是產品。
+
+</Callout>
+
+## 資料來源
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- AuthZed, [caveats docs](https://authzed.com/docs/spicedb/concepts/caveats)
+- AuthZed, [expiring relationships docs](https://authzed.com/docs/spicedb/concepts/expiring-relationships)
+- AuthZed, [The Evolution of Expiration](https://authzed.com/blog/the-evolution-of-expiration), 2025-02-13
+- AuthZed, [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- AuthZed, [`dispatch.proto`](https://github.com/authzed/spicedb/blob/main/proto/internal/dispatch/v1/dispatch.proto)
+- Google, [CEL specification](https://github.com/google/cel-spec)
+- OpenFGA, [conditions](https://openfga.dev/docs/modeling/conditions)
+- OpenFGA, [contextual and time-based authorization](https://openfga.dev/docs/modeling/contextual-time-based-authorization)
+- Andres Aguiar, [Conditional Relationship Tuples for OpenFGA](https://openfga.dev/blog/conditional-tuples-announcement), OpenFGA blog, 2023-11-06
+- Permify, [ABAC use case](https://fusionauth.io/permify-docs/use-cases/abac) and [modeling guide](https://fusionauth.io/permify-docs/getting-started/modeling)
+- Permify, [An Exciting New Chapter: Permify Joins FusionAuth](https://permify.co/post/fusionauth-acquires-permify/), 2025-11-20
+- Joseph W. Cutler et al., [Cedar: A New Language for Expressive, Fast, Safe, and Analyzable Authorization (Extended Version)](https://arxiv.org/abs/2403.04651), arXiv:2403.04651v2, 2024-03-08

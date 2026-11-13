@@ -1,0 +1,233 @@
+---
+title: "SpiceDB"
+description: "O banco de dados de código aberto da AuthZed para relacionamentos de autorização, lido à luz do artigo do Zanzibar."
+section: ecosystem
+order: 1
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4"]
+product:
+  name: SpiceDB
+  maintainer: AuthZed, Inc.
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/authzed/spicedb
+  docs: https://authzed.com/docs
+  status: "Ativo"
+  latest: v1.57.1 (2026-11-10)
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+O SpiceDB é um banco de dados de código aberto que armazena relacionamentos e responde a consultas de permissão sobre eles, no estilo do Zanzibar. É escrito em Go, licenciado sob Apache-2.0 e mantido pela AuthZed, Inc. ([repositório](https://github.com/authzed/spicedb)). Sua primeira versão no GitHub, a v1.0.0, é datada de 2021-09-30. A AuthZed também vende serviços gerenciados e comerciais em torno dele; esses são identificados como tal abaixo. A maior parte das fontes desta página é documentação e blog da própria AuthZed.
+
+## Termos do artigo e termos do SpiceDB
+
+| No artigo | No SpiceDB |
+| --- | --- |
+| Configuração de namespace (§2.3) | Uma `definition` no schema ([documentação do schema](https://authzed.com/docs/spicedb/concepts/schema)) |
+| Tupla de relação `object#relation@user` (§2.1) | Relationship `resource#relation@subject`, por exemplo `document:readme#editor@user:emilia` ([relacionamentos](https://authzed.com/docs/spicedb/concepts/relationships)) |
+| `_this` (§2.3.1) | Uma `relation` com seus tipos de sujeito permitidos; os relacionamentos armazenados para ela |
+| `computed_userset` | Nomear outra relação ou permissão dentro de uma expressão `permission` |
+| `tuple_to_userset` | A seta `parent->view` (alias `parent.any(view)`) |
+| `union` / `intersection` / `exclusion` | `+` / `&` / `-` |
+| Zookie (§2.4) | ZedToken ([consistência](https://authzed.com/docs/spicedb/concepts/consistency)) |
+| Check (§2.4.4) | `CheckPermission`, `CheckBulkPermissions` |
+| Read (§2.4.1) | `ReadRelationships` |
+| Write (§2.4.2) | `WriteRelationships`, `DeleteRelationships` |
+| Watch (§2.4.3) | `Watch` |
+| Expand (§2.4.5) | `ExpandPermissionTree` |
+| Fora da API do artigo | `LookupResources`, `LookupSubjects`, `ImportBulkRelationships`, `ExportBulkRelationships` |
+| Leopard (§3.2.4) | AuthZed Materialize, um serviço comercial para clientes do AuthZed Dedicated ([documentação](https://authzed.com/docs/materialize/getting-started/overview)) |
+| Spanner (§3) | CockroachDB, Cloud Spanner, PostgreSQL, MySQL, memdb ([repositórios de dados](https://authzed.com/docs/spicedb/concepts/datastores)) |
+
+Os nomes da API vêm dos arquivos de protocolo da AuthZed: [`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto) e [`watch_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto).
+
+## O exemplo em curso como schema
+
+A Figura 1 do artigo torna os donos editores, os editores visualizadores, e os visualizadores da pasta pai visualizadores do documento (§2.3.1). No SpiceDB, relações armazenadas e permissões calculadas são declaradas separadamente: as linhas `relation` dizem quem pode ser escrito em um relacionamento, e as linhas `permission` dizem como o acesso é calculado.
+
+```text
+definition user {}
+
+definition group {
+    relation member: user
+}
+
+definition folder {
+    relation viewer: user | group#member
+    permission view = viewer
+}
+
+definition doc {
+    relation parent: folder
+    relation owner: user
+    relation editor: user | group#member
+    relation viewer: user | group#member
+
+    permission edit = owner + editor
+    permission view = viewer + edit + parent->view
+}
+```
+
+<Callout kind="note" title="Não passado por um validador">
+
+Este schema usa apenas construções mostradas na [página da linguagem de schema](https://authzed.com/docs/spicedb/concepts/schema) do SpiceDB em 2026-11-13: `definition`, `relation` com `user | group#member`, `permission` com `+` e `->`. Ele não foi executado no `zed` nem no SpiceDB Playground.
+
+</Callout>
+
+Os relacionamentos de Anne, Beto e Chen:
+
+```text
+doc:readme#owner@user:anne
+doc:readme#parent@folder:A
+group:eng#member@user:beto
+doc:readme#viewer@group:eng#member
+folder:A#viewer@user:chen
+```
+
+Quais relacionamentos armazenados levam cada pessoa a `view` sobre o readme?
+
+<Graph
+  width={600}
+  height={270}
+  title="O exemplo em curso como relacionamentos do SpiceDB"
+  desc="Cinco relacionamentos. user:anne é owner de doc:readme. user:beto é member de group:eng, e group:eng#member é viewer de doc:readme. user:chen é viewer de folder:A, e folder:A é parent de doc:readme. O caminho de Chen por folder:A até o readme está destacado: é a seta parent->view."
+  nodes={[
+    { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 225, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 280, y: 135, label: "group:eng", kind: "object", mono: true },
+    { id: "folder", x: 280, y: 225, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 500, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer\n(eng#member)" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Cada seta é um relacionamento armazenado. Anne chega a view por meio de edit (owner), Beto pelo grupo e Chen pela seta destacada parent->view."
+/>
+
+Observe que nenhum relacionamento menciona `view` ou `edit`: ambos são permissões, calculadas a partir do schema no momento da verificação, assim como as regras de reescrita do artigo são calculadas em vez de armazenadas (§2.3.1).
+
+## Arquitetura
+
+Como uma implantação do SpiceDB responde a uma verificação? A AuthZed descreve o SpiceDB como "fundamentally a gRPC service" (fundamentalmente um serviço gRPC) com um gateway HTTP opcional ([publicação sobre a arquitetura, 2021-11-17](https://authzed.com/blog/spicedb-architecture)). Um nó divide uma requisição em perguntas menores e as encaminha a outros nós, um processo que ele chama de dispatch; cada nó mantém "an in-memory cache of permissions queries it has resolved in the past" (um cache em memória das consultas de permissão que resolveu no passado) ([documentação de desempenho](https://authzed.com/docs/spicedb/ops/performance)). Um hash consistente envia "the same (sub-)requests to the same server" (as mesmas (sub)requisições ao mesmo servidor) ([publicação sobre a arquitetura](https://authzed.com/blog/spicedb-architecture)). Todos os nós compartilham um único repositório de dados. O Materialize, se usado, pré-computa permissões escolhidas, e o SpiceDB "can dispatch sub-queries to Materialize" (pode despachar subconsultas ao Materialize) ([documentação de desempenho](https://authzed.com/docs/spicedb/ops/performance)).
+
+<Graph
+  width={640}
+  height={320}
+  minWidth={560}
+  title="Arquitetura do SpiceDB"
+  desc="Um cliente da aplicação envia CheckPermission a um de três nós do SpiceDB. Os nós despacham sub-requisições entre si, roteadas por hashing consistente. Os três nós leem e escrevem em um único repositório de dados compartilhado (CockroachDB, Spanner, PostgreSQL ou MySQL). Um consumidor de Watch recebe de um nó do SpiceDB um stream de alterações. O AuthZed Materialize, um serviço comercial, observa o repositório de dados, lê snapshots periódicos dele e responde às subconsultas que o SpiceDB lhe despacha."
+  nodes={[
+    { id: "app", x: 320, y: 40, label: "Aplicação\n(cliente gRPC / HTTP)", kind: "client" },
+    { id: "a", x: 170, y: 150, label: "Nó\nSpiceDB", kind: "server" },
+    { id: "b", x: 320, y: 150, label: "Nó\nSpiceDB", kind: "server" },
+    { id: "c", x: 470, y: 150, label: "Nó\nSpiceDB", kind: "server" },
+    { id: "ds", x: 320, y: 275, label: "Repositório de dados\nCockroachDB · Spanner\nPostgreSQL · MySQL", kind: "store" },
+    { id: "watch", x: 80, y: 275, label: "Consumidor\nde Watch", kind: "client" },
+    { id: "mat", x: 565, y: 275, label: "AuthZed Materialize\n(comercial)", kind: "server" },
+  ]}
+  edges={[
+    { from: "app", to: "b", label: "CheckPermission" },
+    { from: "a", to: "b", label: "dispatch", dir: "both" },
+    { from: "b", to: "c", label: "dispatch", dir: "both" },
+    { from: "a", to: "ds", dir: "both" },
+    { from: "b", to: "ds", label: "leituras / escritas", dir: "both" },
+    { from: "c", to: "ds", dir: "both" },
+    { from: "a", to: "watch", label: "Watch" },
+    { from: "ds", to: "mat", label: "alterações, snapshots", dashed: true },
+    { from: "c", to: "mat", label: "subconsultas", dashed: true },
+  ]}
+  caption="Amarelo: servidores. Verde: o repositório de dados compartilhado. Azul: clientes. Tracejado: o caminho comercial opcional do Materialize."
+/>
+
+Compare com a Figura 2 do artigo (§3): ali, os `aclservers` também distribuem trabalho a outros servidores do cluster, mas o armazenamento é sempre o Spanner, o Watch é servido por `watchservers` separados que acompanham um changelog, e o Leopard lê snapshots offline além do Watch. O SpiceDB não tem um tipo de servidor de watch separado na documentação citada aqui; `Watch` é um RPC do mesmo serviço.
+
+## Consistência: ZedTokens e zookies
+
+A AuthZed chama o ZedToken de "the SpiceDB equivalent of Google Zanzibar's Zookie concept which protects users from the New Enemy Problem" (o equivalente no SpiceDB do conceito de Zookie do Google Zanzibar, que protege os usuários do problema do novo inimigo) ([documentação de consistência](https://authzed.com/docs/spicedb/concepts/consistency)). As escritas retornam um (`written_at`), e as verificações também (`checked_at`). Uma requisição pode escolher um de quatro modos:
+
+| Modo | O que pede | Análogo no artigo |
+| --- | --- | --- |
+| `minimize_latency` | O que o servidor conseguir responder mais rápido | Sem zookie: "a reasonably recent snapshot" (um snapshot razoavelmente recente) (§2.4.1) |
+| `at_least_as_fresh` + ZedToken | Um snapshot não mais antigo que o token | Um zookie em uma verificação ou leitura (§2.2, §2.4) |
+| `at_exact_snapshot` + ZedToken | Exatamente o snapshot do token | Um zookie de leitura reutilizado para obter "the same snapshot as a previous read" (o mesmo snapshot de uma leitura anterior) (§2.4.1) |
+| `fully_consistent` | Os dados mais recentes | Nenhum análogo direto; a verificação de alteração de conteúdo do artigo é avaliada no snapshot mais recente (§2.4.4) |
+
+No CockroachDB, a documentação adverte que `fully_consistent` "does not guarantee read-after-write consistency" (não garante consistência de leitura após escrita), porque os relógios dos nós podem diferir em até o `max_offset` do cluster; ela recomenda, em vez disso, um ZedToken com `at_least_as_fresh` ([documentação de consistência](https://authzed.com/docs/spicedb/concepts/consistency)).
+
+`fully_consistent` é o padrão para `WriteRelationships`, `DeleteRelationships`, `ReadSchema` e `WriteSchema`; `minimize_latency` é o padrão para todas as demais APIs ([documentação de consistência](https://authzed.com/docs/spicedb/concepts/consistency)).
+
+Como um ZedToken impede que Chen veja um readme do qual foi removido antes da edição?
+
+<Swimlane
+  lanes={["Aplicação", "SpiceDB", "Banco da aplicação"]}
+  laneWidth={190}
+  timeLabel="tempo"
+  title="Usando um ZedToken como um zookie"
+  desc="A aplicação remove o acesso de visualização de Chen à pasta A com WriteRelationships. O SpiceDB confirma a escrita e retorna um ZedToken Z1 como written_at. A aplicação salva o novo conteúdo do readme junto com Z1. Mais tarde, uma verificação de Chen sobre o readme é enviada com at_least_as_fresh Z1. O SpiceDB a avalia em um snapshot não mais antigo que Z1, de modo que a remoção é vista e Chen é negado."
+  events={[
+    { lane: 0, t: 0, label: "remove Chen de A", kind: "write" },
+    { lane: 1, t: 0, label: "confirma", kind: "write" },
+    { lane: 0, t: 1, label: "guarda Z1", kind: "note", mono: true },
+    { lane: 0, t: 2, label: "salva readme + Z1", kind: "write" },
+    { lane: 2, t: 2, label: "conteúdo, Z1", kind: "write", mono: true },
+    { lane: 0, t: 3, label: "Chen pode ver?", kind: "read" },
+    { lane: 1, t: 3, label: "snapshot ≥ Z1", kind: "read" },
+    { lane: 1, t: 4, label: "negado", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0], label: "WriteRelationships" },
+    { from: [1, 0], to: [0, 1], label: "written_at = Z1" },
+    { from: [0, 2], to: [2, 2] },
+    { from: [0, 3], to: [1, 3], label: "at_least_as_fresh Z1" },
+    { from: [1, 4], to: [0, 4], dashed: true },
+  ]}
+  caption="O token viaja com o conteúdo, como faz o zookie do artigo (§2.2). Sem ele, uma verificação minimize_latency poderia ser respondida a partir de um cache anterior à remoção."
+/>
+
+No artigo, o zookie armazenado com o conteúdo vem de uma verificação de alteração de conteúdo (§2.2, §2.4.4). A documentação do SpiceDB diz que, quando um recurso muda, "a new ZedToken is either returned or it should be requested by performing a check with full consistency" (um novo ZedToken é retornado ou deve ser solicitado por meio de uma verificação com consistência total) ([documentação de consistência](https://authzed.com/docs/spicedb/concepts/consistency)), de modo que ambos os caminhos existem.
+
+O `Watch` também usa ZedTokens: uma requisição pode começar a partir de `optional_start_cursor`, e cada resposta traz `changes_through` para retomar a partir dali, o que corresponde ao heartbeat zookie do artigo (§2.4.3) ([`watch_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)).
+
+## Diferenças em relação ao artigo
+
+- **Armazenamento.** O artigo armazena tudo no Spanner (§3.1). O SpiceDB tem repositórios de dados intercambiáveis: CockroachDB ("high throughput and/or multi-region", alta vazão e/ou múltiplas regiões), Cloud Spanner, PostgreSQL ("single-region", região única), MySQL ("Not recommended", não recomendado) e memdb (desenvolvimento local e testes) ([repositórios de dados](https://authzed.com/docs/spicedb/concepts/datastores)).
+- **Relações e permissões são separadas.** O artigo associa uma reescrita de userset a uma relação (§2.3.1). O SpiceDB separa as `relation`s armazenadas das `permission`s calculadas ([schema](https://authzed.com/docs/spicedb/concepts/schema)).
+- **Caveats.** Relacionamentos podem carregar uma expressão CEL nomeada, associada no schema com `with` (por exemplo, `relation viewer: user | user with ip_allowlist`) ([caveats](https://authzed.com/docs/spicedb/concepts/caveats)). A tupla do artigo (§2.1) não tem esse campo.
+- **Curingas.** `relation viewer: user | user:*` permite uma concessão pública ([schema](https://authzed.com/docs/spicedb/concepts/schema)). A gramática de tuplas do artigo tem um ID de usuário ou um userset (§2.1), sem curinga.
+- **Seta de interseção.** `.all()` exige que todo objeto relacionado conceda a permissão ([schema](https://authzed.com/docs/spicedb/concepts/schema)). As três folhas de reescrita do artigo (§2.3.1) não têm essa forma.
+- **Defasagem padrão.** O artigo escolhe a defasagem padrão de forma adaptativa, a partir de estatísticas de leituras fora da zona (§3.2.1), e, separadamente, arredonda os timestamps de avaliação para cima "to a coarse granularity, such as one or ten seconds" (para uma granularidade grossa, como um ou dez segundos), de modo que as entradas de cache sejam compartilhadas (§3.2.5). O SpiceDB tem apenas o arredondamento: ele agrupa as revisões das requisições em janelas definidas por `--datastore-revision-quantization-interval` para que as entradas de cache possam ser reutilizadas; a AuthZed informa que "the default is 5s" (o padrão é 5 s) ([publicação sobre cache de pontos quentes, 2023-05-10](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)), o que corresponde a `RevisionQuantization: 5 * time.Second` no [código-fonte](https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go).
+- **APIs de consulta.** `LookupResources` e `LookupSubjects` respondem a perguntas do tipo “quais recursos” e “quais sujeitos” ([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). A API do artigo tem Read, Write, Watch, Check e Expand (§2.4).
+- **Leopard.** "AuthZed Materialize takes inspiration from the Leopard index component described in the Zanzibar paper" (o AuthZed Materialize se inspira no componente de índice Leopard descrito no artigo do Zanzibar) ([documentação do Materialize](https://authzed.com/docs/materialize/getting-started/overview)). Ele faz parte da oferta paga da AuthZed, não do SpiceDB de código aberto: a documentação diz que seu recurso Accelerated Queries está "generally available to users of AuthZed Dedicated" (disponível de forma geral para usuários do AuthZed Dedicated).
+
+## Situação
+
+Em 2026-11-13: ativo. Versão mais recente v1.57.1 em 2026-11-10, repositório não arquivado, cerca de 7,2 mil estrelas no GitHub, Apache-2.0 ([repositório](https://github.com/authzed/spicedb), [versões](https://github.com/authzed/spicedb/releases)).
+
+A AuthZed também publica uma cópia anotada do artigo em [zanzibar.tech](https://zanzibar.tech) ("Annotations © 2026 AuthZed, Inc. Zanzibar Paper © USENIX and original authors").
+
+## Fontes
+
+- [https://github.com/authzed/spicedb](https://github.com/authzed/spicedb)
+- [https://github.com/authzed/spicedb/releases](https://github.com/authzed/spicedb/releases)
+- [https://authzed.com/docs](https://authzed.com/docs)
+- [https://authzed.com/docs/spicedb/concepts/schema](https://authzed.com/docs/spicedb/concepts/schema)
+- [https://authzed.com/docs/spicedb/concepts/relationships](https://authzed.com/docs/spicedb/concepts/relationships)
+- [https://authzed.com/docs/spicedb/concepts/consistency](https://authzed.com/docs/spicedb/concepts/consistency)
+- [https://authzed.com/docs/spicedb/concepts/datastores](https://authzed.com/docs/spicedb/concepts/datastores)
+- [https://authzed.com/docs/spicedb/concepts/caveats](https://authzed.com/docs/spicedb/concepts/caveats)
+- [https://authzed.com/docs/spicedb/ops/performance](https://authzed.com/docs/spicedb/ops/performance)
+- [https://authzed.com/docs/materialize/getting-started/overview](https://authzed.com/docs/materialize/getting-started/overview)
+- [https://authzed.com/blog/spicedb-architecture](https://authzed.com/blog/spicedb-architecture)
+- [https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go](https://github.com/authzed/spicedb/blob/main/pkg/cmd/datastore/dsconfig/config.go)
+- [https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb](https://authzed.com/blog/hotspot-caching-in-google-zanzibar-and-spicedb)
+- [https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)
+- [https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto](https://github.com/authzed/api/blob/main/authzed/api/v1/watch_service.proto)
+- [https://zanzibar.tech](https://zanzibar.tech)

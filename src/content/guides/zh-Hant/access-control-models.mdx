@@ -1,0 +1,265 @@
+---
+title: "ACL、RBAC、ABAC、ReBAC：描述誰可以做什麼的四種方式"
+description: "同一個存取決策「Chen 能否檢視 doc:readme？」，分別以存取控制清單、角色、屬性規則與關係圖建模，以及 Zanzibar 在其中的位置。"
+section: guide
+part: background
+order: 1
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.3.1", "3.2.3", "3.2.4", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+每一套授權系統回答的都是同一類問題：此使用者能否對此物件做這件事？論文的說法是檢查 "that a user has permission to carry out an operation on a digital object"（使用者有權對某個數位物件執行某項操作）（§1）。四種常見模型的差異，在於它們儲存什麼，以及問題抵達時計算什麼。
+
+1971 年，Butler Lampson 將保護描述為一個矩陣：列是網域（以今日的說法即主體），欄是物件，每一格列出某個網域對某個物件擁有的存取權（[Lampson, "Protection"](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)）。沒有任何實際系統會儲存整個矩陣。ACL 儲存其各欄，角色與屬性規則計算其各格，關係圖則透過沿著邊前進來推導它們。
+
+本頁以四種方式為同一格建模。貫穿全站的範例：Anne、Beto 與 Chen（`user:anne`、`user:beto`、`user:chen`）；位於 `folder:A` 中的文件 `doc:readme`；群組 `group:eng`。Anne 擁有 readme，Beto 屬於 eng，eng 的成員可檢視 readme，Chen 可檢視資料夾 A。要做的決策是：
+
+```text
+Can user:chen view doc:readme?
+```
+
+預期的答案是可以，而且完全是因為資料夾。Chen 在 readme 上沒有直接的授權。
+
+## ACL：物件上的一份清單
+
+存取控制清單為每個物件附上一份項目清單，每個項目是一個主體加上一組權利。Multics 在 "on segments and directories"（區段與目錄上）設有 ACL，其項目由 "a principal identifier and a set of permissions bits"（一個主體識別碼與一組權限位元）組成（§5，引用 Saltzer 在 SOSP '73 的論文，修訂版為 [Saltzer 1974](https://dl.acm.org/doi/10.1145/361011.361067)）。後來的系統允許項目指名一個群組，例如 POSIX ACL（§5）。
+
+readme 自己的清單對 Chen 怎麼說？
+
+<Graph
+  width={600}
+  height={230}
+  minWidth={500}
+  title="doc:readme 的 ACL"
+  desc="兩份清單並排。左側是 folder:A，只有一個項目：user:chen · view。右側是 doc:readme，有三個項目：user:anne · owner、group:eng · view（虛線，群組項目），以及 user:chen · view。一支被標出、標示為「由應用程式複製」的虛線箭頭，從資料夾的 Chen 項目指向 readme 的 Chen 項目。"
+  nodes={[
+    { id: "fh", x: 130, y: 40, label: "folder:A", kind: "object", mono: true },
+    { id: "fc", x: 130, y: 100, label: "user:chen · view", kind: "object", mono: true, w: 200, on: true },
+    { id: "dh", x: 440, y: 40, label: "doc:readme", kind: "object", mono: true },
+    { id: "da", x: 440, y: 100, label: "user:anne · owner", kind: "object", mono: true, w: 200 },
+    { id: "dg", x: 440, y: 145, label: "group:eng · view", kind: "group", mono: true, w: 200 },
+    { id: "dc", x: 440, y: 190, label: "user:chen · view", kind: "object", mono: true, w: 200, on: true },
+  ]}
+  edges={[
+    { from: "fc", to: "dc", label: "由應用程式複製", dashed: true, on: true },
+  ]}
+  caption="每個物件都帶有自己的清單。readme 上的 Chen 項目之所以存在，只是因為有某個東西從資料夾複製了它。"
+/>
+
+檢查本身是一次查找：在 readme 的清單中尋找 Chen。請注意資料夾到哪裡去了。繼承不是 ACL 模型的一部分，因此該項目必須被複製到 readme 上，可能是在文件建立時（VMS "supports ACL inheritance for files created within a directory tree"，對在目錄樹中建立的檔案支援 ACL 繼承，§5），也可能由應用程式負責。一旦複製，該項目就不再記得自己從何而來。
+
+## RBAC：使用者、角色、權限
+
+以角色為基礎的存取控制在使用者與權限之間加入一層。依 NIST 的說法，"RBAC controls all access through roles assigned to users. Each role assigns a collection of permissions to users"（RBAC 透過指派給使用者的角色控制所有存取。每個角色將一組權限指派給使用者）（[Kuhn、Coyne 與 Weil 2010](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)）。Ferraiolo 與 Kuhn 於 1992 年提出 RBAC，統一的 NIST 模型於 2004 年成為 ANSI INCITS 359-2004（[NIST RBAC 專案](https://csrc.nist.gov/projects/role-based-access-control)）。
+
+角色是全域的，因此對單一文件的授權需要一個指名該文件的角色。貫穿全站的範例變成三個角色：
+
+| 使用者 | 角色 | 角色授予的權限 |
+| --- | --- | --- |
+| `user:anne` | `readme_owner` | 編輯 `doc:readme`、檢視 `doc:readme` |
+| `user:beto` | `eng` | 檢視 `doc:readme` |
+| `user:chen` | `folderA_viewer` | 檢視 `folder:A`、檢視 `doc:readme`（以及資料夾 A 中的所有其他文件） |
+
+是哪個角色給了 Chen 檢視權限？
+
+<Graph
+  width={620}
+  height={280}
+  minWidth={520}
+  title="使用者、角色與權限"
+  desc="三欄。左欄：膠囊形的 user:anne、user:beto、user:chen。中欄：虛線的角色方框 role:readme_owner、role:eng、role:folderA_viewer，每位使用者被指派到同一列的角色。右欄：權限 edit doc:readme、view doc:readme、view folder:A。readme_owner 授予 readme 的編輯與檢視；eng 授予 readme 的檢視；folderA_viewer 授予資料夾 A 的檢視與 readme 的檢視。標出的部分：user:chen 到 role:folderA_viewer 再到 view doc:readme。"
+  nodes={[
+    { id: "anne", x: 70, y: 50, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 70, y: 140, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 70, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "ro", x: 290, y: 50, label: "role:readme_owner", kind: "group", mono: true },
+    { id: "re", x: 290, y: 140, label: "role:eng", kind: "group", mono: true },
+    { id: "rf", x: 290, y: 230, label: "role:folderA_viewer", kind: "group", mono: true, on: true },
+    { id: "pe", x: 520, y: 50, label: "edit doc:readme", kind: "object", mono: true },
+    { id: "pv", x: 520, y: 140, label: "view doc:readme", kind: "object", mono: true, on: true },
+    { id: "pf", x: 520, y: 230, label: "view folder:A", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "ro", label: "持有" },
+    { from: "beto", to: "re", label: "持有" },
+    { from: "chen", to: "rf", label: "持有", on: true },
+    { from: "ro", to: "pe", label: "授予" },
+    { from: "ro", to: "pv" },
+    { from: "re", to: "pv", label: "授予" },
+    { from: "rf", to: "pf", label: "授予" },
+    { from: "rf", to: "pv", on: true },
+  ]}
+  caption="Chen 持有 role:folderA_viewer，而該角色的權限集合列有 view doc:readme。"
+/>
+
+請注意，資料夾只剩下一個名稱。系統無法以任何方式理解 `folderA_viewer` 與 `folder:A` 之間的關聯；必須有人讓它的權限集合保持等同於「資料夾 A 中的所有東西」。像 `readme_owner` 這樣的逐物件角色，正是導致角色爆炸的模式，於下表中討論。
+
+## ABAC：針對屬性的述詞
+
+以屬性為基礎的存取控制完全不儲存授權。NIST SP 800-162 將其定義為一種方法，其中授權 "is determined by evaluating attributes associated with the subject, object, requested operations, and, in some cases, environment against policy, rules, or relationships"（是透過依據政策、規則或關係，評估與主體、物件、所請求的操作，以及在某些情況下與環境相關的屬性來決定的）（[NIST SP 800-162](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)）。決策是屬性的函數，在請求當下評估。
+
+以下是貫穿全站範例的三項授權寫成的規則，使用 [Cedar](https://docs.cedarpolicy.com/policies/syntax-policy.html) 的語法；Cedar 是 AWS 於 2023 年開源的政策語言：
+
+```text
+// Anne: the owner may view
+permit (principal, action == Action::"view", resource)
+when { resource.owner == principal };
+
+// Beto: anyone whose team is listed on the document
+permit (principal, action == Action::"view", resource)
+when { resource.viewerTeams.contains(principal.team) };
+
+// Chen: anyone listed as a viewer of the document's folder
+permit (principal, action == Action::"view", resource)
+when { resource.folder.viewers.contains(principal) };
+```
+
+<Callout kind="warn" title="僅供說明">
+
+這三條政策依照 Cedar 文件中的語法撰寫，但尚未經過 Cedar 驗證器執行。屬性名稱（`owner`、`viewerTeams`、`team`、`folder`、`viewers`）是本頁自行設計的。
+
+</Callout>
+
+引擎讀取哪些屬性來決定 Chen 的請求？
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={520}
+  title="ABAC 決策所讀取的屬性"
+  desc="左側是請求：principal user:chen、action view、resource doc:readme。它們送入一個黃色方框：政策評估。右側有四個綠色的屬性方框送入同一個評估：doc:readme.owner = user:anne、doc:readme.viewerTeams = eng、doc:readme.folder = folder:A、folder:A.viewers = user:chen。後兩者被標出。評估下方是決策：permit，被標出。"
+  nodes={[
+    { id: "p", x: 85, y: 60, label: "principal\nuser:chen", kind: "subject", mono: true },
+    { id: "a", x: 85, y: 150, label: "action\nview", kind: "object", mono: true },
+    { id: "r", x: 85, y: 240, label: "resource\ndoc:readme", kind: "object", mono: true },
+    { id: "e", x: 290, y: 120, label: "政策\n評估", kind: "server" },
+    { id: "d", x: 290, y: 250, label: "permit\n（第三條規則）", kind: "object", on: true },
+    { id: "a1", x: 500, y: 40, label: "doc:readme.owner\n= user:anne", kind: "store", mono: true },
+    { id: "a2", x: 500, y: 110, label: "doc:readme.viewerTeams\n= [\"eng\"]", kind: "store", mono: true },
+    { id: "a3", x: 500, y: 180, label: "doc:readme.folder\n= folder:A", kind: "store", mono: true, on: true },
+    { id: "a4", x: 500, y: 250, label: "folder:A.viewers\n= [user:chen]", kind: "store", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "p", to: "e" },
+    { from: "a", to: "e" },
+    { from: "r", to: "e" },
+    { from: "a1", to: "e" },
+    { from: "a2", to: "e" },
+    { from: "a3", to: "e", on: true },
+    { from: "a4", to: "e", on: true },
+    { from: "e", to: "d", label: "決定", on: true },
+  ]}
+  caption="規則只儲存一次；它們所檢驗的事實，則以屬性的形式存在於使用者、文件與資料夾上。"
+/>
+
+請注意被標出的兩個屬性。`doc:readme.folder` 與 `folder:A.viewers` 是以屬性值儲存的關係，而規則沿著其中一個到達另一個。規則保持簡短，但資料已移入屬性之中，而且規則之外沒有任何東西說明哪些屬性對哪些決策有影響。
+
+## ReBAC：關係圖
+
+以關係為基礎的存取控制，依據請求者與資源之間的關係做出決策。Fong 將這個術語的創造歸功於 Carrie Gates（本頁未查核她 2007 年的研討會論文），而 Philip Fong 2011 年的模型根據 "on the relationship between the resource owner and the resource accessor"（資源擁有者與資源存取者之間的關係）做出決策（[Fong 2011](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)）。Fong 強調二元關係可以組合，例如朋友的朋友，而角色是一元述詞，除了布林組合之外幾乎沒有其他表達能力。
+
+Zanzibar 將每一個關係儲存為一筆關係元組 `object#relation@user`（§2.1），並由命名空間設定說明各關係如何組合。論文的圖 1 正好編碼了這個範例：擁有者是編輯者，編輯者是檢視者，且 "viewers of the parent folder are also viewers of the document"（上層資料夾的檢視者也是該文件的檢視者）。論文並未使用 ReBAC 這個詞。
+
+由儲存元組構成的圖如何到達 Chen？
+
+<Graph
+  width={620}
+  height={280}
+  minWidth={520}
+  title="加上資料夾的表 1，標出 Chen 的路徑"
+  desc="左側有三名使用者。user:anne 以一支標示為 owner 的箭頭指向 doc:readme。user:beto 以一支標示為 member 的箭頭指向虛線的使用者集合 group:eng#member，後者以一支標示為 viewer 的箭頭指向 doc:readme。user:chen 以一支標示為 viewer 的箭頭指向 folder:A，後者以一支標示為 parent 的箭頭指向 doc:readme。標出的部分：user:chen、viewer 邊、folder:A、parent 邊與 doc:readme，另有一條被標出的虛線邊從 user:chen 指向 doc:readme，標示為 viewer（計算而得）。"
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 240, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 240, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+    { from: "chen", to: "doc", label: "viewer（計算而得）", dashed: true, on: true, labelOffset: -14 },
+  ]}
+  caption="實線邊是儲存的元組。虛線邊並未儲存：Check 依命名空間設定中的 parent 規則將它計算出來。"
+/>
+
+請注意，資料夾在這裡仍然是資料夾。readme 以一筆 `parent` 元組指向 `folder:A`，而規則在檢查時將「上層的檢視者」轉為「readme 的檢視者」。逐步的走訪見[關係元組頁面](../relation-tuples/)。
+
+## 同一個範例，逐格比較
+
+| | ACL | RBAC | ABAC | ReBAC（Zanzibar） |
+| --- | --- | --- | --- | --- |
+| 儲存了什麼 | readme 的清單：Anne（owner）、`group:eng`（view）、Chen（view，從資料夾 A 複製而來） | 三項角色指派與三個角色的權限集合 | 三條規則，加上使用者、readme 與資料夾 A 上的屬性 | 五筆元組（owner、eng 成員、eng 檢視者、parent、資料夾檢視者）與一份命名空間設定 |
+| 誰能檢視 readme | 讀取清單並展開 `group:eng`：Anne、Beto、Chen | 所有持有授予「view `doc:readme`」之角色的人：Anne、Beto、Chen | 沒有儲存在任何地方：必須對每位使用者評估規則。Anne、Beto、Chen | Expand `doc:readme#viewer`（§2.4.5）：Anne、Beto、Chen |
+| Beto 離開 eng | 將 Beto 從群組中移除；readme 的清單不受影響 | 移除 Beto 對 `eng` 的指派 | 變更 `user:beto.team` | 刪除一筆元組 `group:eng#member@user:beto` |
+| readme 從資料夾 A 移到資料夾 B | 移除從 A 複製來的項目並複製 B 的項目，在 readme 以及所有一起移動的東西上都要做 | 將「view `doc:readme`」從 `folderA_viewer` 中移出，並加入某個 `folderB_viewer` 角色 | 變更 `doc:readme.folder`；規則不變 | 替換一筆 `parent` 元組：`doc:readme#parent@folder:A#...` 變成 `@folder:B#...` |
+| 困難之處 | 繼承與群組是附加功能；「Chen 能看到什麼？」意味著掃描每個物件的清單 | 角色爆炸："thousands of separate roles"（數千個不同的角色），且 n 個布林條件可能需要 2ⁿ 個角色（[Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)）；像 `readme_owner` 這樣的逐物件角色使情況更糟 | 稽核：ABAC "is easy to set up, but analyzing or changing user permissions can be problematic"（容易設定，但分析或變更使用者權限可能有問題）（[Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)）。「屬性蔓延」（attribute sprawl）是業界對同一問題的簡稱，並非 NIST 術語 | 圖走訪："Recursive pointer chasing … has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups"（遞迴的指標追蹤 …… 對於深層巢狀或擁有大量子群組的群組，難以維持低延遲）（§3.2.4）。SpiceDB 預設將深度上限設為 [50 步](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)，OpenFGA 的 `resolveNodeLimit` 則為 [25](https://openfga.dev/docs/getting-started/setup-openfga/configuration) |
+
+請注意中間的兩列。Beto 離開 eng 在每個模型中都是一次變更，因為這裡的每個模型都有某種形式的群組。資料夾移動才是它們分道揚鑣之處：ACL 與 RBAC 將資料夾的意義複製到 readme 的授權中，因此必須改寫這些授權；ABAC 與 ReBAC 將資料夾保留為資料，因此只需變更一個值。ReBAC 還能讓「誰能檢視？」從儲存的資料中得到解答，而僅有規則的 ABAC 版本做不到。
+
+## Zanzibar 的位置
+
+Zanzibar 是一套 ReBAC 系統：關係元組是邊，使用者集合改寫規則（§2.3.1）說明邊如何組合。其資料模型支援 "permissions, users, groups, and inheritance"（權限、使用者、群組與繼承），如 Multics、UNIX、POSIX ACL 與 VMS 中所見（§5），並將群組當作另一種物件，這 "allows us to unify the concepts of ACLs and groups"（讓我們得以統一 ACL 與群組的概念）（§2.1）。
+
+RBAC 可以建構在其上。論文說角色 "are similar to Zanzibar relations"（類似於 Zanzibar 的關係），且 "A number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language"（許多 Zanzibar 客戶端已在 Zanzibar 的命名空間設定語言之上實作了 RBAC 政策）（§5）。論文沒有說明做法；其中一種方式是讓角色成為一個物件，其 `member` 關係是一個使用者集合。
+
+Chen 的角色以元組表示是什麼樣子？
+
+<Graph
+  width={620}
+  height={210}
+  minWidth={520}
+  title="在 Zanzibar 中作為使用者集合的角色"
+  desc="user:chen 以一支標示為 member 的箭頭指向虛線的使用者集合 role:folderA_viewer#member。該使用者集合有一支標示為 viewer 的箭頭指向 folder:A，另一支標示為 viewer 的箭頭指向 doc:readme。從 Chen 經由角色到 doc:readme 的路徑被標出。"
+  nodes={[
+    { id: "chen", x: 70, y: 105, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "role", x: 290, y: 105, label: "role:folderA_viewer#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 530, y: 45, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 530, y: 165, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "chen", to: "role", label: "member", on: true },
+    { from: "role", to: "folder", label: "viewer" },
+    { from: "role", to: "doc", label: "viewer", on: true },
+  ]}
+  caption="三筆元組：role:folderA_viewer#member@user:chen、folder:A#viewer@role:folderA_viewer#member、doc:readme#viewer@role:folderA_viewer#member。僅供說明，並非出自論文。"
+/>
+
+請注意，角色的形狀與 `group:eng` 相同：都是使用者集合。在 Zanzibar 中，第二條 `viewer` 邊是不必要的，因為 parent 規則已讓資料夾的檢視者能檢視 readme；角色只需要是資料夾的檢視者即可。
+
+ABAC 是論文沒有涵蓋的部分。關於請求的條件，例如一天中的時段或網路，並不是儲存物件之間的關係。數套 Zanzibar 風格的系統加入了這類條件：SpiceDB 有 caveat，即以 CEL 撰寫的條件（[SpiceDB schema 文件](https://authzed.com/docs/spicedb/concepts/schema)），OpenFGA 有[條件](https://openfga.dev/docs/modeling/conditions)，而 Permify 的 schema 有 `attribute` 與 `rule`（[Permify 文件](https://fusionauth.io/permify-docs/getting-started/modeling)）。Cedar 則反其道而行：一種以 `in` 表達階層成員資格的屬性語言（[Cedar 語法](https://docs.cedarpolicy.com/policies/syntax-policy.html)）。
+
+<Callout kind="note" title="實際系統會混用多種模型">
+
+實際部署的系統很少只採用單一模型。將使用者指派給角色的 Google Cloud IAM "is built as a layer on top of Zanzibar’s ACL storage and evaluation system"（是建構在 Zanzibar 的 ACL 儲存與評估系統之上的一層）（§5）。上述 Zanzibar 風格系統所支援的一種組合是：以關係圖處理分享與階層，在其中以具名關係表示角色，再加上少數屬性條件處理情境。這是本頁的總結，並非論文的主張。
+
+</Callout>
+
+<Callout kind="paper" title="論文中的對應">
+
+問題陳述：§1。元組與使用者集合：§2.1。改寫規則：§2.3.1。Multics、UNIX、POSIX ACL、VMS、RBAC 與 IAM 系統：§5 相關研究。指標追蹤及其成本：§3.2.3 與 §3.2.4。
+
+</Callout>
+
+## 資料來源
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- B. W. Lampson, "Protection", 1971; reprinted in ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
+- J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
+- D. R. Kuhn, E. J. Coyne, T. R. Weil, "Adding Attributes to Role-Based Access Control", IEEE Computer 43(6), 2010, [PDF](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)
+- NIST, Role Based Access Control project, [csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
+- NIST SP 800-162, Guide to Attribute Based Access Control, [csrc.nist.gov/pubs/sp/800/162/upd2/final](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)
+- Philip W. L. Fong, "Relationship-Based Access Control: Protection Model and Policy Language", CODASPY '11, [PDF](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)
+- Cedar policy syntax, [docs.cedarpolicy.com/policies/syntax-policy.html](https://docs.cedarpolicy.com/policies/syntax-policy.html)
+- SpiceDB recursion and max depth, [authzed.com/docs/spicedb/modeling/recursion-and-max-depth](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth)
+- SpiceDB schema language (vendor docs), [authzed.com/docs/spicedb/concepts/schema](https://authzed.com/docs/spicedb/concepts/schema)
+- OpenFGA configuration, [openfga.dev/docs/getting-started/setup-openfga/configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)
+- OpenFGA conditions, [openfga.dev/docs/modeling/conditions](https://openfga.dev/docs/modeling/conditions)
+- Permify modeling, [fusionauth.io/permify-docs/getting-started/modeling](https://fusionauth.io/permify-docs/getting-started/modeling)

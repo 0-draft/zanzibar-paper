@@ -1,0 +1,237 @@
+---
+title: "Listando o que um usuário pode ver"
+description: "Por que “todos os documentos que Anne pode ver” é uma pergunta diferente do Check, o que o artigo oferece para ela e as três abordagens usadas na prática."
+section: guide
+part: practice
+order: 8
+checked: "2026-11-13"
+paper: ["1", "2.4.1", "2.4.3", "2.4.5", "3.2.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+O Check responde a uma pergunta: este usuário pode fazer isto com este objeto? Uma página de listagem faz outra: quais objetos este usuário pode ver, filtrados, ordenados e uma página por vez. Esta página explica por que a segunda pergunta é mais difícil, o que o artigo oferece para ela e as três abordagens que os produtos no estilo Zanzibar documentam.
+
+## Uma pergunta diferente do Check
+
+O Check começa em um objeto e percorre as tuplas até encontrar o usuário ou esgotar os caminhos (§2.4.4, §3.2.3). O trabalho é limitado pelo que está ligado àquele objeto. “Todos os documentos que Anne pode ver” não tem objeto de partida. Respondê-la com o Check significa um Check por documento do sistema, a maioria respondida com “não”.
+
+A lista também precisa de dados que o serviço de autorização não guarda. O guia do OpenFGA o diz assim: o serviço "does not store object metadata (names of files, creation dates, time of last update, etc)" ("não armazena metadados de objetos (nomes de arquivos, datas de criação, horário da última atualização etc.)"), de modo que a busca "will require data from your database" ("exigirá dados do seu banco de dados") ([OpenFGA, Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)). A filtragem e a ordenação acontecem no seu banco de dados; a autorização acontece no outro serviço; a resposta é a interseção dos dois.
+
+O artigo conhece bem esse caso de uso. Sua primeira motivação declarada para um sistema unificado inclui "a search index that respects access control and works across applications" (§1) ("um índice de busca que respeita o controle de acesso e funciona entre aplicações"), e seu objetivo de latência destaca "serving search results, which often require tens to hundreds of checks" (§1) ("servir resultados de busca, que frequentemente exigem de dezenas a centenas de verificações").
+
+## O que o artigo oferece e o que não oferece
+
+A API do artigo tem cinco chamadas: Read, Write, Watch, Check e Expand (§2.4). Nenhuma delas retorna “todos os objetos que o usuário U pode ver”.
+
+- **Read** retorna apenas tuplas armazenadas. Com um conjunto de tuplas (tupleset) indexado por usuário, os clientes podem "look up all groups with a given user as a direct member" (§2.4.1) ("consultar todos os grupos que têm um dado usuário como membro direto"). *Direto*: o Read não aplica regras de reescrita, então não segue de `editor` para `viewer` nem de uma pasta para seus documentos.
+- **Expand** segue as regras de reescrita, mas na outra direção: recebe um par ⟨*object#relation*⟩ e retorna seu "effective userset" ("userset efetivo") como uma *árvore de userset* cujas folhas "are user IDs or usersets pointing to other ⟨*object#relation*⟩ pairs" (§2.4.5) ("são IDs de usuário ou usersets que apontam para outros pares ⟨*object#relation*⟩"). O artigo nomeia o propósito: ele permite que os clientes "build efficient search indices for access-controlled content" (§2.4.5) ("construam índices de busca eficientes para conteúdo com controle de acesso"). Construir o índice é tarefa do cliente.
+- **Watch** transmite alterações de tuplas para que "clients maintain secondary indices of relation tuples" (§2.4.3) ("os clientes mantenham índices secundários de tuplas de relação").
+- **Leopard** (§3.2.4) achata *grupos* aninhados: ele responde se um usuário está em um grupo com uma única interseção de conjuntos. É usado dentro do Zanzibar para acelerar o Check em "selected namespaces" ("namespaces selecionados"); o artigo não o descreve como uma API de listagem. Veja [Leopard, o índice de grupos](../leopard/).
+
+O que o Expand retorna para os visualizadores do readme, em comparação com a lista plana que um cliente realmente quer?
+
+<Frames>
+
+<Graph
+  width={480}
+  height={300}
+  title="Expand: uma árvore de userset"
+  desc="O Expand de doc:readme#viewer retorna uma árvore. A raiz é doc:readme#viewer; abaixo dela, um nó de união com três filhos: a folha de userset group:eng#member, uma união para editor e a folha de userset folder:A#viewer. A união de editor tem a folha user:anne, vinda de owner. As duas folhas de userset precisam de novas chamadas de Expand para chegar a user:beto, por meio de group:eng#member, e a user:chen, por meio de folder:A#viewer; esses passos são tracejados."
+  nodes={[
+    { id: "root", x: 240, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u", x: 240, y: 95, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 85, y: 170, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 240, y: 170, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 395, y: 170, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "beto", x: 85, y: 265, label: "user:beto", kind: "subject", mono: true },
+    { id: "anne", x: 240, y: 265, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 395, y: 265, label: "user:chen", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u" },
+    { from: "u", to: "eng" },
+    { from: "u", to: "ed" },
+    { from: "u", to: "fold" },
+    { from: "eng", to: "beto", label: "próximo Expand", dashed: true },
+    { from: "ed", to: "anne", label: "owner" },
+    { from: "fold", to: "chen", label: "próximo Expand", dashed: true },
+  ]}
+  minWidth={420}
+  caption="A árvore preserva a estrutura. As folhas de userset apontam para outros objetos; o cliente as expande por sua vez."
+/>
+
+<Graph
+  width={300}
+  height={300}
+  title="Uma API de lookup: uma lista plana"
+  desc="Uma chamada de lookup pelos sujeitos com view sobre doc:readme retorna três IDs de usuário, user:anne, user:beto e user:chen, como uma lista plana, sem estrutura de árvore."
+  nodes={[
+    { id: "q", x: 150, y: 40, label: "quem pode ver\ndoc:readme?", kind: "server" },
+    { id: "anne", x: 150, y: 130, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 150, y: 195, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "chen", x: 150, y: 260, label: "user:chen", kind: "subject", mono: true, on: true },
+  ]}
+  edges={[{ from: "q", to: "anne", label: "IDs em stream" }]}
+  caption="LookupSubjects (SpiceDB) ou ListUsers (OpenFGA): a mesma resposta, já achatada."
+/>
+
+</Frames>
+
+Observe que a árvore responde a “quem pode ver este documento”, não a “o que Anne pode ver”. Para listar os documentos de Anne apenas com o Expand, um cliente expandiria todos os documentos ou, como sugere a §2.4.5, expandiria antecipadamente e manteria o resultado em seu próprio índice. A documentação do SpiceDB descreve a mesma lacuna: o Expand "responds with a tree structure that can be awkward for applications to consume" ("responde com uma estrutura de árvore que pode ser incômoda para as aplicações consumirem"), então o SpiceDB adicionou `LookupResources` e `LookupSubjects`, que "return a flattened list of results" ("retornam uma lista achatada de resultados") ([SpiceDB, Google Zanzibar](https://authzed.com/docs/spicedb/concepts/zanzibar)).
+
+## Abordagem 1: uma API de lookup, depois filtrar no banco de dados
+
+O serviço de autorização calcula a pergunta inversa diretamente: `LookupResources` do SpiceDB e `ListObjects` do OpenFGA retornam os IDs de todos os objetos de um tipo sobre os quais o usuário tem uma permissão. A aplicação então passa esses IDs para sua consulta ao banco de dados (`WHERE id = ANY(…)`), que filtra, ordena e pagina como de costume. O SpiceDB chama isso de "the simplest approach from a bookkeeping perspective and is a good place to start" ("a abordagem mais simples do ponto de vista de controle e um bom ponto de partida") ([SpiceDB, Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)).
+
+O custo é que o conjunto completo de IDs volta antes de a primeira linha ser exibida, e calculá-lo percorre o grafo de trás para frente a partir do usuário.
+
+- SpiceDB: "it's a heavy request that can cause performance problems when more than 10k results are involved" ("é uma requisição pesada que pode causar problemas de desempenho quando mais de 10 mil resultados estão envolvidos") ([SpiceDB, Querying Data](https://authzed.com/docs/spicedb/concepts/querying-data)); ela "can get slow quickly: with a sufficiently large relation dataset, a sufficiently complex schema, or a sufficiently large set of accessible results" ("pode ficar lenta rapidamente: com um conjunto de relações suficientemente grande, um schema suficientemente complexo ou um conjunto de resultados acessíveis suficientemente grande") ([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)). A requisição transmite seus resultados em stream e oferece suporte a cursores.
+- OpenFGA: `ListObjects` "will return the results found within the time allotted (`listObjectsDeadline`, default: `3s`) up to the maximum number of results configured (`listObjectsMaxResults`, default: `1000`)" ("retornará os resultados encontrados dentro do tempo concedido (`listObjectsDeadline`, padrão: `3s`) até o número máximo de resultados configurado (`listObjectsMaxResults`, padrão: `1000`)") e é posicionado para "access-aware filtering on small object collections" ("filtragem com reconhecimento de acesso em pequenas coleções de objetos") ([OpenFGA, Relationship Queries](https://openfga.dev/docs/interacting/relationship-queries)). Seu desempenho varia "drastically depending on the model complexity, number of tuples, and the relations it needs to evaluate" ("drasticamente conforme a complexidade do modelo, o número de tuplas e as relações que precisa avaliar"), e relações com `and` ou `but not` "are more expensive to evaluate than relations with `or`" ("são mais custosas de avaliar do que relações com `or`") ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)).
+
+Uma lista parcial não basta para ordenar: o OpenFGA observa que "you won't be able to sort using it" ("você não conseguirá ordenar usando-a") até ter a lista inteira em mãos ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)).
+
+## Abordagem 2: consultar o banco de dados, depois verificar em lote
+
+A outra direção: deixe o banco de dados produzir uma página de candidatos (filtrados e ordenados pela consulta do usuário), verifique a página com uma única chamada em lote (`CheckBulkPermissions` do SpiceDB, `/batch-check` do OpenFGA), descarte as linhas negadas e repita até a página ficar cheia. Isso é o Check usado da forma que a §1 descreve para resultados de busca, dezenas a centenas por vez.
+
+O guia do SpiceDB apresenta o laço e suas restrições: "because we don't know how many results are going to be accessible beforehand, we need to iterate until we have a full page of accessible results" ("como não sabemos de antemão quantos resultados serão acessíveis, precisamos iterar até termos uma página cheia de resultados acessíveis"); o desempenho "will depend in part on choosing the size of the page of candidate results" ("dependerá em parte da escolha do tamanho da página de resultados candidatos"); e ela "works better with an API backed by cursor-based pagination than limit-offset pagination, since the database doesn't know the offset associated with the last accessible result" ("funciona melhor com uma API baseada em paginação por cursor do que com paginação por limit-offset, já que o banco de dados não conhece o offset associado ao último resultado acessível") ([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)). Ele também recomenda executar todas as chamadas em lote "at the same revision" ("na mesma revisão"): pegue o ZedToken (o zookie do SpiceDB) da primeira chamada e envie-o com as demais, para que uma página não seja montada a partir de dois snapshots.
+
+Como as duas abordagens ordenam suas chamadas quando Anne abre sua lista de documentos?
+
+<Frames>
+
+<Swimlane
+  lanes={["aplicação", "serviço de authz", "banco da aplicação"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="tempo"
+  title="Pré-filtro: lookup, depois consulta"
+  desc="Anne pede seus documentos. A aplicação chama uma API de lookup pelos documentos que Anne pode ver; o serviço de autorização percorre o grafo a partir de Anne e retorna todos os IDs correspondentes. A aplicação então consulta seu banco de dados usando esses IDs como filtro; o banco de dados filtra, ordena e retorna uma página."
+  events={[
+    { lane: 0, t: 0, label: "Anne: listar\nmeus docs", kind: "note" },
+    { lane: 0, t: 1, label: "lookup de docs que\nanne pode ver", kind: "read" },
+    { lane: 1, t: 1, label: "percorre o grafo\na partir de anne", kind: "read" },
+    { lane: 1, t: 2, label: "todos os IDs:\nreadme, …", kind: "good", mono: true },
+    { lane: 0, t: 3, label: "consulta com\nid IN (IDs)", kind: "read", mono: true },
+    { lane: 2, t: 3, label: "filtra, ordena,\numa página", kind: "read" },
+    { lane: 0, t: 4, label: "exibe a página", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [1, 1] },
+    { from: [1, 2], to: [0, 3], label: "todos os IDs" },
+    { from: [0, 3], to: [2, 3] },
+    { from: [2, 3], to: [0, 4] },
+  ]}
+  caption="Uma única chamada de autorização, mas sua resposta é o conjunto inteiro antes da primeira linha."
+/>
+
+<Swimlane
+  lanes={["aplicação", "serviço de authz", "banco da aplicação"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="tempo"
+  title="Pós-filtro: consulta, depois verificação em lote"
+  desc="Anne pede seus documentos. A aplicação busca os próximos vinte candidatos em seu banco de dados, filtrados e ordenados, com um cursor. Ela envia uma única verificação em lote para esses vinte em um único snapshot; o serviço de autorização retorna quais são permitidos, por exemplo sete. Se a página não estiver cheia, a aplicação busca os próximos candidatos e repete; depois exibe a página."
+  events={[
+    { lane: 0, t: 0, label: "Anne: listar\nmeus docs", kind: "note" },
+    { lane: 0, t: 1, label: "próximos 20\ncandidatos", kind: "read" },
+    { lane: 2, t: 1, label: "filtra, ordena,\ncursor", kind: "read" },
+    { lane: 0, t: 2, label: "verificação em\nlote de 20 IDs", kind: "read" },
+    { lane: 1, t: 2, label: "20 verificações,\num snapshot", kind: "read" },
+    { lane: 1, t: 3, label: "7 permitidos", kind: "good" },
+    { lane: 0, t: 4, label: "página não cheia:\nrepete", kind: "note" },
+    { lane: 0, t: 5, label: "exibe a página", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [2, 1] },
+    { from: [2, 1], to: [0, 2] },
+    { from: [0, 2], to: [1, 2] },
+    { from: [1, 3], to: [0, 4] },
+  ]}
+  caption="Respostas pequenas, mas o número de rodadas depende de quantos candidatos Anne pode ver."
+/>
+
+</Frames>
+
+Observe para onde o custo se desloca. A pré-filtragem paga uma vez, em proporção a tudo o que Anne pode ver. A pós-filtragem paga por rodada, em proporção a quantos candidatos ela não pode ver. O guia do OpenFGA transforma isso em uma regra: buscar e depois verificar é adequado quando a consulta ao banco de dados retorna poucas linhas ou quando o usuário pode ver uma grande parcela delas; é inadequado quando o usuário vê muitos objetos que ainda assim são uma pequena parcela do total, o seu caso “Google Drive”, porque "you will be retrieving and checking against a lot of items and discarding most of them" ("você estará recuperando e verificando muitos itens e descartando a maioria deles") ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)).
+
+## Abordagem 3: um índice desnormalizado alimentado pelo Watch
+
+A terceira abordagem é a que a §2.4.3 e a §2.4.5 descrevem: mantenha seu próprio índice de quem pode ver o quê, ao lado dos dados que ele protege, e mantenha-o atualizado a partir do stream de alterações. Uma consulta de listagem passa então a ser um join no seu próprio banco de dados.
+
+Onde fica cada peça, e o que mantém o índice atualizado?
+
+<Graph
+  width={640}
+  height={260}
+  title="Um índice alimentado pelo Watch"
+  desc="A aplicação escreve tuplas no serviço de autorização. Um indexador consome o stream do Watch, achata grupos e a herança de pastas em pares de usuário e documento, escreve-os em uma tabela doc_viewers no próprio banco de dados da aplicação e salva o último token do stream para poder retomar. O endpoint de listagem faz o join de doc_viewers com a tabela de documentos. Ele pode verificar novamente a página final no serviço de autorização, mostrado tracejado, para descartar linhas cuja revogação ainda não chegou ao índice."
+  nodes={[
+    { id: "app", x: 80, y: 50, label: "aplicação\nescreve tuplas", kind: "client" },
+    { id: "authz", x: 300, y: 50, label: "serviço de authz", kind: "server" },
+    { id: "idx", x: 530, y: 50, label: "indexador:\nachata grupos,\npastas", kind: "server", on: true },
+    { id: "tok", x: 530, y: 200, label: "último token", kind: "store", mono: true },
+    { id: "dv", x: 300, y: 200, label: "doc_viewers\n(user, doc)", kind: "store", mono: true, on: true },
+    { id: "list", x: 80, y: 200, label: "endpoint de listagem", kind: "client" },
+  ]}
+  edges={[
+    { from: "app", to: "authz", label: "Write" },
+    { from: "authz", to: "idx", label: "Watch", on: true },
+    { from: "idx", to: "tok", label: "salva" },
+    { from: "idx", to: "dv", label: "upsert / delete", on: true },
+    { from: "list", to: "dv", label: "JOIN docs" },
+    { from: "list", to: "authz", label: "reverifica a página", dashed: true },
+  ]}
+  minWidth={520}
+  caption="O índice é uma cópia. Ele fica atrás do stream, e a nova verificação cobre revogações ainda em trânsito."
+/>
+
+Observe a caixa do indexador: ela faz o trabalho que o Leopard faz dentro do Zanzibar. Uma tupla pode alterar muitas linhas. Adicionar `group:eng#member@user:beto` adiciona uma linha para cada documento que `group:eng` pode ver; adicionar um visualizador a `folder:A` adiciona uma linha para cada documento da pasta. O artigo relata o mesmo fan-out para o Leopard: "a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events" (§3.2.4) ("uma única adição ou exclusão de tupla do Zanzibar pode gerar potencialmente dezenas de milhares de eventos distintos de tuplas do Leopard").
+
+Os produtos documentam duas formas de construir isso:
+
+- **Construí-lo você mesmo a partir do stream de alterações.** A opção 2 do OpenFGA consome `GET /changes`, achata as alterações para a versão do modelo em uso (seu exemplo: "`user:anne, writer, doc:planning` becomes two tuples" ("`user:anne, writer, doc:planning` vira duas tuplas")) e então chama `/check` sobre os resultados finais "to filter out any resource with permissions revoked but whose authorization data has not made it into your index yet" ("para filtrar qualquer recurso com permissões revogadas cujos dados de autorização ainda não chegaram ao seu índice") ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)). Com o SpiceDB, o stream é o `Watch`; [Mantendo as tuplas em sincronia com seus dados](../sync/) explica por que esse stream não é uma fila durável.
+- **Deixar o fornecedor calculá-lo.** O AuthZed Materialize "takes inspiration from the Leopard index" ("inspira-se no índice Leopard"), pré-calcula as permissões configuradas, e seu recurso Event Streams permite "keep your own copy of it — either colocated alongside the data it protects in your application database, or in a secondary index like a search engine" ("manter sua própria cópia dele — seja junto aos dados que ele protege no banco de dados da sua aplicação, seja em um índice secundário como um mecanismo de busca") ([AuthZed, What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview)). É um recurso comercial: o Event Streams está "currently in early access for AuthZed Dedicated users" ("atualmente em acesso antecipado para usuários do AuthZed Dedicated") ([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)), e suas limitações documentadas incluem que "your application must be able to tolerate some lag" ("sua aplicação deve ser capaz de tolerar algum atraso") ([Materialize limitations](https://authzed.com/docs/materialize/getting-started/limitations)).
+
+## As três lado a lado
+
+Os limites de escala são citados da documentação de cada produto. Latência e esforço são relativos, não medidos.
+
+| | API de lookup, depois consulta | Consulta, depois verificação em lote | Índice alimentado pelo Watch |
+| --- | --- | --- | --- |
+| Latência | Cresce com o número de objetos acessíveis e com a profundidade do schema; conjunto inteiro antes da primeira linha | Cresce com o número de rodadas, ou seja, com a parcela de candidatos negados | Um join no banco de dados; independe da profundidade do grafo |
+| Atualidade | As mesmas opções de consistência do Check (ZedToken no SpiceDB; `MINIMIZE_LATENCY` / `HIGHER_CONSISTENCY` no OpenFGA) | O mesmo que o Check; use um único token para todas as rodadas de uma página | Fica atrás do stream; verifique a página novamente para descartar linhas revogadas |
+| Limites de escala na documentação | SpiceDB: "performance problems when more than 10k results are involved" ("problemas de desempenho quando mais de 10 mil resultados estão envolvidos"). OpenFGA: padrões de `3s` e `1000` resultados, "small object collections" ("pequenas coleções de objetos") | SpiceDB: depende de "the size of the page of candidate results" ("o tamanho da página de resultados candidatos"). OpenFGA: ruim quando o usuário vê uma pequena parcela de muitos objetos | SpiceDB: "the greatest scalability of the three options" ("a maior escalabilidade das três opções") (via Materialize) |
+| Esforço | Uma chamada e uma cláusula `IN` | Um laço, paginação por cursor, a escolha de um tamanho de página | Um indexador, lógica de achatamento, uma posição de stream armazenada, reconstruções; ou um serviço comercial |
+
+<Callout kind="note" title="Um número medido, de 2021">
+
+O único valor de latência encontrado para uma API de lookup é uma nota de rodapé em uma proposta de design do SpiceDB de 2021: "approximately ~100ms for a LookupResources call on a SpiceDB with 100-250K relationships, and a graph nesting of 3-5 deep" ("aproximadamente ~100 ms para uma chamada LookupResources em um SpiceDB com 100-250 mil relacionamentos e um aninhamento de grafo de 3 a 5 níveis") ([spicedb#207](https://github.com/authzed/spicedb/issues/207)). É um resultado de teste de uma versão antiga, não um benchmark.
+
+</Callout>
+
+O guia do OpenFGA acrescenta duas formas de tornar a pós-filtragem viável quando um usuário vê poucos objetos entre muitos: filtrar por tenant na consulta ao banco de dados ("Duplicating logic from the authorization model is not ideal, but it can be a reasonable trade-off" ("Duplicar lógica do modelo de autorização não é o ideal, mas pode ser uma troca razoável")), ou listar primeiro um recurso mais grosseiro, por exemplo as pastas que um usuário pode ver, e filtrar os documentos por pasta ([Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)). No exemplo corrente, o acesso de Chen vem de `folder:A`, então “documentos em pastas que Chen pode ver” o cobre com uma lista de uma única pasta.
+
+Uma lista vazia também exige uma decisão. O guia do SpiceDB sugere que, em sistemas de granularidade fina, "often makes sense to treat 'there is no data' and 'there is nothing you're authorized to see' as the same, by returning a successful response with an empty result set" ("frequentemente faz sentido tratar 'não há dados' e 'não há nada que você esteja autorizado a ver' como a mesma coisa, retornando uma resposta bem-sucedida com um conjunto de resultados vazio") em vez de um 403 ([Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)).
+
+<Callout kind="paper" title="No artigo">
+
+A busca como motivação: §1. O Read e sua consulta de associação direta: §2.4.1. O Watch e os índices secundários: §2.4.3. O Expand e a árvore de userset: §2.4.5. Leopard: §3.2.4. Termos: [Expand](../glossary/#expand), [árvore de userset](../glossary/#userset-tree), [Watch](../glossary/#watch), [Leopard](../glossary/#leopard).
+
+</Callout>
+
+## Fontes
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §1, §2.4.1, §2.4.3, §2.4.5, §3.2.4.
+- AuthZed (fornecedor), [Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint), documentação do SpiceDB.
+- AuthZed (fornecedor), [Querying Data](https://authzed.com/docs/spicedb/concepts/querying-data), documentação do SpiceDB.
+- AuthZed (fornecedor), [Google Zanzibar](https://authzed.com/docs/spicedb/concepts/zanzibar), documentação do SpiceDB, seção "Reverse Indices".
+- AuthZed (fornecedor), [What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview) e [Limitations](https://authzed.com/docs/materialize/getting-started/limitations).
+- AuthZed, [Proposal: Lookup Watch API and Tiger Cache for fast ACL-aware filtering](https://github.com/authzed/spicedb/issues/207), issue #207 do spicedb, aberta em 2021-10-22.
+- OpenFGA, [Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions).
+- OpenFGA, [Relationship Queries: Check, Read, Expand, ListObjects and ListUsers](https://openfga.dev/docs/interacting/relationship-queries).
+- OpenFGA, [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency).

@@ -1,0 +1,386 @@
+---
+title: "Relationstupel und Usersets"
+description: "Wie Zanzibar jede Berechtigung als kleinen Fakt speichert, wie eine Namespace-Konfiguration aus diesen Fakten effektive ACLs macht und wie Check das Ergebnis als Graph durchläuft."
+section: guide
+part: mechanisms
+order: 3
+checked: "2026-11-13"
+paper: ["2.1", "2.3", "2.3.1", "2.4.1", "2.4.5", "3.2.3"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar speichert Berechtigungen als *Relationstupel*: ein Fakt pro Zeile, gelesen als „dieser Benutzer hat diese Relation zu diesem Objekt“. Alles Weitere auf dieser Seite, Umschreibregeln, Check und Expand, wird aus diesen Zeilen berechnet.
+
+Das durchgehende Beispiel: Anne, Beto und Chen (`user:anne`, `user:beto`, `user:chen`); das Dokument `doc:readme` in `folder:A`; die Gruppe `group:eng`. Anne ist Eigentümerin des Readme, Beto ist in eng, die Mitglieder von eng sehen das Readme, und Chen sieht Ordner A.
+
+## Die Grammatik
+
+Das Paper (§2.1) gibt die Textnotation in vier Regeln an:
+
+```text
+⟨tuple⟩   ::= ⟨object⟩ ‘#’ ⟨relation⟩ ‘@’ ⟨user⟩
+⟨object⟩  ::= ⟨namespace⟩ ‘:’ ⟨object_id⟩
+⟨user⟩    ::= ⟨user_id⟩ | ⟨userset⟩
+⟨userset⟩ ::= ⟨object⟩ ‘#’ ⟨relation⟩
+```
+
+Ein Tupel hat drei Teile. Das *Objekt* ist ein Namespace plus eine ID, etwa `doc:readme`. Die *Relation* ist ein Name, den der Namespace definiert, etwa `owner` oder `viewer`. Der *Benutzer* ist entweder eine einzelne Benutzer-ID oder ein *Userset*. Im Paper ist eine Benutzer-ID eine ganze Zahl; diese Website schreibt `user:anne`, damit das Beispiel lesbar bleibt.
+
+Was sagt ein einzelnes Tupel aus?
+
+<Graph
+  width={560}
+  height={150}
+  title="Ein Relationstupel"
+  desc="Eine Pille mit der Beschriftung user:anne und ein Pfeil mit der Beschriftung owner, der auf einen Kasten mit der Beschriftung doc:readme zeigt. Das ist das Tupel doc:readme#owner@user:anne."
+  nodes={[
+    { id: "anne", x: 110, y: 75, label: "user:anne", kind: "subject", mono: true },
+    { id: "doc", x: 450, y: 75, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[{ from: "anne", to: "doc", label: "owner" }]}
+  caption="doc:readme#owner@user:anne, gezeichnet als Kante vom Benutzer zum Objekt."
+/>
+
+Es sagt genau eines: Anne hat die Relation `owner` zu `doc:readme`. Das Paper nennt die Primärschlüssel, die ein Tupel identifizieren: Namespace, Objekt-ID, Relation und Benutzer.
+
+## Usersets: ein Tupel, das auf eine Gruppe zeigt
+
+Die vierte Grammatikregel ist die interessante. Ein Userset ist selbst ein Objekt plus eine Relation: `group:eng#member` bedeutet „jeder Benutzer, der die Relation `member` zu `group:eng` hat“. Ist der Benutzer eines Tupels ein Userset, gewährt eine einzige Zeile einer ganzen Menge von Benutzern etwas, und diese Menge wird durch andere Zeilen definiert.
+
+Wie gibt ein einziges Tupel jedem Mitglied von eng Zugriff auf das Readme?
+
+<Graph
+  width={600}
+  height={170}
+  minWidth={480}
+  title="Ein Tupel, dessen Benutzer ein Userset ist"
+  desc="user:beto hat einen Pfeil mit der Beschriftung member zu einem gestrichelten Kasten group:eng#member. Dieser gestrichelte Kasten hat einen Pfeil mit der Beschriftung viewer zu doc:readme. Beto erreicht das Readme nur über die Gruppe."
+  nodes={[
+    { id: "beto", x: 80, y: 85, label: "user:beto", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 85, label: "group:eng#member", kind: "group", mono: true },
+    { id: "doc", x: 515, y: 85, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+  ]}
+  caption="Zwei Tupel: group:eng#member@user:beto und doc:readme#viewer@group:eng#member. Der gestrichelte Kasten ist ein Userset, kein einzelner Benutzer."
+/>
+
+Keine Zeile nennt Beto und das Readme zusammen. Beto ist Betrachter, weil er in der Menge ist, auf die das zweite Tupel zeigt. Fügt man eng ein Mitglied hinzu, kann dieses Mitglied das Readme sehen, ohne dass sich die ACL des Readme ändert.
+
+Derselbe Kniff lässt sich verschachteln. Ein Mitglied einer Gruppe kann ein weiteres Userset sein, zum Beispiel `group:eng#member@group:sre#member` (ein hypothetisches Unterteam, nicht Teil des durchgehenden Beispiels), und die Mitgliedschaft reicht dann über so viele Ebenen, wie die Tupel beschreiben. Das Paper fasst es in einem Satz: "a ⟨*userset*⟩ allows ACLs to refer to groups and thus supports representing nested group membership" (§2.1) (ein ⟨*userset*⟩ erlaubt es ACLs, auf Gruppen zu verweisen, und unterstützt damit die Darstellung verschachtelter Gruppenmitgliedschaften). Es erklärt auch den Gewinn: Die Modellierung mit Tupeln statt mit ACLs pro Objekt "allows us to unify the concepts of ACLs and groups" (§2.1) (erlaubt es uns, die Konzepte von ACLs und Gruppen zu vereinheitlichen). Eine Gruppe ist nur ein Objekt, dessen Relation `member` eine ACL ist.
+
+## Tabelle 1 als ein Graph
+
+Tabelle 1 des Papers listet vier Beispieltupel. Mit den Benutzern 10 und 11 umbenannt in Anne und Beto und einem zusätzlichen Tupel für Chen lauten sie:
+
+| Tupel | Gelesen als |
+| --- | --- |
+| `doc:readme#owner@user:anne` | Anne ist eine Eigentümerin des Readme |
+| `group:eng#member@user:beto` | Beto ist ein Mitglied von eng |
+| `doc:readme#viewer@group:eng#member` | Mitglieder von eng sind Betrachter des Readme |
+| `doc:readme#parent@folder:A#...` | Das Readme liegt in Ordner A |
+| `folder:A#viewer@user:chen` | Chen ist ein Betrachter von Ordner A (nicht in Tabelle 1) |
+
+Das `#...` in der vierten Zeile ist die Notation des Papers für "a relation that does not affect the semantics of the tuple" (Bildunterschrift von Tabelle 1) (eine Relation, die die Semantik des Tupels nicht beeinflusst): Das Tupel zeigt auf den Ordner selbst, nicht auf eine Menge seiner Benutzer.
+
+Wie sehen alle fünf Zeilen zusammen aus?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Tabelle 1 und Chens Tupel als ein Graph"
+  desc="Drei Benutzer links. user:anne hat einen Pfeil mit der Beschriftung owner direkt zu doc:readme rechts. user:beto hat einen Pfeil mit der Beschriftung member zum gestrichelten Userset group:eng#member, das einen Pfeil mit der Beschriftung viewer zu doc:readme hat. user:chen hat einen Pfeil mit der Beschriftung viewer zu folder:A, das einen Pfeil mit der Beschriftung parent zu doc:readme hat."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="Jedes gespeicherte Tupel ist eine Kante, gezeichnet vom Benutzer (oder Userset) zum Objekt."
+/>
+
+Die Kante `parent` sagt nichts über Zugriff aus. Wie das Paper schreibt, definieren manche Relationen "only define abstract relations between objects. These abstract relations may indirectly affect access control given userset rewrite rules specified in namespace configs" (§2.1) (lediglich abstrakte Relationen zwischen Objekten. Diese abstrakten Relationen können die Zugriffskontrolle indirekt beeinflussen, sofern in Namespace-Konfigurationen Userset-Umschreibregeln spezifiziert sind). Ob Chen das Readme sehen kann, hängt von einer solchen Regel ab, und darum geht es im nächsten Abschnitt.
+
+## Namespace-Konfiguration
+
+Bevor ein Client Tupel speichert, konfiguriert er einen *Namespace* wie `doc` oder `folder` (§2.3). Die Konfiguration listet die Relationen des Namespace auf, jede mit einem Namen und einer *Relationskonfiguration*, dazu Speicherparameter: Sharding-Einstellungen und eine Kodierung für Objekt-IDs.
+
+Tupel allein definieren die effektive ACL nicht. Viele Clients wollen, dass jeder Bearbeiter auch Betrachter ist. Für jeden Bearbeiter jedes Objekts ein zusätzliches Tupel `viewer` zu speichern, wäre nach den Worten des Papers "wasteful and make it hard to make modifications across all objects" (§2.3.1) (verschwenderisch und würde Änderungen über alle Objekte hinweg erschweren). Stattdessen kann eine Relationskonfiguration eine *Userset-Umschreibregel* tragen: eine Funktion, die eine Objekt-ID nimmt und einen Userset-Ausdrucksbaum zurückgibt.
+
+Dies ist Abbildung 1 des Papers, wörtlich:
+
+```text
+name: "doc"
+
+relation { name: "owner" }
+
+relation {
+ name: "editor"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "owner" } }
+} } }
+
+relation {
+ name: "viewer"
+ userset_rewrite {
+  union {
+   child { _this {} }
+   child { computed_userset { relation: "editor" } }
+   child { tuple_to_userset {
+     tupleset { relation: "parent" }
+     computed_userset {
+       object: $TUPLE_USERSET_OBJECT  # parent folder
+       relation: "viewer"
+   } } }
+} } }
+```
+
+> Figure 1: Simple namespace configuration with concentric relations on documents. All owners are editors, and all editors are viewers. Further, viewers of the parent folder are also viewers of the document.
+>
+> (Abbildung 1: Einfache Namespace-Konfiguration mit konzentrischen Relationen auf Dokumenten. Alle Eigentümer sind Bearbeiter, und alle Bearbeiter sind Betrachter. Darüber hinaus sind Betrachter des übergeordneten Ordners auch Betrachter des Dokuments.)
+
+Die Blätter eines Umschreibbaums gibt es in drei Arten (§2.3.1):
+
+| Blatt | Was es zurückgibt | In Abbildung 1 |
+| --- | --- | --- |
+| `_this` | Die Benutzer in gespeicherten Tupeln für dieses Objekt und diese Relation, einschließlich der Usersets, auf die diese Tupel zeigen. Der Standard, wenn eine Relation keine Regel hat. | Die auf `doc:readme` gespeicherten Tupel `viewer` |
+| `computed_userset` | Das Userset einer anderen Relation auf demselben Objekt. | `editor` auf demselben Dokument; für `editor` ist es `owner` |
+| `tuple_to_userset` | Liest eine *Tupelmenge* vom Objekt und berechnet dann aus jedem gefundenen Tupel ein Userset. | Die Tupel `parent` des Dokuments lesen, dann `viewer` auf jedem übergeordneten Ordner nehmen |
+
+Blätter werden mit Vereinigung, Schnittmenge und Ausschluss kombiniert (§2.3.1). Abbildung 1 verwendet nur die Vereinigung. Eine Schnittmenge würde verlangen, dass ein Benutzer in jedem Kind enthalten ist, zum Beispiel „Bearbeiter, die auch in eng sind“; ein Ausschluss würde eine Menge entfernen, zum Beispiel „Betrachter außer einer Sperrliste“. Diese beiden Beispiele dienen der Veranschaulichung und stammen nicht aus dem Paper.
+
+Welchen Baum baut die Regel `viewer` für ein Dokument?
+
+<Graph
+  width={620}
+  height={380}
+  minWidth={540}
+  title="Ausdrucksbaum für doc:readme#viewer"
+  desc="Wurzel doc:readme#viewer, darunter ein gestrichelter union-Knoten. Die union hat drei Kinder: _this, das gespeicherte viewer-Tupel liest; computed_userset mit relation editor; und tuple_to_userset mit tupleset parent und computed_userset viewer, das die Betrachter des übergeordneten Ordners erreicht. Das Kind editor expandiert über die eigene Regel von editor in eine weitere union aus _this und computed_userset mit relation owner."
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "this1", x: 90, y: 180, label: "_this", kind: "group", mono: true },
+    { id: "cue", x: 310, y: 180, label: "computed_userset\nrelation: editor", kind: "group", mono: true },
+    { id: "ttu", x: 520, y: 180, label: "tuple_to_userset\ntupleset: parent\nthen: viewer", kind: "group", mono: true },
+    { id: "n1", x: 90, y: 250, label: "gespeicherte viewer-\nTupel am Dokument", kind: "note" },
+    { id: "n3", x: 520, y: 270, label: "Betrachter jedes\nübergeordneten Ordners", kind: "note" },
+    { id: "u2", x: 310, y: 262, label: "union", kind: "group", mono: true },
+    { id: "this2", x: 200, y: 345, label: "_this", kind: "group", mono: true },
+    { id: "cuo", x: 420, y: 345, label: "computed_userset\nrelation: owner", kind: "group", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "this1" },
+    { from: "u1", to: "cue" },
+    { from: "u1", to: "ttu" },
+    { from: "cue", to: "u2", label: "Regel von editor", dashed: true, labelOffset: 48 },
+    { from: "u2", to: "this2" },
+    { from: "u2", to: "cuo" },
+  ]}
+  caption="Die Regel viewer aus Abbildung 1, mit dem Zweig editor durch die eigene Regel von editor expandiert. Gestrichelte Kästen werden berechnet, nicht gespeichert."
+/>
+
+`owner` liegt zwei Ebenen tiefer: Eigentümer sind Bearbeiter, Bearbeiter sind Betrachter. Das meint die Bildunterschrift von Abbildung 1 mit "concentric relations" (konzentrischen Relationen). Der rechte Zweig ist der einzige, der das Dokument verlässt: Er folgt einer gespeicherten Kante `parent` zu einem anderen Objekt.
+
+## Check als Graphsuche
+
+Eine Check-Anfrage nennt ein Userset ⟨*object#relation*⟩ und einen Benutzer und fragt, ob der Benutzer darin enthalten ist (§2.4.4). Ohne Umschreibregeln schreibt das Paper die Auswertung als rekursive Formel (§3.2.3): Der Benutzer ist in ⟨*object#relation*⟩, wenn ein Tupel ⟨*object#relation@U*⟩ existiert oder wenn ein Tupel ⟨*object#relation@U′*⟩ existiert, wobei U′ ein Userset ist und der Benutzer in U′ enthalten ist. Das Paper nennt diese Rekursion "pointer chasing" (Zeigerverfolgung). Umschreibregeln "are also translated to boolean expressions as part of check evaluation" (§3.2.3) (werden im Rahmen der Check-Auswertung ebenfalls in boolesche Ausdrücke übersetzt), sodass der Ausdrucksbaum oben zu einem ODER aus drei Zweigen wird.
+
+Die Frage für die nächsten vier Abbildungen: Kann Chen `doc:readme` sehen? Jedes Bild verwendet denselben Graphen und hebt die Kanten hervor, die der aktuelle Zweig liest. Die Namespace-Konfiguration für `folder` steht nicht im Paper; diese Bilder nehmen an, dass `folder#viewer` keine Umschreibregel hat, also nur `_this` ist.
+
+<Callout kind="note" title="Einzelbilder, keine Zeitleiste">
+
+Die Bilder gehen Zweig für Zweig vor, damit jedes für sich gelesen werden kann. Zanzibar wartet nicht auf diese Weise: Es wertet "all leaf nodes of the boolean expression tree concurrently" (alle Blattknoten des booleschen Ausdrucksbaums gleichzeitig) aus und bricht den Rest eines Teilbaums ab, sobald ein Knoten ihn entscheidet (§3.2.3).
+
+</Callout>
+
+### Schritt 1: `_this`
+
+Enthält ein auf dem Readme gespeichertes Tupel `viewer` Chen?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check-Schritt 1: der Zweig _this"
+  desc="Derselbe Graph wie bei Tabelle 1. Hervorgehoben: die viewer-Kante von group:eng#member zu doc:readme, der Gruppenknoten und die member-Kante von user:beto in die Gruppe. user:chen liegt nicht auf dem hervorgehobenen Pfad. Ergebnis dieses Zweigs: nein."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true, on: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member", on: true },
+    { from: "eng", to: "doc", label: "viewer", on: true },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="_this findet ein viewer-Tupel, das auf group:eng#member zeigt. Dessen Verfolgung findet nur Beto. Ergebnis des Zweigs: nein."
+/>
+
+Der einzige gespeicherte Betrachter ist ein Userset, also steigt Check rekursiv in `group:eng#member` ab. Dessen einziges Mitglied ist Beto. Dieser Zweig sagt nein.
+
+### Schritt 2: `computed_userset` editor, dann owner
+
+Ist Chen Bearbeiter oder Eigentümer?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check-Schritt 2: der Zweig editor und owner"
+  desc="Derselbe Graph. Hervorgehoben: die owner-Kante von user:anne zu doc:readme. Es gibt keine editor-Tupel. user:chen liegt nicht auf dem hervorgehobenen Pfad. Ergebnis dieses Zweigs: nein."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner", on: true },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent" },
+  ]}
+  caption="editor = _this ∪ owner. Es gibt keine editor-Tupel; die einzige Eigentümerin ist Anne. Ergebnis des Zweigs: nein."
+/>
+
+Die Umschreibung geht von `viewer` zu `editor` zu `owner` auf demselben Objekt. Für die ersten beiden Schritte ist kein gespeichertes Tupel nötig: Sie stammen aus der Konfiguration. Die einzige Eigentümerin ist Anne, also sagt auch dieser Zweig nein.
+
+### Schritt 3: `tuple_to_userset`, den übergeordneten Ordner finden
+
+In welchem Ordner liegt das Readme?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check-Schritt 3: die Tupelmenge parent lesen"
+  desc="Derselbe Graph. Hervorgehoben: die parent-Kante von folder:A zu doc:readme und der Knoten folder:A. Dieser Schritt findet nur den Ordner; er entscheidet noch nichts."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer" },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="Die Tupelmenge doc:readme#parent enthält ein Tupel, das auf folder:A zeigt. Die Regel fragt nun nach folder:A#viewer."
+/>
+
+Das Tupel `parent` ist die „abstrakte Relation“ aus Tabelle 1. Für sich gewährt es nichts; die Umschreibregel macht daraus eine neue Frage zu einem anderen Objekt.
+
+### Schritt 4: `folder:A#viewer`
+
+Ist Chen ein Betrachter von Ordner A?
+
+<Graph
+  width={620}
+  height={270}
+  minWidth={520}
+  title="Check-Schritt 4: der Pfad, der mit Ja antwortet"
+  desc="Derselbe Graph. Hervorgehoben: user:chen, die viewer-Kante von user:chen zu folder:A, folder:A, die parent-Kante zu doc:readme und doc:readme. Das ist ein vollständiger Pfad von Chen zum Readme. Ergebnis: ja."
+  nodes={[
+    { id: "anne", x: 80, y: 40, label: "user:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 135, label: "user:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 230, label: "user:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 135, label: "group:eng#member", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 230, label: "folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 535, y: 135, label: "doc:readme", kind: "object", mono: true, on: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owner" },
+    { from: "beto", to: "eng", label: "member" },
+    { from: "eng", to: "doc", label: "viewer" },
+    { from: "chen", to: "folder", label: "viewer", on: true },
+    { from: "folder", to: "doc", label: "parent", on: true },
+  ]}
+  caption="folder:A#viewer@user:chen ist gespeichert. Die union hat ein wahres Kind, also antwortet Check mit Ja."
+/>
+
+Der Pfad user:chen → folder:A → doc:readme beantwortet die Frage. Die Kanten zeigen in jedem Bild in dieselbe Richtung, die Suche lief aber vom Readme nach außen: Check beginnt bei ⟨*object#relation*⟩ und sucht den Benutzer.
+
+Eine solche Zeigerverfolgung "works well for most types of ACLs and groups, but can be expensive when indirect ACLs or groups are deep or wide" (§3.2.3) (funktioniert gut für die meisten Arten von ACLs und Gruppen, kann aber teuer werden, wenn indirekte ACLs oder Gruppen tief oder breit sind). Für solche Namespaces verwendet Zanzibar den Leopard-Index, beschrieben auf [der Leopard-Seite](../leopard/).
+
+## Read und Expand
+
+Zwei API-Aufrufe betrachten dieselben Daten aus unterschiedlicher Höhe.
+
+**Read** (§2.4.1) gibt nur gespeicherte Tupel zurück. Eine Anfrage nennt eine oder mehrere *Tupelmengen*: einen einzelnen Tupelschlüssel oder alle Tupel für eine Objekt-ID oder ein Userset in einem Namespace, optional auf eine Relation eingeschränkt. Das Paper sagt ausdrücklich: "Read results only depend on contents of relation tuples and do not reflect userset rewrite rules" (§2.4.1) (Read-Ergebnisse hängen nur vom Inhalt der Relationstupel ab und spiegeln keine Userset-Umschreibregeln wider). Ein Read von `doc:readme` mit der Relation `viewer` gibt im durchgehenden Beispiel eine Zeile zurück:
+
+```text
+doc:readme#viewer@group:eng#member
+```
+
+Anne fehlt, obwohl jeder Eigentümer Betrachter ist, und Chen fehlt, obwohl er das Readme sehen kann.
+
+**Expand** (§2.4.5) "follows indirect references expressed through userset rewrite rules" (folgt indirekten Verweisen, die durch Userset-Umschreibregeln ausgedrückt werden). Es gibt einen *Userset-Baum* zurück: Blätter sind Benutzer-IDs oder Usersets, die auf andere Paare ⟨*object#relation*⟩ zeigen, und innere Knoten sind Vereinigung, Schnittmenge oder Ausschluss.
+
+Was gibt Expand für `doc:readme#viewer` zurück?
+
+<Graph
+  width={620}
+  height={300}
+  minWidth={540}
+  title="Expand-Ergebnis für doc:readme#viewer"
+  desc="Ein Baum. Wurzel doc:readme#viewer, dann eine union mit drei Kindern. Das erste Kind ist das Userset-Blatt group:eng#member. Das zweite ist eine union für editor mit einem Blatt, user:anne, das aus owner stammt. Das dritte ist das Userset-Blatt folder:A#viewer. Userset-Blätter sind gestrichelt; user:anne ist eine Pille."
+  nodes={[
+    { id: "root", x: 310, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u1", x: 310, y: 98, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 100, y: 180, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 310, y: 180, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 520, y: 180, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "anne", x: 310, y: 262, label: "user:anne", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u1" },
+    { from: "u1", to: "eng", label: "_this" },
+    { from: "u1", to: "ed", label: "editor" },
+    { from: "u1", to: "fold", label: "parent → viewer" },
+    { from: "ed", to: "anne", label: "owner" },
+  ]}
+  caption="Expand wendet die Umschreibregeln an; Read hätte nur die Zeile group:eng#member zurückgegeben."
+/>
+
+Beachten Sie die beiden gestrichelten Blätter. Nach §2.4.5 kann ein Blatt ein Userset sein, das auf anderes verweist; ein Client, der jede einzelne Person (Beto, Chen) will, expandiert diese Blätter seinerseits. Das Paper sagt nicht, wie tief ein einzelner Expand-Aufruf rekursiv absteigt; diese Abbildung endet bei den Usersets, die die eigenen Regeln des Dokuments erreichen. Das Paper nennt den Anwendungsfall: Expand erlaubt es Clients, "reason about the complete set of users and groups that have access to their objects, which allows them to build efficient search indices for access-controlled content" (§2.4.5) (über die vollständige Menge der Benutzer und Gruppen nachzudenken, die Zugriff auf ihre Objekte haben, was es ihnen ermöglicht, effiziente Suchindizes für zugriffskontrollierte Inhalte aufzubauen).
+
+<Callout kind="paper" title="Im Paper">
+
+Tupel und Grammatik: §2.1 und Tabelle 1. Namespace-Konfigurationen: §2.3. Umschreibregeln und Abbildung 1: §2.3.1. Read: §2.4.1. Check: §2.4.4. Expand: §2.4.5. Check-Auswertung und Zeigerverfolgung: §3.2.3. Die Begriffe sind im [Glossar](../glossary/) gesammelt.
+
+</Callout>
+
+## Quellen
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)

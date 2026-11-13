@@ -1,0 +1,220 @@
+---
+title: "Ory Keto"
+description: "El servidor de permisos de código abierto de Ory, reconstruido sobre el modelo de Zanzibar en 2021, configurado en un subconjunto de TypeScript y con campos snaptoken que aún no están implementados."
+section: ecosystem
+order: 4
+checked: "2026-11-13"
+paper: ["2.1", "2.2", "2.3.1", "2.4"]
+product:
+  name: Ory Keto
+  maintainer: Ory Corp
+  license: Apache-2.0
+  language: Go
+  repo: https://github.com/ory/keto
+  docs: https://www.ory.com/docs/keto
+  status: Activo, con un ritmo de versiones más lento
+  latest: v26.2.0 (2026-03-20)
+---
+
+import Callout from "../../../components/diagram/Callout.astro";
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+
+Ory Keto es un servidor de permisos escrito en Go por Ory Corp. Su README lo llama "an open source implementation of 'Zanzibar: Google's Consistent, Global Authorization System'" (una implementación de código abierto de “Zanzibar: Google's Consistent, Global Authorization System”) ([README](https://github.com/ory/keto)). Ory también lo ofrece como servicio gestionado: "Ory Permissions is powered by the open source Ory Keto" (Ory Permissions funciona con el Ory Keto de código abierto) en Ory Network (mismo README).
+
+Keto no nació como un sistema Zanzibar. El diseño de Zanzibar llegó en la v0.6.0-alpha.1 el 2021-04-07; las notas de la versión dicen que el Keto anterior pasó a una rama `legacy-0.5` y que "the architectures are vastly different" (las arquitecturas son muy distintas) ([notas de la versión](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)). Las reescrituras de usersets, escritas en el Ory Permission Language, llegaron después, en la v0.10.0-alpha.0 el 2022-09-27 ([notas de la versión](https://github.com/ory/keto/releases/tag/v0.10.0-alpha.0)).
+
+## El artículo y Keto, uno al lado del otro
+
+| En el artículo | En Ory Keto |
+| --- | --- |
+| Configuración del espacio de nombres (§2.3) | Una `class` que `implements Namespace` en el Ory Permission Language (OPL), un subconjunto de TypeScript ([referencia de OPL](https://www.ory.com/docs/keto/reference/ory-permission-language)) |
+| Tupla de relación `object#relation@user` (§2.1) | `namespace:object#relation@subject`, por ejemplo `Group:eng#members@User:beto` ([relation tuples](https://www.ory.com/docs/keto/concepts/relation-tuples), [parser](https://github.com/ory/keto/blob/master/ketoapi/enc_string.go)) |
+| `_this` | `this.related.viewers.includes(ctx.subject)` |
+| `computed_userset` | `this.permits.edit(ctx)`: "A permission can call another permission defined on the same namespace" (un permiso puede llamar a otro permiso definido en el mismo espacio de nombres) |
+| `tuple_to_userset` | `this.related.parents.traverse((p) => p.permits.view(ctx))` |
+| Unión, intersección, exclusión | `\|\|`, `&&`, `!` |
+| Zookie (§2.2, §2.4) | Existen campos `snaptoken` en la API, pero cada uno está "not implemented yet and has no effect" (aún no implementado y sin efecto) ([check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)) |
+| Check (§2.4.4) | `CheckService.Check`, `BatchCheck` |
+| Read (§2.4.1) | `ReadService.ListRelationTuples` ([read_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/read_service.proto)) |
+| Write (§2.4.2) | `WriteService.TransactRelationTuples`, `DeleteRelationTuples` ([write_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/write_service.proto)) |
+| Watch (§2.4.3) | Ninguno en la API |
+| Expand (§2.4.5) | `ExpandService.Expand` ([expand_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/expand_service.proto)) |
+| Leopard (§3.2.4) | Sin equivalente documentado |
+| Spanner (§3.1) | PostgreSQL, MySQL o CockroachDB; SQLite solo para desarrollo ([guía de producción](https://www.ory.com/docs/keto/guides/production)) |
+
+## El ejemplo de referencia en OPL
+
+La Figura 1 del artículo hace que los propietarios sean editores, los editores lectores, y los lectores de la carpeta padre lectores del documento (§2.3.1). En OPL, cada espacio de nombres es una clase: `related` declara las relaciones y los tipos de sujeto que aceptan, y `permits` contiene funciones que devuelven verdadero o falso para `ctx.subject`.
+
+```ts
+import { Namespace, SubjectSet, Context } from "@ory/keto-namespace-types"
+
+class User implements Namespace {}
+
+class Group implements Namespace {
+  related: {
+    members: User[]
+  }
+}
+
+class Folder implements Namespace {
+  related: {
+    viewers: (User | SubjectSet<Group, "members">)[]
+  }
+
+  permits = {
+    view: (ctx: Context): boolean => this.related.viewers.includes(ctx.subject),
+  }
+}
+
+class Doc implements Namespace {
+  related: {
+    parents: Folder[]
+    owners: User[]
+    editors: (User | SubjectSet<Group, "members">)[]
+    viewers: (User | SubjectSet<Group, "members">)[]
+  }
+
+  permits = {
+    edit: (ctx: Context): boolean =>
+      this.related.owners.includes(ctx.subject) ||
+      this.related.editors.includes(ctx.subject),
+
+    view: (ctx: Context): boolean =>
+      this.related.viewers.includes(ctx.subject) ||
+      this.permits.edit(ctx) ||
+      this.related.parents.traverse((p) => p.permits.view(ctx)),
+  }
+}
+```
+
+`SubjectSet<Group, "members">` es el tipo de OPL para “los miembros de un grupo”, el userset del artículo. Las relaciones son siempre arrays porque "an object can have many subjects" (un objeto puede tener muchos sujetos) ([referencia de OPL](https://www.ory.com/docs/keto/reference/ory-permission-language)).
+
+<Callout title="Contrastado con la documentación, no ejecutado">
+Esta configuración sigue la sintaxis documentada a 2026-11-13: la [referencia de OPL](https://www.ory.com/docs/keto/reference/ory-permission-language), la [especificación de OPL](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md) del repositorio y el ejemplo de los mantenedores [namespaces.keto.ts](https://github.com/ory/keto/blob/master/contrib/rewrites-example/namespaces.keto.ts). No se ha cargado en Keto.
+</Callout>
+
+Las cinco tuplas del ejemplo de referencia, en la forma textual de Keto. Un sujeto escrito como `User:anne` es un subject set con una relación vacía; las tuplas de ejemplo de los mantenedores escriben así a los usuarios ([tuples.json](https://github.com/ory/keto/blob/master/contrib/rewrites-example/relation-tuples/tuples.json)).
+
+```text
+Doc:readme#owners@User:anne
+Group:eng#members@User:beto
+Doc:readme#viewers@Group:eng#members
+Doc:readme#parents@Folder:A
+Folder:A#viewers@User:chen
+```
+
+¿Qué tupla y qué expresión de OPL deciden el acceso de cada persona al readme?
+
+<Graph
+  width={600}
+  height={260}
+  title="El ejemplo de referencia como relation tuples de Keto"
+  desc="Cinco relation tuples. User:anne está en owners de Doc:readme. User:beto está en members de Group:eng. Group:eng#members está en viewers de Doc:readme. Folder:A está en parents de Doc:readme. User:chen está en viewers de Folder:A. El camino de Chen a través de Folder:A está resaltado: lo resuelve traverse sobre parents."
+  nodes={[
+    { id: "anne", x: 80, y: 50, label: "User:anne", kind: "subject", mono: true },
+    { id: "beto", x: 80, y: 130, label: "User:beto", kind: "subject", mono: true },
+    { id: "chen", x: 80, y: 210, label: "User:chen", kind: "subject", mono: true, on: true },
+    { id: "eng", x: 300, y: 130, label: "Group:eng", kind: "group", mono: true },
+    { id: "folder", x: 300, y: 210, label: "Folder:A", kind: "object", mono: true, on: true },
+    { id: "doc", x: 510, y: 130, label: "Doc:readme", kind: "object", mono: true },
+  ]}
+  edges={[
+    { from: "anne", to: "doc", label: "owners" },
+    { from: "beto", to: "eng", label: "members" },
+    { from: "eng", to: "doc", label: "viewers\n(#members)", dashed: true },
+    { from: "chen", to: "folder", label: "viewers", on: true },
+    { from: "folder", to: "doc", label: "parents", on: true },
+  ]}
+  caption="Anne: owners → permits.edit → view. Beto: el subject set Group:eng#members. Chen: parents.traverse(p => p.permits.view). Discontinuo: un subject set."
+/>
+
+Obsérvese que solo se almacenan las flechas. Cada paso que convierte a un propietario en lector, o a un lector de la carpeta en lector del documento, vive en las funciones `permits` y se ejecuta en el momento de la comprobación.
+
+## Arquitectura
+
+¿Qué partes de un despliegue de Keto hablan con cuáles?
+
+<Graph
+  width={620}
+  height={270}
+  title="Despliegue de Ory Keto, según la documentación"
+  desc="Cada contenedor de Keto sirve por defecto una Read API en el puerto 4466 y una Write API en el puerto 4467. Los clientes expuestos al público solo llegan a la Read API, detrás de una pasarela. El backend propio usa la Write API. Todos los contenedores comparten una base de datos SQL. Escalar significa añadir contenedores."
+  nodes={[
+    { id: "pub", x: 95, y: 55, label: "Clientes vía\npasarela de API", kind: "client" },
+    { id: "be", x: 95, y: 215, label: "Su backend", kind: "client" },
+    { id: "k1", x: 330, y: 55, label: "Contenedor de Keto\nRead :4466 · Write :4467", kind: "server" },
+    { id: "k2", x: 330, y: 215, label: "Contenedor de Keto\nRead :4466 · Write :4467", kind: "server" },
+    { id: "db", x: 545, y: 135, label: "Base de datos SQL", kind: "store" },
+  ]}
+  edges={[
+    { from: "pub", to: "k1", label: "solo Read API" },
+    { from: "be", to: "k2", label: "Write + Read" },
+    { from: "k1", to: "db", label: "SQL" },
+    { from: "k2", to: "db", label: "SQL" },
+  ]}
+  caption="Amarillo: contenedores de Keto. Verde: la base de datos compartida. Azul: clientes. No se documenta tráfico entre contenedores."
+/>
+
+- Cada contenedor sirve una Read API (puerto predeterminado 4466), una Write API (4467) y una API de sintaxis de OPL (4469), cada una por HTTP y gRPC ([esquema de configuración](https://github.com/ory/keto/blob/master/embedx/config.schema.json)).
+- "A good practice is to not expose the Write API at all to the public internet" (una buena práctica es no exponer en absoluto la Write API a la internet pública), y "The Read API should also be protected" (la Read API también debe protegerse) ([guía de producción](https://www.ory.com/docs/keto/guides/production)).
+- Escalado: "There are no additional requirements for scaling when self-hosting Ory Keto, just spin up another container!" (no hay requisitos adicionales para escalar cuando se aloja Ory Keto por cuenta propia: ¡basta con levantar otro contenedor!) (misma guía). Los contenedores comparten la base de datos.
+
+## Consistencia
+
+El zookie del artículo permite a un cliente pedir una comprobación "at a consistent snapshot no earlier than the given zookie" (en una instantánea consistente no anterior al zookie dado) (§2.4.4). La API protobuf de Keto recoge la misma idea en los nombres de sus campos: `snaptoken` en Check, Expand y ListRelationTuples, `snaptokens` en TransactRelationTuples, y un indicador `latest` para una comprobación de cambio de contenido. Todos estos campos están documentados como "not implemented yet and has no effect" (aún no implementado y sin efecto) ([check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)).
+
+¿Qué ocurre hoy con un token que envía un cliente?
+
+<Swimlane
+  lanes={["Su servicio", "Keto", "Base de datos SQL"]}
+  timeLabel="tiempo"
+  title="Campos snaptoken sin efecto"
+  desc="El servicio escribe una tupla con TransactRelationTuples; Keto la almacena en la base de datos SQL. La respuesta tiene un campo snaptokens, que no está implementado. Más tarde, el servicio envía un Check con un snaptoken; Keto ignora el campo, así que el token no da ninguna garantía de frescura."
+  events={[
+    { lane: 0, t: 0, label: "Transact: añade\nlector de Doc:readme", kind: "write" },
+    { lane: 2, t: 0, label: "fila escrita", kind: "write" },
+    { lane: 1, t: 1, label: "snaptokens:\nno implementado", kind: "note" },
+    { lane: 0, t: 2, label: "Check con\nsnaptoken", kind: "read" },
+    { lane: 1, t: 2, label: "el campo no\ntiene efecto", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [1, 1], to: [0, 1], dashed: true },
+    { from: [0, 2], to: [1, 2] },
+  ]}
+  caption="La forma de la API sigue el protocolo de zookies del artículo; el comportamiento aún no está ahí."
+/>
+
+Obsérvese que la garantía que el artículo construye sobre los zookies, proteger el contenido del problema del “nuevo enemigo” (§2.2), depende por tanto de cómo se comporte la base de datos SQL subyacente. Las páginas de documentación de Keto consultadas aquí no dicen nada sobre la consistencia.
+
+## Diferencias con el artículo
+
+- **Sin zookies.** Los campos existen; el comportamiento, no (véase más arriba).
+- **Sin Watch.** La API v1alpha2 tiene servicios Check, Expand, Read, Write, Namespaces y Version, y un servicio de sintaxis de OPL aparte (`opl/v1alpha1`), pero ningún flujo de cambios ([directorio de protos](https://github.com/ory/keto/tree/master/proto/ory/keto)). El Watch del artículo alimenta los índices secundarios y Leopard (§2.4.3, §3.2.4).
+- **Sin Leopard.** No se documenta ningún índice de conjuntos desnormalizado.
+- **Una sintaxis de lenguaje de programación.** OPL es un subconjunto de TypeScript para que "users can get context help from their IDE" (los usuarios puedan obtener ayuda contextual de su IDE) ([especificación de OPL](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md)). La Figura 1 del artículo escribe una configuración en una sintaxis de texto al estilo de protocol buffers (§2.3.1); el artículo no nombra el formato.
+- **Almacenamiento SQL.** Una base de datos SQL compartida en lugar de Spanner (§3.1).
+- **Profundidad de la comprobación.** Las solicitudes Check llevan un `max_depth`, "The maximum depth to search for a relation" (la profundidad máxima hasta la que buscar una relación) ([check_service.proto](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)).
+
+## Estado
+
+- Primera versión el 2018-11-13 (diseño anterior a Zanzibar); diseño de Zanzibar desde la v0.6.0-alpha.1 el 2021-04-07; OPL desde la v0.10.0-alpha.0 el 2022-09-27 ([versiones](https://github.com/ory/keto/releases)).
+- Los números de versión cambiaron de esquema tras la v0.14.0 (2025-03-06): la siguiente versión fue la v25.4.0 (2025-11-07), después la v26.2.0 (2026-03-20), la última a 2026-11-13.
+- Último commit en la rama predeterminada: 2026-07-29. Unas 5.4k estrellas (API de GitHub, 2026-11-13).
+
+## Fuentes
+
+- Repositorio y README de Ory Keto: [github.com/ory/keto](https://github.com/ory/keto)
+- Versión v0.6.0-alpha.1: [github.com/ory/keto/releases/tag/v0.6.0-alpha.1](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)
+- Versión v0.10.0-alpha.0: [github.com/ory/keto/releases/tag/v0.10.0-alpha.0](https://github.com/ory/keto/releases/tag/v0.10.0-alpha.0)
+- Documentación de Ory Keto: [ory.com/docs/keto](https://www.ory.com/docs/keto)
+- Referencia de OPL: [ory.com/docs/keto/reference/ory-permission-language](https://www.ory.com/docs/keto/reference/ory-permission-language)
+- Especificación de OPL: [github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md](https://github.com/ory/keto/blob/master/docs/ory_permission_language_spec.md)
+- Relation tuples: [ory.com/docs/keto/concepts/relation-tuples](https://www.ory.com/docs/keto/concepts/relation-tuples)
+- Formato textual de las tuplas: [github.com/ory/keto/blob/master/ketoapi/enc_string.go](https://github.com/ory/keto/blob/master/ketoapi/enc_string.go)
+- Espacios de nombres y tuplas de ejemplo: [namespaces.keto.ts](https://github.com/ory/keto/blob/master/contrib/rewrites-example/namespaces.keto.ts), [tuples.json](https://github.com/ory/keto/blob/master/contrib/rewrites-example/relation-tuples/tuples.json)
+- Servicios gRPC: [github.com/ory/keto/tree/master/proto/ory/keto](https://github.com/ory/keto/tree/master/proto/ory/keto)
+- Esquema de configuración: [github.com/ory/keto/blob/master/embedx/config.schema.json](https://github.com/ory/keto/blob/master/embedx/config.schema.json)
+- Guía de producción: [ory.com/docs/keto/guides/production](https://www.ory.com/docs/keto/guides/production)

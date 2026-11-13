@@ -1,0 +1,237 @@
+---
+title: "列出用户能看到的内容"
+description: "为什么“Anne 能看到的所有文档”与 Check 是不同的问题，论文为此提供了什么，以及实践中使用的三种方法。"
+section: guide
+part: practice
+order: 8
+checked: "2026-11-13"
+paper: ["1", "2.4.1", "2.4.3", "2.4.5", "3.2.4"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Check 回答一个问题：这个用户能否对这个对象做这件事。列表页面问的是另一个问题：这个用户能看到哪些对象，并且要过滤、排序、一次一页。本页解释为什么第二个问题更难，论文为此提供了什么，以及 Zanzibar 风格产品所记载的三种方法。
+
+## 与 Check 不同的问题
+
+Check 从一个对象出发，沿着元组前进，直到找到该用户或没有路径可走（§2.4.4、§3.2.3）。工作量受限于挂在该对象上的东西。“Anne 能看到的所有文档”没有起始对象。用 Check 来回答它，意味着为系统中的每个文档执行一次 Check，其中大多数的答案都是“否”。
+
+列表还需要授权服务所不持有的数据。OpenFGA 的指南是这样说的：该服务 "does not store object metadata (names of files, creation dates, time of last update, etc)"（不存储对象元数据（文件名、创建日期、最后更新时间等）），因此搜索 "will require data from your database"（将需要来自你的数据库的数据）（[OpenFGA, Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。过滤和排序在你的数据库中进行；授权在另一个服务中进行；答案是两者的交集。
+
+论文很清楚这种用例。它为统一系统陈述的第一个动机就包括 "a search index that respects access control and works across applications"（一个遵循访问控制且跨应用工作的搜索索引）（§1），其延迟目标还特别提到 "serving search results, which often require tens to hundreds of checks"（提供搜索结果，这通常需要数十到数百次检查）（§1）。
+
+## 论文提供了什么，没有提供什么
+
+论文的 API 有五个调用：Read、Write、Watch、Check 和 Expand（§2.4）。它们都不返回“用户 U 能看到的所有对象”。
+
+- **Read** 只返回已存储的元组。借助以用户为键的元组集，客户端可以 "look up all groups with a given user as a direct member"（查找以给定用户为直接成员的所有组）（§2.4.1）。*直接*：Read 不应用重写规则，因此它不会从 `editor` 推到 `viewer`，也不会从文件夹推到其中的文档。
+- **Expand** 会沿着重写规则前进，但方向相反：它接受一个 ⟨*object#relation*⟩ 对，以*用户集树*的形式返回其 "effective userset"（有效用户集），树的叶节点 "are user IDs or usersets pointing to other ⟨*object#relation*⟩ pairs"（是用户 ID 或指向其他 ⟨*object#relation*⟩ 对的用户集）（§2.4.5）。论文点明了其用途：它让客户端能够 "build efficient search indices for access-controlled content"（为受访问控制的内容构建高效的搜索索引）（§2.4.5）。构建索引是客户端的工作。
+- **Watch** 以流的形式发送元组变更，以便 "clients maintain secondary indices of relation tuples"（客户端维护关系元组的二级索引）（§2.4.3）。
+- **Leopard**（§3.2.4）把嵌套的*组*扁平化：它用一次集合求交来回答用户是否属于某个组。它在 Zanzibar 内部用于加速 "selected namespaces"（选定命名空间）的 Check；论文并没有把它描述为列表 API。参见 [Leopard：组索引](../leopard/)。
+
+Expand 对 readme 的查看者返回什么？与客户端真正想要的扁平列表相比又如何？
+
+<Frames>
+
+<Graph
+  width={480}
+  height={300}
+  title="Expand：用户集树"
+  desc="对 doc:readme#viewer 执行 Expand 返回一棵树。根节点是 doc:readme#viewer，其下是一个有三个子节点的 union 节点：用户集叶节点 group:eng#member、editor 的 union，以及用户集叶节点 folder:A#viewer。editor 的 union 有叶节点 user:anne，来自 owner。两个用户集叶节点需要进一步的 Expand 调用，才能经由 group:eng#member 到达 user:beto、经由 folder:A#viewer 到达 user:chen；这些步骤以虚线表示。"
+  nodes={[
+    { id: "root", x: 240, y: 28, label: "doc:readme#viewer", kind: "object", mono: true },
+    { id: "u", x: 240, y: 95, label: "union", kind: "group", mono: true },
+    { id: "eng", x: 85, y: 170, label: "group:eng#member", kind: "group", mono: true },
+    { id: "ed", x: 240, y: 170, label: "union (editor)", kind: "group", mono: true },
+    { id: "fold", x: 395, y: 170, label: "folder:A#viewer", kind: "group", mono: true },
+    { id: "beto", x: 85, y: 265, label: "user:beto", kind: "subject", mono: true },
+    { id: "anne", x: 240, y: 265, label: "user:anne", kind: "subject", mono: true },
+    { id: "chen", x: 395, y: 265, label: "user:chen", kind: "subject", mono: true },
+  ]}
+  edges={[
+    { from: "root", to: "u" },
+    { from: "u", to: "eng" },
+    { from: "u", to: "ed" },
+    { from: "u", to: "fold" },
+    { from: "eng", to: "beto", label: "下一次 Expand", dashed: true },
+    { from: "ed", to: "anne", label: "owner" },
+    { from: "fold", to: "chen", label: "下一次 Expand", dashed: true },
+  ]}
+  minWidth={420}
+  caption="树保留了结构。用户集叶节点指向其他对象；客户端需要依次展开它们。"
+/>
+
+<Graph
+  width={300}
+  height={300}
+  title="查找 API：扁平列表"
+  desc="一次针对 doc:readme 上具有 view 的主体的查找调用，以扁平列表的形式返回三个用户 ID：user:anne、user:beto 和 user:chen，没有树结构。"
+  nodes={[
+    { id: "q", x: 150, y: 40, label: "谁能查看\ndoc:readme？", kind: "server" },
+    { id: "anne", x: 150, y: 130, label: "user:anne", kind: "subject", mono: true, on: true },
+    { id: "beto", x: 150, y: 195, label: "user:beto", kind: "subject", mono: true, on: true },
+    { id: "chen", x: 150, y: 260, label: "user:chen", kind: "subject", mono: true, on: true },
+  ]}
+  edges={[{ from: "q", to: "anne", label: "流式返回 ID" }]}
+  caption="LookupSubjects（SpiceDB）或 ListUsers（OpenFGA）：同样的答案，已经扁平化。"
+/>
+
+</Frames>
+
+注意，这棵树回答的是“谁能看到这个文档”，而不是“Anne 能看到什么”。如果只用 Expand 来列出 Anne 的文档，客户端就得展开每一个文档，或者像 §2.4.5 所建议的那样，提前展开并把结果保存在自己的索引中。SpiceDB 的文档描述了同样的缺口：Expand "responds with a tree structure that can be awkward for applications to consume"（以一种应用难以使用的树结构作出响应），因此 SpiceDB 增加了 `LookupResources` 和 `LookupSubjects`，它们 "return a flattened list of results"（返回扁平化的结果列表）（[SpiceDB, Google Zanzibar](https://authzed.com/docs/spicedb/concepts/zanzibar)）。
+
+## 方法一：先调用查找 API，再在数据库中过滤
+
+授权服务直接计算反向问题：SpiceDB 的 `LookupResources` 和 OpenFGA 的 `ListObjects` 返回某种类型中用户拥有某项权限的所有对象的 ID。然后应用把这些 ID 传入其数据库查询（`WHERE id = ANY(…)`），由数据库照常过滤、排序和分页。SpiceDB 称这是 "the simplest approach from a bookkeeping perspective and is a good place to start"（从记账的角度看最简单的方法，是一个很好的起点）（[SpiceDB, Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)）。
+
+代价是在显示第一行之前，完整的 ID 集合就必须返回，而计算它需要从用户出发反向遍历图。
+
+- SpiceDB："it's a heavy request that can cause performance problems when more than 10k results are involved"（这是一个很重的请求，结果超过 1 万条时可能导致性能问题）（[SpiceDB, Querying Data](https://authzed.com/docs/spicedb/concepts/querying-data)）；它 "can get slow quickly: with a sufficiently large relation dataset, a sufficiently complex schema, or a sufficiently large set of accessible results"（可能很快变慢：当关系数据集足够大、schema 足够复杂或可访问的结果集足够大时）（[Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)）。该请求以流的形式返回结果，并支持游标。
+- OpenFGA：`ListObjects` "will return the results found within the time allotted (`listObjectsDeadline`, default: `3s`) up to the maximum number of results configured (`listObjectsMaxResults`, default: `1000`)"（会返回在分配的时间（`listObjectsDeadline`，默认 `3s`）内找到的结果，最多不超过配置的最大结果数（`listObjectsMaxResults`，默认 `1000`）），其定位是 "access-aware filtering on small object collections"（对小型对象集合进行感知访问权限的过滤）（[OpenFGA, Relationship Queries](https://openfga.dev/docs/interacting/relationship-queries)）。其性能会 "drastically depending on the model complexity, number of tuples, and the relations it needs to evaluate"（因模型复杂度、元组数量和需要评估的关系而大幅变化），并且带有 `and` 或 `but not` 的关系 "are more expensive to evaluate than relations with `or`"（比带有 `or` 的关系评估代价更高）（[Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。
+
+部分列表不足以支持排序：OpenFGA 指出，在拿到完整列表之前 "you won't be able to sort using it"（你无法用它来排序）（[Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。
+
+## 方法二：先查询数据库，再批量检查
+
+另一个方向：让数据库产生一页候选（按用户的查询过滤和排序），用一次批量调用检查这一页（SpiceDB 的 `CheckBulkPermissions`，OpenFGA 的 `/batch-check`），去掉被拒绝的行，然后重复，直到这一页填满。这就是按 §1 所描述的搜索结果的方式来使用 Check，一次数十到数百个。
+
+SpiceDB 的指南给出了这个循环及其约束："because we don't know how many results are going to be accessible beforehand, we need to iterate until we have a full page of accessible results"（因为我们事先不知道会有多少结果可以访问，所以需要反复迭代，直到得到一整页可访问的结果）；性能 "will depend in part on choosing the size of the page of candidate results"（部分取决于候选结果页大小的选择）；并且它 "works better with an API backed by cursor-based pagination than limit-offset pagination, since the database doesn't know the offset associated with the last accessible result"（在基于游标分页的 API 上比在 limit-offset 分页上效果更好，因为数据库不知道最后一个可访问结果所对应的偏移量）（[Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)）。它还建议所有批量调用都 "at the same revision"（在同一修订版本上）运行：从第一次调用中取得 ZedToken（SpiceDB 的 zookie），并在其余调用中发送它，这样一页就不会由两个快照拼凑而成。
+
+当 Anne 打开她的文档列表时，两种方法如何安排各次调用的顺序？
+
+<Frames>
+
+<Swimlane
+  lanes={["应用", "授权服务", "应用数据库"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="时间"
+  title="预过滤：先查找，再查询"
+  desc="Anne 请求她的文档。应用调用查找 API，查询 Anne 能查看的文档；授权服务从 Anne 出发遍历图，返回所有匹配的 ID。然后应用以这些 ID 为过滤条件查询其数据库；数据库过滤、排序并返回一页。"
+  events={[
+    { lane: 0, t: 0, label: "Anne：列出\n我的文档", kind: "note" },
+    { lane: 0, t: 1, label: "查找 anne\n能查看的文档", kind: "read" },
+    { lane: 1, t: 1, label: "从 anne 出发\n遍历图", kind: "read" },
+    { lane: 1, t: 2, label: "所有 ID：\nreadme, …", kind: "good", mono: true },
+    { lane: 0, t: 3, label: "query with\nid IN (IDs)", kind: "read", mono: true },
+    { lane: 2, t: 3, label: "过滤、排序、\n一页", kind: "read" },
+    { lane: 0, t: 4, label: "显示该页", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [1, 1] },
+    { from: [1, 2], to: [0, 3], label: "每一个 ID" },
+    { from: [0, 3], to: [2, 3] },
+    { from: [2, 3], to: [0, 4] },
+  ]}
+  caption="只有一次授权调用，但它的答案是在第一行之前就得到的整个集合。"
+/>
+
+<Swimlane
+  lanes={["应用", "授权服务", "应用数据库"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="时间"
+  title="后过滤：先查询，再批量检查"
+  desc="Anne 请求她的文档。应用借助游标从数据库中取出接下来的二十个候选，已过滤并排序。它在一个快照上对这二十个发送一次批量检查；授权服务返回其中哪些被允许，例如七个。如果这一页没有填满，应用取出下一批候选并重复；然后显示该页。"
+  events={[
+    { lane: 0, t: 0, label: "Anne：列出\n我的文档", kind: "note" },
+    { lane: 0, t: 1, label: "接下来 20 个\n候选", kind: "read" },
+    { lane: 2, t: 1, label: "过滤、排序、\n游标", kind: "read" },
+    { lane: 0, t: 2, label: "批量检查\n20 个 ID", kind: "read" },
+    { lane: 1, t: 2, label: "20 次检查，\n一个快照", kind: "read" },
+    { lane: 1, t: 3, label: "7 个被允许", kind: "good" },
+    { lane: 0, t: 4, label: "页未填满：\n重复", kind: "note" },
+    { lane: 0, t: 5, label: "显示该页", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 1], to: [2, 1] },
+    { from: [2, 1], to: [0, 2] },
+    { from: [0, 2], to: [1, 2] },
+    { from: [1, 3], to: [0, 4] },
+  ]}
+  caption="每次的答案都很小，但轮数取决于 Anne 能看到的候选有多少。"
+/>
+
+</Frames>
+
+注意成本转移到了哪里。预过滤只付出一次代价，与 Anne 能看到的全部内容成正比。后过滤按轮付出代价，与她看不到的候选数量成正比。OpenFGA 的指南把这一点变成了一条规则：当数据库查询返回的行很少，或用户能看到其中很高比例时，先搜索后检查很合适；当用户能看到很多对象、但这些对象只占总数很小比例时，就很不合适，即其 “Google Drive” 情形，因为 "you will be retrieving and checking against a lot of items and discarding most of them"（你会取出并检查大量条目，然后丢弃其中的大部分）（[Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。
+
+## 方法三：由 Watch 馈送的反规范化索引
+
+第三种方法就是 §2.4.3 和 §2.4.5 所描述的：在它所保护的数据旁边维护你自己的“谁能看到什么”的索引，并通过变更流使其保持最新。这样列表查询就变成了你自己数据库中的一次 join。
+
+各部分分别位于哪里，又是什么让索引保持最新？
+
+<Graph
+  width={640}
+  height={260}
+  title="由 Watch 馈送的索引"
+  desc="应用把元组写入授权服务。一个索引器消费 Watch 流，把组和文件夹继承扁平化为用户与文档的对，写入应用自身数据库中的 doc_viewers 表，并保存最后一个流令牌以便恢复。列表端点把 doc_viewers 与 documents 表做 join。它可以用授权服务重新检查最终这一页（以虚线表示），以去掉撤销尚未到达索引的行。"
+  nodes={[
+    { id: "app", x: 80, y: 50, label: "应用\n写入元组", kind: "client" },
+    { id: "authz", x: 300, y: 50, label: "授权服务", kind: "server" },
+    { id: "idx", x: 530, y: 50, label: "索引器：\n扁平化组、\n文件夹", kind: "server", on: true },
+    { id: "tok", x: 530, y: 200, label: "last token", kind: "store", mono: true },
+    { id: "dv", x: 300, y: 200, label: "doc_viewers\n(user, doc)", kind: "store", mono: true, on: true },
+    { id: "list", x: 80, y: 200, label: "列表端点", kind: "client" },
+  ]}
+  edges={[
+    { from: "app", to: "authz", label: "Write" },
+    { from: "authz", to: "idx", label: "Watch", on: true },
+    { from: "idx", to: "tok", label: "保存" },
+    { from: "idx", to: "dv", label: "upsert / delete", on: true },
+    { from: "list", to: "dv", label: "JOIN docs" },
+    { from: "list", to: "authz", label: "重新检查该页", dashed: true },
+  ]}
+  minWidth={520}
+  caption="索引是一份副本。它落后于流，而重新检查覆盖了仍在传递中的撤销。"
+/>
+
+注意索引器方框：它做的是 Leopard 在 Zanzibar 内部所做的工作。一个元组可能改变许多行。添加 `group:eng#member@user:beto`，会为 `group:eng` 能查看的每个文档添加一行；为 `folder:A` 添加一个查看者，会为该文件夹中的每个文档添加一行。论文为 Leopard 报告了同样的扇出："a single Zanzibar tuple addition or deletion may yield potentially tens of thousands of discrete Leopard tuple events"（单个 Zanzibar 元组的添加或删除可能产生多达数万个离散的 Leopard 元组事件）（§3.2.4）。
+
+各产品记载了两种构建方式：
+
+- **基于变更流自己构建。** OpenFGA 的第二种选项消费 `GET /changes`，针对所使用的模型版本把变更扁平化（其示例："`user:anne, writer, doc:planning` becomes two tuples"，`user:anne, writer, doc:planning` 变成两个元组），然后对最终结果调用 `/check`，"to filter out any resource with permissions revoked but whose authorization data has not made it into your index yet"（以过滤掉权限已被撤销、但其授权数据尚未进入你的索引的资源）（[Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。对 SpiceDB 而言，这个流就是 `Watch`；[让元组与你的数据保持同步](../sync/)解释了为什么该流不是一个持久队列。
+- **让厂商来计算。** AuthZed Materialize "takes inspiration from the Leopard index"（从 Leopard 索引中获得灵感），预先计算所配置的权限，其 Event Streams 功能让你 "keep your own copy of it — either colocated alongside the data it protects in your application database, or in a secondary index like a search engine"（保留一份自己的副本：要么与它所保护的数据一起放在你的应用数据库中，要么放在搜索引擎之类的二级索引中）（[AuthZed, What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview)）。这是一项商业功能：Event Streams "currently in early access for AuthZed Dedicated users"（目前面向 AuthZed Dedicated 用户提供抢先体验）（[Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)），其文档化的限制之一是 "your application must be able to tolerate some lag"（你的应用必须能够容忍一定的延迟）（[Materialize limitations](https://authzed.com/docs/materialize/getting-started/limitations)）。
+
+## 三者对照
+
+规模限制引自各产品的文档。延迟和工作量是相对的，并非测量所得。
+
+| | 先查找 API，再查询 | 先查询，再批量检查 | 由 Watch 馈送的索引 |
+| --- | --- | --- | --- |
+| 延迟 | 随可访问对象的数量和 schema 深度增长；第一行之前就要得到完整集合 | 随轮数增长，也就是随被拒绝候选所占的比例增长 | 一次数据库 join；与图的深度无关 |
+| 新鲜度 | 与 Check 相同的一致性选项（SpiceDB 中的 ZedToken；OpenFGA 中的 `MINIMIZE_LATENCY` / `HIGHER_CONSISTENCY`） | 与 Check 相同；一页的每一轮都使用同一个令牌 | 落后于流；重新检查该页以去掉已撤销的行 |
+| 文档中的规模限制 | SpiceDB："performance problems when more than 10k results are involved"（结果超过 1 万条时出现性能问题）。OpenFGA：默认 `3s` 和 `1000` 条结果，"small object collections"（小型对象集合） | SpiceDB：取决于 "the size of the page of candidate results"（候选结果页的大小）。OpenFGA：当用户只能看到大量对象中的一小部分时表现很差 | SpiceDB："the greatest scalability of the three options"（三种选项中可扩展性最好）（通过 Materialize） |
+| 工作量 | 一次调用加一个 `IN` 子句 | 一个循环、游标分页、选择页大小 | 一个索引器、扁平化逻辑、一个已存储的流位置、重建；或者一项商业服务 |
+
+<Callout kind="note" title="一个测量数字，来自 2021 年">
+
+为查找 API 找到的唯一延迟数字，是 2021 年一份 SpiceDB 设计提案中的一个脚注："approximately ~100ms for a LookupResources call on a SpiceDB with 100-250K relationships, and a graph nesting of 3-5 deep"（在拥有 10 万到 25 万条关系、图嵌套深度为 3 到 5 层的 SpiceDB 上，一次 LookupResources 调用约 100 毫秒）（[spicedb#207](https://github.com/authzed/spicedb/issues/207)）。这是旧版本上的测试结果，而不是基准测试。
+
+</Callout>
+
+OpenFGA 的指南还补充了两种办法，让用户只能看到大量对象中的少数几个时后过滤仍然可行：在数据库查询中按租户过滤（"Duplicating logic from the authorization model is not ideal, but it can be a reasonable trade-off"，重复授权模型中的逻辑并不理想，但可以是一种合理的权衡），或者先列出较粗粒度的资源，例如用户能看到的文件夹，再按文件夹过滤文档（[Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)）。在贯穿示例中，Chen 的访问权来自 `folder:A`，因此“Chen 能查看的文件夹中的文档”只需一个文件夹的列表就能覆盖他。
+
+空列表也需要作出决定。SpiceDB 的指南建议，在细粒度系统中 "often makes sense to treat 'there is no data' and 'there is nothing you're authorized to see' as the same, by returning a successful response with an empty result set"（通常合理的做法是把“没有数据”和“没有你被授权查看的内容”视为相同，返回一个结果集为空的成功响应），而不是返回 403（[Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)）。
+
+<Callout kind="paper" title="论文出处">
+
+以搜索为动机：§1。Read 及其直接成员关系查找：§2.4.1。Watch 与二级索引：§2.4.3。Expand 与用户集树：§2.4.5。Leopard：§3.2.4。术语：[Expand](../glossary/#expand)、[用户集树](../glossary/#userset-tree)、[Watch](../glossary/#watch)、[Leopard](../glossary/#leopard)。
+
+</Callout>
+
+## 来源
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §1, §2.4.1, §2.4.3, §2.4.5, §3.2.4.
+- AuthZed（厂商），[Protecting a List Endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)，SpiceDB 文档。
+- AuthZed（厂商），[Querying Data](https://authzed.com/docs/spicedb/concepts/querying-data)，SpiceDB 文档。
+- AuthZed（厂商），[Google Zanzibar](https://authzed.com/docs/spicedb/concepts/zanzibar)，SpiceDB 文档，“Reverse Indices”一节。
+- AuthZed（厂商），[What is Materialize?](https://authzed.com/docs/materialize/getting-started/overview) 和 [Limitations](https://authzed.com/docs/materialize/getting-started/limitations)。
+- AuthZed，[Proposal: Lookup Watch API and Tiger Cache for fast ACL-aware filtering](https://github.com/authzed/spicedb/issues/207)，spicedb issue #207，2021-10-22 提出。
+- OpenFGA，[Search With Permissions](https://openfga.dev/docs/interacting/search-with-permissions)。
+- OpenFGA，[Relationship Queries: Check, Read, Expand, ListObjects and ListUsers](https://openfga.dev/docs/interacting/relationship-queries)。
+- OpenFGA，[Query Consistency Modes](https://openfga.dev/docs/interacting/consistency)。
