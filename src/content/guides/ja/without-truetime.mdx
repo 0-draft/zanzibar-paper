@@ -1,0 +1,256 @@
+---
+title: "TrueTime なしで順序を得る"
+description: "zookie が下層のデータベースに求めるもの、Zanzibar 型の製品が CockroachDB、PostgreSQL、MySQL、Spanner からそれを得る方法、そしてどれもそれを提供しないときに起きること。"
+section: guide
+part: practice
+order: 12
+checked: "2026-11-13"
+paper: ["2.2", "2.4", "2.4.4", "3.2.5", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Zanzibar は zookie によって「new enemy」問題を防いでおり、zookie が機能するのは、Spanner がすべての書き込みに因果関係を尊重したタイムスタンプを与えるからである。[一貫性、スナップショット、zookie](../consistency/) は、TrueTime とコミット待ちがそのタイムスタンプをどう生み出すかを含め、その両方を説明している。Google の外で TrueTime の上で動いている人はほとんどいない。このページは、zookie プロトコルが実際にデータベースに何を求めるのか、そして他のデータベース上に作られた製品がそれをどう得るのか、あるいはそれなしで済ませるのかを問う。
+
+## zookie がデータストアに求めるもの
+
+zookie プロトコルは、§2.2 がストレージ層に求める 2 つの特性、"external consistency and snapshot reads with bounded staleness" (外部一貫性と有界な古さを伴うスナップショット読み取り) に依拠している。
+
+1. **コミットの順序が因果関係に従う。** 書き込み `x` が書き込み `y` より前に起きた (たとえば Anne が `x` の成功を見てから `y` を行った) なら、`T_x < T_y` である。論文の言葉では、因果的に関連する 2 つの更新 `x ≺ y` は "will be assigned timestamps that reflect the causal order: `T_x < T_y`" (因果的順序を反映したタイムスタンプ `T_x < T_y` が割り当てられる) (§2.2)。そして zookie プロトコルは "ensures that all prior ACL writes have lower timestamps" (それ以前のすべての ACL 書き込みがより小さいタイムスタンプを持つことを保証する)。
+2. **ある時点以降でのスナップショット読み取り。** `T` での読み取りは "observes all updates with timestamps ≤ T" (タイムスタンプが ≤ T であるすべての更新を観測する) (§2.2)。そしてチェックは "is always evaluated at a consistent snapshot no earlier than the given zookie" (常に、与えられた zookie より前でない一貫したスナップショットで評価される) (§2.4.4)。
+
+このリストのどこにも、壁時計の時刻という意味での「タイムスタンプ」は出てこない。zookie の中の値は、2 つの特性が成り立つ限り、履歴の中の任意の位置でよい。論文が zookie を不透明にしたのはそのためである。"to discourage our clients from choosing arbitrary timestamps and to allow future extensions" (クライアントが任意のタイムスタンプを選ぶのを抑止し、将来の拡張を可能にするため) (§2.4)。
+
+2 つの特性は、folder A から外された Chen が readme を見ることを、どう組み合わさって防ぐのか。
+
+<Graph
+  width={640}
+  height={300}
+  minWidth={540}
+  title="zookie が依拠する 2 つの特性"
+  desc="書き込み x は Chen を folder:A から外す。x の確認応答の後に行われた書き込み y は doc:readme を folder:A に移す。特性 1 により、x のコミット位置は y のそれより小さい。y に対して返されたトークンは y の位置を表す。後のチェックはそのトークンを携える。特性 2 により、チェックはトークン以降のスナップショットを読むので、そこには y が含まれ、特性 1 によって x も含まれる。Chen は拒否される。"
+  nodes={[
+    { id: "x", x: 100, y: 60, label: "x: Chen を\nfolder:A から外す", kind: "store" },
+    { id: "y", x: 100, y: 200, label: "y: readme を\nfolder:A に移す", kind: "store" },
+    { id: "tok", x: 330, y: 200, label: "token = pos(y)", kind: "object", mono: true },
+    { id: "chk", x: 540, y: 200, label: "スナップショット ≥ token\nでチェック", kind: "server", on: true },
+    { id: "res", x: 540, y: 60, label: "x と y が見える:\nChen は拒否", kind: "note" },
+  ]}
+  edges={[
+    { from: "x", to: "y", label: "① x ≺ y ⇒ pos(x) < pos(y)", on: true },
+    { from: "y", to: "tok", label: "返される" },
+    { from: "tok", to: "chk", label: "携える" },
+    { from: "chk", to: "res", label: "② スナップショット以下をすべて", on: true },
+  ]}
+  caption="① が破れると、スナップショットが x なしで y を含みうる。② が破れると、チェックが y より前に実行されうる。どちらの場合も Chen は readme を見てしまう。"
+/>
+
+特性 ① が *データベースからは関連して見えないかもしれない書き込み* についてのものであることに注目したい。§2.2 は "updates on different ACLs or objects and those coordinated via channels invisible to Zanzibar" (異なる ACL やオブジェクトに対する更新や、Zanzibar からは見えない経路を介して調整された更新) について順序を求めている。論文の例 A では、2 つの書き込みを結びつけているのは Alice が Charlie に依頼したことであり、どのシステムの外でもある。それでもデータベースは 2 つのコミットを正しく順序付けなければならない。
+
+## 順序を得る 3 つの方法
+
+Spanner は、誤差の上限がわかっている同期クロックによって特性 ① を得ており、その代償として書き込みごとに不確実性の分だけ待つ ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)。図は [一貫性のページ](../consistency/#タイムスタンプの出どころtruetime) にある)。他のデータベースは、別の方法でそれを、あるいはその大部分を得ている。それぞれ順序はどこから来るのか。
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={540}
+  title="コミットの順序はどこから来るか"
+  desc="順序の 3 つの出どころ。Spanner: TrueTime のタイムスタンプとコミット待ちにより、リージョンをまたいですべてのコミットに因果的なタイムスタンプが与えられる。CockroachDB: ハイブリッド論理クロックは、同じキーに触れるトランザクション間でのみ因果関係を尊重するタイムスタンプを与えるので、SpiceDB は書き込みに共通のキーを触らせる。PostgreSQL と MySQL: 1 台のプライマリがコミット順序を決めるので、そのプライマリのトランザクション ID やスナップショットはすでに因果関係を尊重している。"
+  nodes={[
+    { id: "sp", x: 110, y: 60, label: "Spanner\nTrueTime + コミット待ち", kind: "store" },
+    { id: "cr", x: 330, y: 60, label: "CockroachDB\nハイブリッド論理クロック", kind: "store" },
+    { id: "pg", x: 540, y: 60, label: "PostgreSQL, MySQL\nプライマリは 1 台", kind: "store" },
+    { id: "sp2", x: 110, y: 180, label: "すべてのコミットが\n順序付けられる", kind: "note" },
+    { id: "cr2", x: 330, y: 180, label: "キーが重なるときだけ\n順序付けられる", kind: "note" },
+    { id: "pg2", x: 540, y: 180, label: "すべてのコミットが\n順序付けられる (1 拠点)", kind: "note" },
+  ]}
+  edges={[
+    { from: "sp", to: "sp2" },
+    { from: "cr", to: "cr2", on: true },
+    { from: "pg", to: "pg2" },
+  ]}
+  caption="アプリケーション層の助けが必要なのは中央の列である。"
+/>
+
+単一プライマリのデータベースは、1 台のサーバーがすべてのコミットを順に見るので、特性 ① をただで得ていることに注目したい。その代わりに手放しているのは、論文のグローバルな複製である。CockroachDB はグローバルに複製するが、特性 ① は部分的にしか提供しない。次の節はその隙間についてである。
+
+## CockroachDB: キーを重ねる規則
+
+CockroachDB には TrueTime がない。ノードはゆるく同期したクロックを持ち、クラスタには最大クロックオフセット `--max-offset` があり、そのデフォルトは `500ms` である。"If observed clock offsets exceed this limit, servers will crash to minimize the likelihood of reading inconsistent data" (観測されたクロックオフセットがこの上限を超えると、不整合なデータを読む可能性を最小にするためにサーバーはクラッシュする) ([`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start))。Cockroach Labs 自身による Spanner との比較は "CockroachDB only goes as far as to claim serializability" (CockroachDB が主張するのは直列化可能性までである) と述べ、それが許す異常を "causal reverse" (因果の逆転) と呼んでいる。因果的に関連するトランザクションが、誤った順序のタイムスタンプでコミットされうるということである ([Living without atomic clocks, 2022-01-27](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/))。
+
+AuthZed は 2021 年に、SpiceDB を使って CockroachDB 上で「new enemy」問題を再現した ([The One Crucial Difference Between Spanner and CockroachDB, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb))。記事は隙間をこうまとめている。"Cockroach does not provide external consistency for transactions involving _non-overlapping keys_." (Cockroach は、*重ならないキー* を含むトランザクションに対しては外部一貫性を提供しない。) そのテストは 2 つの書き込みと 1 つのチェックを "in sequence (not parallel)" (順番に (並列ではなく)) 実行した。`excluded` タプルを書き、`direct` タプルを書き、それから 2 番目の書き込みのリビジョンで `allowed = direct - excluded` をチェックする。"the check in 3 will succeed" (3 のチェックは成功してしまう)。
+
+1 つのノードのクロックが進んでいる場合、共通の例ではどうなるか。
+
+<Frames>
+
+<Swimlane
+  lanes={["Anne のアプリ", "ノード 1 (+250 ms)", "ノード 2 (正確)", "Chen のチェック"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="実時間"
+  ticks={["10.000", "10.100"]}
+  title="キーを重ねない場合のクロックのずれ"
+  desc="実時間 10.000 に、Anne のアプリが Chen を folder:A から外す。クロックが 250 ms 進んでいるノード 1 は、それをタイムスタンプ 10.250 でコミットする。確認応答の後、実時間 10.100 に、アプリは readme を folder:A に移す。クロックが正確なノード 2 は、それをタイムスタンプ 10.100 でコミットし、トークンとして返す。Chen のチェックはスナップショット 10.100 で実行される。移動は見えるが、より大きいタイムスタンプを持つ削除は見えないので、Chen は許可される。これが「new enemy」問題である。"
+  events={[
+    { lane: 0, t: 0, label: "x: Chen を外す", kind: "write" },
+    { lane: 1, t: 0, label: "x をコミット\nat 10.250", kind: "write", mono: true },
+    { lane: 0, t: 1, label: "y: readme を移す", kind: "write" },
+    { lane: 2, t: 1, label: "y をコミット\nat 10.100", kind: "bad", mono: true },
+    { lane: 3, t: 2, label: "スナップショット\n10.100 でチェック", kind: "read", mono: true },
+    { lane: 3, t: 3, label: "y は見え x は見えない:\nChen は許可", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [0, 1], label: "ack", dashed: true },
+    { from: [0, 1], to: [2, 1] },
+    { from: [2, 1], to: [3, 2], label: "token 10.100", dashed: true },
+  ]}
+  caption="違反: y は x の後に起きたのに T_y < T_x である。T_y のスナップショットは、起きたことの接頭部分になっていない。"
+/>
+
+<Swimlane
+  lanes={["Anne のアプリ", "ノード 1 (+250 ms)", "ノード 2 (正確)", "Chen のチェック"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="実時間"
+  ticks={["10.000", "10.100"]}
+  title="重なりキーを使う場合のクロックのずれ"
+  desc="同じ 2 つの書き込みだが、どの書き込みも共有の重なりキー K も書く。ノード 1 は K を含めて x を 10.250 でコミットする。ノード 2 が y をコミットするときにも K を書くので、CockroachDB は y に、x による K への書き込みより大きいタイムスタンプ、ここでは 10.251 を与えなければならない。トークンは 10.251 で、Chen のチェックはそのスナップショットで実行され、x と y の両方が見えるので、Chen は拒否される。"
+  events={[
+    { lane: 0, t: 0, label: "x: Chen を外す", kind: "write" },
+    { lane: 1, t: 0, label: "x + K をコミット\nat 10.250", kind: "write", mono: true },
+    { lane: 0, t: 1, label: "y: readme を移す", kind: "write" },
+    { lane: 2, t: 1, label: "y + K をコミット\nat 10.251", kind: "good", mono: true },
+    { lane: 3, t: 2, label: "スナップショット\n10.251 でチェック", kind: "read", mono: true },
+    { lane: 3, t: 3, label: "x と y が見える:\nChen は拒否", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [0, 1], label: "ack", dashed: true },
+    { from: [0, 1], to: [2, 1] },
+    { from: [1, 0], to: [2, 1], label: "同じキー K" },
+    { from: [2, 1], to: [3, 2], label: "token 10.251", dashed: true },
+  ]}
+  caption="修正: 1 つのキーへの 2 つの書き込みは、クロックではなくキーによって順序付けられる。"
+/>
+
+</Frames>
+
+右のフレームの「同じキー K」とラベルの付いた矢印に注目したい。どちらのクロックも良くなってはいない。変わったのは、2 つのトランザクションが競合するようになったことであり、CockroachDB は競合するトランザクションを正しく順序付ける。両フレームのタイムスタンプは説明用である。ずれはデフォルトの `500ms` より十分小さいので、どのサーバーもクラッシュしない。
+
+AuthZed は、共有の読み取りでは足りないことを見いだした。"we needed both transactions to write to the same key" (両方のトランザクションが同じキーに書き込む必要があった)。そのため SpiceDB の CockroachDB ドライバは書き込みに重なりキーを加え、その戦略は `--datastore-tx-overlap-strategy` で選ぶ ([datastores](https://authzed.com/docs/spicedb/concepts/datastores))。
+
+| 戦略 | SpiceDB のドキュメント |
+| --- | --- |
+| `static` (デフォルト) | "All writes overlap to guarantee safety at the cost of write throughput" (書き込みスループットを犠牲にして安全性を保証するため、すべての書き込みが重なる) |
+| `prefix` | "Only writes that contain objects with same prefix overlap" (同じ接頭辞を持つオブジェクトを含む書き込みだけが重なる) |
+| `request` | "Only writes with the same io.spicedb.requestoverlapkey header overlap" (同じ io.spicedb.requestoverlapkey ヘッダを持つ書き込みだけが重なる) |
+| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem" (どの書き込みも重ならず、書き込みスループットは最も良いが、New Enemy 問題に対して脆弱になりうる) |
+
+AuthZed の言葉によるコストは次のとおりである。"This does add a small amount of latency to the write path, but it leaves the read paths performant." (これは書き込みの経路にわずかなレイテンシを加えるが、読み取りの経路の性能は保たれる。) `static` の書き込みはすべて 1 つの行で競合する。これが、論文がコミット待ちという形で代わりに支払った代償である。
+
+データストアのドキュメントは、読み取り側について CockroachDB の注意点をもう 1 つ挙げている。SpiceDB は `cluster_logical_timestamp()` でリビジョンを選ぶが、その値は "which can differ across nodes by up to the cluster's" 最大オフセット (ノード間でクラスタの最大オフセットまで異なりうる) ものである。そして "A read may not see a recently committed write if the reading node's timestamp is behind the writing node's." (読み取るノードのタイムスタンプが書き込んだノードより遅れていると、読み取りは最近コミットされた書き込みを見ないことがある。) その結果、"fully_consistent does not guarantee read-after-write consistency on CockroachDB." (CockroachDB では fully_consistent は read-after-write 一貫性を保証しない。) 書き込みから得た ZedToken は書き込み自身のリビジョンを表すので、これを避けられる ([datastores](https://authzed.com/docs/spicedb/concepts/datastores))。
+
+## PostgreSQL と MySQL: 1 台のプライマリが決める
+
+単一プライマリのデータベースはすでにすべてのコミットを順に見ているので、特性 ① にクロックは要らない。残る問題は特性 ② であり、読み取りが遅れたレプリカに行くことがある。
+
+SpiceDB の PostgreSQL ドライバは、順序付けに時刻をまったく使わない。リビジョンは `pg_current_xact_id()` と `pg_current_snapshot()` から得たトランザクション ID とスナップショットである。ドライバのコメントは "timestamps cannot be used for ordering transactions in PG" (PG ではタイムスタンプをトランザクションの順序付けに使えない) と述べ、2 つのスナップショットが "mutually uncomparable" (互いに比較できない) ことがあるとしている ([`postgres/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/postgres/revisions.go), v1.57.1)。`x` のコミット後に取られたスナップショットは `x` をコミット済みとして列挙する。これは特性 ① を PostgreSQL 自身の言葉で述べたものである。MySQL ドライバは、`id` が `AUTO_INCREMENT` のトランザクション表に行を書き、その id をリビジョンとして使う ([`migrations`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/migrations/zz_migration.0001_initial_schema.go), [`revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/revisions.go))。別の書き込みのコミット後に始まった書き込みは、その行を後に挿入するので、より大きい id を得る。この推論はこのページによるものであり、SpiceDB のドキュメントには書かれていない。
+
+リードレプリカは遅延を再び持ち込む。レプリカが遅れているとき、SpiceDB はどうやってチェックをトークンと少なくとも同じだけ新しく保つのか。
+
+<Swimlane
+  lanes={["アプリケーション", "SpiceDB", "プライマリ", "レプリカ"]}
+  laneWidth={140}
+  rowHeight={60}
+  timeLabel="時間"
+  title="レプリカが遅れているときプライマリにフォールバックする"
+  desc="アプリケーションが Chen を folder:A から外す。プライマリはそれをリビジョン r105 としてコミットし、SpiceDB は r105 の ZedToken を返す。後に、at_least_as_fresh r105 を指定したチェックが届く。SpiceDB はレプリカに r105 が複製済みかを問い合わせる。レプリカは r103 までしか進んでいないので、SpiceDB は読み取りを代わりにプライマリに送り、プライマリは r105 以降で応答する。Chen は拒否される。"
+  events={[
+    { lane: 0, t: 0, label: "Chen を外す", kind: "write" },
+    { lane: 2, t: 0, label: "commit r105", kind: "write", mono: true },
+    { lane: 1, t: 1, label: "ZedToken r105", kind: "note", mono: true },
+    { lane: 0, t: 2, label: "check, token r105", kind: "read", mono: true },
+    { lane: 3, t: 2, label: "replayed to r103", kind: "bad", mono: true },
+    { lane: 1, t: 3, label: "r105 がない:\nプライマリを使う", kind: "note" },
+    { lane: 2, t: 4, label: "read at ≥ r105", kind: "good", mono: true },
+    { lane: 0, t: 5, label: "Chen は拒否", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [2, 0], to: [1, 1] },
+    { from: [1, 1], to: [0, 1], label: "written_at" },
+    { from: [0, 2], to: [1, 2] },
+    { from: [1, 2], to: [3, 2], label: "r105 はあるか" },
+    { from: [1, 3], to: [2, 4] },
+    { from: [2, 4], to: [0, 5], dashed: true },
+  ]}
+  caption="リビジョン番号は説明用である。最近のトークンを持たないチェックは、レプリカが応答する可能性が高くなる。"
+/>
+
+ドキュメントはまさにこれを記述している。レプリケーションの遅延は "would be problematic to SpiceDB's ability to solve the new enemy problem" (SpiceDB が new enemy 問題を解決する能力にとって問題になる) ので、SpiceDB は "if the revision has been replicated into the target replica. If missing, it will fall back to the primary." を確認する (リビジョンが対象のレプリカに複製済みかどうかを確認し、なければプライマリにフォールバックする)。 MySQL ではこれが "requires two roundtrips instead of one" (1 回ではなく 2 回のラウンドトリップを要する)。またドキュメントは、MySQL のレプリカの前にロードバランサを置くことに対して "because SpiceDB will not be able to maintain consistency guarantees" (SpiceDB が一貫性の保証を維持できなくなるため) と警告している ([datastores](https://authzed.com/docs/spicedb/concepts/datastores))。
+
+PostgreSQL 上で動く Permify も、Snap Token を同じ方法で作る。トークンは PostgreSQL の `XID8` とスナップショット文字列を保持する ([`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go), v1.7.6)。そのドキュメントはトークンを "a token that consists of an encoded timestamp" (エンコードされたタイムスタンプから成るトークン) とだけ説明している ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens))。
+
+## 論文なしの Spanner
+
+SpiceDB は TrueTime を持つ Cloud Spanner の上でも動く。そこではドライバが "assumes the database is linearizable and skips the transaction overlap strategy" (データベースが線形化可能であると仮定し、トランザクションの重なり戦略を省く) ([datastores](https://authzed.com/docs/spicedb/concepts/datastores))、リビジョンを `SELECT CURRENT_TIMESTAMP()` で読む ([`spanner/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/spanner/revisions.go))。これが論文に最も近い構成である。
+
+## トークンがまったくない場合
+
+OpenFGA には zookie がない。そのドキュメントは、論文が "has a feature called `Zookies`" (`Zookies` という機能を持つ) と述べ、OpenFGA は "is considering a similar feature in future releases" (将来のリリースで同様の機能を検討している) としている ([consistency](https://openfga.dev/docs/interacting/consistency))。代わりにクエリは `MINIMIZE_LATENCY` (デフォルト) か `HIGHER_CONSISTENCY` を選ぶ。後者は "will skip the cache and query the database directly" (キャッシュを飛ばしてデータベースに直接問い合わせる)。PostgreSQL でセカンダリのデータストアが設定されている場合 (`datastore.secondaryUri`、"for postgres only" (postgres 専用)、[configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration))、`HIGHER_CONSISTENCY` はプライマリも選ぶ。コードのコメントには "If we are using higher consistency, we need to use the write database" (higher consistency を使う場合は書き込み用のデータベースを使う必要がある) とある ([`postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go), v1.22.1)。
+
+これで得られるのは「プライマリと同じだけ新しい」であり、「自分の書き込みと少なくとも同じだけ新しい」ではない。この違いはコストに効く。zookie があれば、ほとんどのチェックはキャッシュやレプリカを使え、最近のものだけがプライマリに行く。一方 `HIGHER_CONSISTENCY` は、そうしたクエリをすべてプライマリに送る。[OpenFGA のページ](../../ecosystem/openfga/#zookie-なしの一貫性) はキャッシュの場合を図示している。ドキュメントは、リソースの最終更新時刻とキャッシュの TTL を比べてリクエストごとにモードを選ぶことを勧めており、それはアプリケーションに zookie の情報の一部を自分で保持させることになる。
+
+その他の製品:
+
+- **Ory Keto** は Check API に `snaptoken` と `latest` のフィールドを持つが、どちらにも "This field is not implemented yet and has no effect" (このフィールドはまだ実装されておらず、効果はない) と記されている ([`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto))。
+- **Warrant** は `Warrant-Token` ヘッダを読むが、意味を持つのは値 `latest` だけで、この値は読み取りをプライマリに送る。他の値は無視され、オープンソース版のサーバーはトークンを返さない ([`wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go)、[Warrant](../../ecosystem/warrant/))。
+- **Topaz** はトークンを文書化していない。[比較のページ](../../ecosystem/compare/#一貫性トークンとモード) を参照。
+
+Tom MacWright による論文の読書ノートも、外側から同じことを指摘している。OpenFGA には zookie に相当するものがなく、"neither does Ory Keto" (Ory Keto にもない) ([Reading Zanzibar, 2025-05-02](https://macwright.com/2025/05/02/reading-zanzibar.html))。
+
+トークンがない場合、論文の保証を必要とするアプリケーションには 2 つの選択肢がある。常に最新のストア (プライマリは 1 台、キャッシュなし) から読むか、外されたユーザーがまだ許可されうる時間帯を受け入れるかである。
+
+## 製品ごとの仕組み
+
+| 製品とデータストア | 順序の出どころ | トークン | トークン以降での読み取り |
+| --- | --- | --- | --- |
+| 論文 (Spanner) | TrueTime + コミット待ち | zookie | 任意のレプリカ。必要なら待つ (§3.2.5) |
+| SpiceDB on Spanner | TrueTime。重なり戦略は省略 | ZedToken | Spanner のスナップショット読み取り |
+| SpiceDB on CockroachDB | HLC のタイムスタンプ。書き込みに重なりキー (デフォルトは `static`) | ZedToken | `AS OF SYSTEM TIME`。`fully_consistent` は別ノードの書き込みを見逃しうる |
+| SpiceDB on PostgreSQL | プライマリのトランザクション ID とスナップショット | ZedToken | リビジョンがあればレプリカ、なければプライマリ |
+| SpiceDB on MySQL | `AUTO_INCREMENT` のトランザクション ID | ZedToken | リビジョンがあればレプリカ、なければプライマリ (2 回のラウンドトリップ) |
+| Permify on PostgreSQL | プライマリの `XID8` とスナップショット | Snap Token | トークンのスナップショット |
+| OpenFGA | 公開されていない | なし | `HIGHER_CONSISTENCY`: キャッシュを飛ばしてプライマリを使う |
+| Ory Keto | 公開されていない | `snaptoken` フィールド (未実装) | 利用できない |
+| Warrant | なし (トークンは返されない) | `Warrant-Token` ヘッダ | `latest` のみ。他の値は無視される |
+
+各行の出典は上の各節にある。Permify のトークンに対する読み取り経路はソースでは追っておらず、この行はトークンの中身だけを反映している。
+
+<Callout kind="note" title="検証していないこと">
+
+AuthZed の CockroachDB の記事は、3 ノードのクラスタの 1 ノードにクロックとネットワークの遅延を注入して再現したと報告している。このページのタイムスタンプは説明用であり、測定したものではない。MySQL の `AUTO_INCREMENT` の id が因果的順序に従うという主張は、InnoDB が id を割り当てる方法からの推論であり、SpiceDB のドキュメントに書かれていることではない。
+
+</Callout>
+
+## 出典
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.2, §2.4, §2.4.4, §3.2.5, §5.
+- James C. Corbett et al., [Spanner: Google's Globally-Distributed Database](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), OSDI '12.
+- AuthZed, [The One Crucial Difference Between Spanner and CockroachDB](https://authzed.com/blog/prevent-newenemy-cockroachdb), 2021-10-14 (ベンダーのブログ).
+- AuthZed, [Enforcing Causal Ordering in Distributed Systems: The Importance of Permissions Checking](https://authzed.com/blog/new-enemies), 2021-02-17 (ベンダーのブログ).
+- AuthZed, [Datastores](https://authzed.com/docs/spicedb/concepts/datastores), SpiceDB docs.
+- SpiceDB v1.57.1 source: [`postgres/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/postgres/revisions.go), [`mysql/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/revisions.go), [`mysql` initial schema](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/migrations/zz_migration.0001_initial_schema.go), [`spanner/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/spanner/revisions.go).
+- Cockroach Labs, [`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start) (`--max-offset`).
+- Spencer Kimball and Irfan Sharif, [Living without atomic clocks: Where CockroachDB and Spanner diverge](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/), Cockroach Labs, 2022-01-27 (ベンダーのブログ).
+- OpenFGA, [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency) and [Configuring OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configuration); v1.22.1 source [`pkg/storage/postgres/postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go).
+- Permify, [Snap Tokens](https://fusionauth.io/permify-docs/operations/snap-tokens); v1.7.6 source [`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go).
+- Ory Keto, [`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto).
+- Warrant, [`pkg/wookie/wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go).
+- Tom MacWright, [Reading Zanzibar](https://macwright.com/2025/05/02/reading-zanzibar.html), 2025-05-02.

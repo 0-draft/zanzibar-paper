@@ -18,7 +18,7 @@ import Callout from "../../../components/diagram/Callout.astro";
 
 ## 튜플이 말할 수 없는 것
 
-논문의 튜플은 네 가지로 이루어지며 그 밖에는 아무것도 없다. 문법은 ⟨*object*⟩ ‘#’ ⟨*relation*⟩ ‘@’ ⟨*user*⟩이고, "the primary keys required to identify a relation tuple are ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, and ⟨*user*⟩"(관계 튜플을 식별하는 데 필요한 기본 키는 ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, ⟨*user*⟩다)(§2.1). 저장소에서는 "each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*"(각 행은 기본 키 *(샤드 ID, 객체 ID, 관계, 사용자, 커밋 타임스탬프)*로 식별된다)(§3.1.1). 논문은 다른 열을 기술하지 않는다. 만료도, 조건도, 사용자나 객체의 속성도 없다.
+논문의 튜플은 네 가지로 이루어지며 그 밖에는 아무것도 없다. 문법은 ⟨*object*⟩ ‘#’ ⟨*relation*⟩ ‘@’ ⟨*user*⟩이고, "the primary keys required to identify a relation tuple are ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, and ⟨*user*⟩"(관계 튜플을 식별하는 데 필요한 기본 키는 ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, ⟨*user*⟩다)(§2.1). 저장소에서는 "each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*"(각 행은 기본 키 <em>(샤드 ID, 객체 ID, 관계, 사용자, 커밋 타임스탬프)</em>로 식별된다)(§3.1.1). 논문은 다른 열을 기술하지 않는다. 만료도, 조건도, 사용자나 객체의 속성도 없다.
 
 요청 쪽도 마찬가지로 좁다. "A check request specifies a userset, represented by ⟨*object#relation*⟩, a putative user, often represented by an authentication token, and a zookie corresponding to the desired object version"(검사 요청은 ⟨*object#relation*⟩으로 표현되는 유저셋, 흔히 인증 토큰으로 표현되는 추정 사용자, 그리고 원하는 객체 버전에 대응하는 zookie를 지정한다)(§2.4.4). 호출자의 IP 주소, 시각, 거래 금액을 위한 필드는 없다.
 

@@ -1,0 +1,217 @@
+---
+title: "你需要 Zanzibar 嗎？"
+description: "自有資料庫中的角色表、OPA 或 Cedar 之類的政策引擎、Zanzibar 風格的服務，或它們的組合，在相同的需求上比較，並附上已發表的批評與回應。"
+section: guide
+part: practice
+order: 14
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.2", "2.3.1", "2.4.3", "2.4.5", "3", "4.2"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+論文描述的是一套為 "billions of objects shared by billions of users"（由數十億使用者共享的數十億個物件）打造的系統（§1）。大多數應用程式的規模都小得多，而讀者最常問的問題是：到底需不需要這樣一套系統。本頁在相同的需求上比較四種常見的答案：應用程式自有資料庫中的角色表、政策引擎、Zanzibar 風格的服務，以及它們的組合。本頁不選出贏家；所引用的來源確實意見分歧，因此照原樣引用。其中有幾個來源是廠商，會如此標明。
+
+這些選項背後的模型（ACL、RBAC、ABAC、ReBAC）在 [ACL、RBAC、ABAC、ReBAC](../access-control-models/) 中比較。開源的 Zanzibar 風格系統則在 [Zanzibar 風格系統比較](../../ecosystem/compare/)中比較。
+
+## 四種選項
+
+**自有資料庫中的角色表。** 授權是與其所保護之資料並列的列，例如 `(user_id, role, doc_id)`，應用程式以查詢檢查它們。「Anne 能看到的文件」清單就是一次 join。巢狀群組需要一個沿著成員資格邊前進的查詢；在 PostgreSQL 中，"Using `RECURSIVE`, a `WITH` query can refer to its own output"（使用 `RECURSIVE`，`WITH` 查詢可以參照它自己的輸出）（[PostgreSQL docs](https://www.postgresql.org/docs/current/queries-with.html)）。在 2021 年一則關於 Oso〈Why Authorization Is Hard〉的 Hacker News 討論串中，一位留言者主張，既然許多專案主要都在存取資料庫，在資料庫本身強制執行規則可能就已足夠（[HN 28543457](https://news.ycombinator.com/item?id=28543457)）。
+
+**政策引擎。** 規則存放在一種政策語言中，並針對應用程式提供的資料或引擎所快取的資料進行評估。"Cedar is a language for writing authorization policies and making authorization decisions based on those policies"（Cedar 是一種用於撰寫授權政策、並根據這些政策做出授權決策的語言），且 "Cedar evaluates each request against the provided policies and entities to make an allow or deny decision"（Cedar 針對所提供的政策與實體評估每一個請求，以做出允許或拒絕的決策）（[Cedar docs](https://docs.cedarpolicy.com/)）。OPA 保有 "a cache or replica of that data, just as OPA has a cache/replica of policy"（該資料的快取或副本，就像 OPA 保有政策的快取／副本一樣），資料透過 bundle、推送、請求輸入或評估期間的呼叫載入；使用 bundle 時，"OPA stores the entire datasource at once in memory"（OPA 會一次將整個資料來源存放在記憶體中）（[OPA external data](https://www.openpolicyagent.org/docs/external-data)）。
+
+**Zanzibar 風格的服務。** 關係事先儲存在授權服務中，並透過網路查詢。AuthZed（SpiceDB 背後的公司）是這樣描述差異的："authorization data must be explicitly written into the backing datastore ahead of query time, just like an RDBMS"（授權資料必須在查詢之前就明確寫入背後的資料儲存區，就像 RDBMS 一樣）（[AuthZed blog，2023-11-29](https://authzed.com/blog/policy-based-access-control)）。論文對單一共用服務的論證在 §1：它 "helps establish consistent semantics and user experience across applications"（有助於在各應用程式之間建立一致的語意與使用者體驗）、"makes it easier for applications to interoperate"（讓應用程式更容易互通），並支援共通的基礎設施，例如 "a search index that respects access control and works across applications"（能遵循存取控制並跨應用程式運作的搜尋索引）。
+
+**組合。** 可以是一個同時具備兩種模型的產品（SpiceDB 的 caveat、OpenFGA 的條件，見 [ACL、RBAC、ABAC、ReBAC](../access-control-models/)），也可以是兩套並列的系統，見下文討論。
+
+決策所需的資料存放在哪裡，又由誰保持最新？
+
+<Frames min="18rem">
+
+<Graph
+  width={280}
+  height={240}
+  title="角色表"
+  desc="應用程式讀寫同一個資料庫，其中同時存放它自己的資料與角色表。只有一條寫入路徑。"
+  nodes={[
+    { id: "app", x: 140, y: 40, label: "應用程式", kind: "client" },
+    { id: "db", x: 140, y: 175, label: "應用程式資料庫：\n文件 + 角色表", kind: "store", on: true },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "一筆交易", dir: "both", on: true },
+  ]}
+  caption="角色表：一個儲存區，一次寫入。"
+/>
+
+<Graph
+  width={320}
+  height={240}
+  title="政策引擎"
+  desc="應用程式將其資料存放在自己的資料庫中。它向政策引擎請求決策，並隨請求送出輸入與實體。引擎也存有政策，以及選擇性的、以 bundle 載入的資料副本。"
+  nodes={[
+    { id: "app", x: 80, y: 40, label: "應用程式", kind: "client" },
+    { id: "db", x: 80, y: 180, label: "應用程式資料庫", kind: "store" },
+    { id: "pe", x: 240, y: 120, label: "政策引擎\n（OPA、Cedar）", kind: "server", on: true },
+    { id: "b", x: 240, y: 205, label: "政策 + 資料\nbundle", kind: "note" },
+  ]}
+  edges={[
+    { from: "app", to: "db", dir: "both" },
+    { from: "app", to: "pe", label: "輸入 +\n實體", on: true },
+    { from: "b", to: "pe", dashed: true },
+  ]}
+  caption="政策引擎：資料隨請求傳遞，或被複製進去。"
+/>
+
+<Graph
+  width={280}
+  height={240}
+  title="Zanzibar 風格的服務"
+  desc="應用程式將其資料寫入自己的資料庫，並將關係元組寫入授權服務，後者有自己的資料儲存區。檢查送往該服務。兩次寫入是分開的。"
+  nodes={[
+    { id: "app", x: 140, y: 40, label: "應用程式", kind: "client" },
+    { id: "db", x: 60, y: 185, label: "應用程式資料庫", kind: "store" },
+    { id: "z", x: 215, y: 120, label: "授權服務", kind: "server" },
+    { id: "zs", x: 215, y: 200, label: "tuples", kind: "store", mono: true },
+  ]}
+  edges={[
+    { from: "app", to: "db", label: "寫入 1", on: true },
+    { from: "app", to: "z", label: "寫入 2、\n檢查", on: true },
+    { from: "z", to: "zs", dir: "both" },
+  ]}
+  caption="Zanzibar 風格：兩個儲存區，兩次寫入。"
+/>
+
+</Frames>
+
+請注意被標出的箭頭。使用角色表時，授權與資料在同一筆交易中變更。政策引擎將工作移到請求當下：呼叫它的一方必須蒐集事實。獨立的 Zanzibar 風格服務則將工作移到寫入當下：每一個影響存取權的變更都要寫入兩次，一次寫入應用程式，一次寫入服務。AuthZed 稱之為 "the dual-write problem"（雙重寫入問題），並列出了處理方式，從頻外一致性檢查到交易式 outbox 或持久執行（[AuthZed blog，2025-01-02](https://authzed.com/blog/the-dual-write-problem)）。論文沒有討論這項成本。它說 "Zanzibar stores ACLs and their metadata in Spanner databases"（Zanzibar 將 ACL 及其中繼資料儲存在 Spanner 資料庫中）（§3），以及客戶端將 zookie 儲存 "in an atomic write to the client storage"（以一次原子寫入存入客戶端儲存區）（§2.2），但沒有說明客戶端如何讓自己的資料與元組保持同步。
+
+## 需求與選項對照
+
+每一格都是本頁段落與來源的簡短摘要；「可行」表示該選項可以做到，但需要格中所列的工作。
+
+| 需求 | 自有資料庫中的角色表 | 政策引擎（OPA、Cedar） | Zanzibar 風格的服務 | 組合 |
+| --- | --- | --- | --- | --- |
+| 將單一物件分享給單一使用者或群組 | 可行：每個物件與主體一列授權 | 若將分享資料傳入或作為資料複製進去，則可行 | 原生支援：每次分享一筆元組（§2.1） | 分享放在關係儲存區，其餘作為政策 |
+| 巢狀群組 | 遞迴查詢（例如 `WITH RECURSIVE`） | 依引擎而定；資料必須包含整個階層 | 原生支援：使用者集合可以巢狀（§2.1）；深層群組有其成本，見 [Leopard](../leopard/) | 來自關係儲存區 |
+| 跨服務的一致性 | 一筆交易，限於單一資料庫內 | 取決於呼叫端資料所反映的狀態；引擎中沒有快照權杖 | 論文的 zookie（§2.2）；各產品支援程度不一（[比較](../../ecosystem/compare/)） | 各部分各自處理；政策這一側沿用呼叫端的新鮮度 |
+| 稽核：誰能看到 X | 對授權表進行查詢 | 分析規則加資料；對屬性規則而言很困難（[Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)） | Expand 傳回使用者集合樹（§2.4.5）；產品另外加入查找 API | 關係這一側可以回答；政策這一側同政策引擎 |
+| 列出：Anne 能看到什麼 | 一次 join | 部分評估或篩選，依引擎而定 | 查找 API 或批次檢查，見 [protecting a list endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint) | 同存放關係的那個儲存區 |
+| 單次檢查的延遲 | 一次本地查詢 | 在蒐集資料之後，於行程內或 sidecar 中評估 | 一次網路呼叫；Google 報告 Safe 檢查的 p50 ≈ 3 毫秒（§4.2） | 若兩套系統都在路徑上，就是兩次呼叫 |
+| 營運成本 | 資料庫之外沒有額外成本 | 將政策與資料分發到每個引擎 | 另一個有狀態的服務與資料儲存區 | 兩者皆有 |
+| 資料同步 | 不需要 | 每次請求時複製或傳入資料 | 由應用程式進行雙重寫入 | 只有關係需要雙重寫入 |
+
+延遲這一列最常被過度解讀。論文的數字（表 2，§4.2）來自 Google 的部署與快取；它們對單節點安裝毫無說明，而政策引擎的評估時間也沒有算入呼叫端蒐集資料所花的時間。AuthZed 以對自己有利的方式提出了第二點（[AuthZed blog](https://authzed.com/blog/policy-based-access-control)）；這是廠商的論點，本頁並未實測。
+
+## 大致的提問順序
+
+哪些問題能區分這些選項？下圖依循表格的各列，按照它們通常發揮決定作用的順序排列。
+
+<Graph
+  width={620}
+  height={360}
+  minWidth={540}
+  title="縮小選擇範圍的問題"
+  desc="三個問題的流程。第一：使用者是否會將單一物件分享給其他使用者或群組（可能是巢狀的）？若否，角色表或政策引擎通常就夠了。若是，第二個問題：是否有不只一個服務或資料庫需要相同的答案？若否，應用程式資料庫中的授權表加上遞迴查詢可能就夠了。若是，Zanzibar 風格的服務是一個候選。第三個問題，從任一分支而來：決策是否取決於請求情境，例如時間、IP 位址或金額？若是，就加上條件（caveat），或在旁邊加上一個政策引擎。"
+  nodes={[
+    { id: "q1", x: 150, y: 40, label: "使用者會將單一物件分享給\n使用者或巢狀群組嗎？", w: 280 },
+    { id: "a1", x: 500, y: 40, label: "角色表或\n政策引擎", kind: "note" },
+    { id: "q2", x: 150, y: 150, label: "是否有多個服務或資料庫\n需要相同的答案？", w: 280 },
+    { id: "a2", x: 500, y: 150, label: "授權表 +\n遞迴查詢", kind: "note" },
+    { id: "a3", x: 150, y: 250, label: "Zanzibar 風格的服務", kind: "server", on: true },
+    { id: "q3", x: 470, y: 250, label: "情境：時間、IP、\n金額？", w: 200 },
+    { id: "a4", x: 470, y: 330, label: "條件／caveat\n或政策引擎", kind: "note" },
+  ]}
+  edges={[
+    { from: "q1", to: "a1", label: "否" },
+    { from: "q1", to: "q2", label: "是" },
+    { from: "q2", to: "a2", label: "否" },
+    { from: "q2", to: "a3", label: "是", on: true },
+    { from: "a3", to: "q3", dashed: true },
+    { from: "a2", to: "q3", dashed: true },
+    { from: "q3", to: "a4", label: "是" },
+  ]}
+  caption="這是從本頁來源歸納出的經驗法則，而非規則。規模與團隊技能都會移動這些界線。"
+/>
+
+請注意，情境是另一條獨立的軸。論文沒有屬性條件；使用者集合改寫是以 "union, intersection, and exclusion"（聯集、交集與排除）組合使用者集合（§2.3.1）。無論前兩個問題的答案為何，關於時間或網路的規則都需要產品擴充或第二套系統。
+
+## 批評與回應
+
+這場辯論是公開的，部分也帶有商業性質。以下是主要已發表的立場，並註明各自的作者。
+
+**「Zanzibar isn't flexible」**（Greg Sarjeant，Oso，2024-11-01；Oso 販售以政策為基礎的授權服務）。論點是：應用程式詢問的是動作，但 "Your authorization service only lets you define relations"（你的授權服務只讓你定義關係），因此團隊最後會把權限編碼成關係；而受限的語言讓你更難精確表達你的意思（[Oso blog](https://www.osohq.com/post/google-zanzibar-isnt-flexible)）。Oso 也寫過在微服務中集中授權資料的同步成本（[Oso Academy](https://www.osohq.com/academy/microservices-authorization)），並推出了「Local Authorization」，讓 Oso 可以回答「是，如果……」，再由應用程式針對自己的資料庫評估該條件（[Oso blog，2024-04-16](https://www.osohq.com/post/local-authorization)）。
+
+**「Reading Zanzibar」**（Tom MacWright，2025-05-02；獨立開發者）。這篇文章將論文的模型（物件、使用者集合、改寫規則）與其為一致性和規模而設的機制分開，指出 "Zookies are very clearly important to Google"（zookie 對 Google 而言顯然非常重要），而數個類 Zanzibar 產品卻沒有對應物，並結論道："For my own needs, zookies and distributed consistency to the degree described in the Zanzibar paper are overkill."（就我自己的需求而言，zookie 以及 Zanzibar 論文所描述程度的分散式一致性都是過度設計。）MacWright 想要的是 "the API surface that Zanzibar describes"（Zanzibar 所描述的 API 介面），以 "some scalability for simplicity"（一些可擴展性換取簡單性）（[macwright.com](https://macwright.com/2025/05/02/reading-zanzibar.html)）。
+
+**政策與 ReBAC 互補**（AuthZed，SpiceDB 的開發者）。AuthZed 的學習頁面說 "Policy engines like Cerbos and OPA primarily focus on ABAC but can be used alongside ReBAC systems"（Cerbos 與 OPA 之類的政策引擎主要著重於 ABAC，但可以與 ReBAC 系統並用），用於無法對應到儲存關係的情況（[AuthZed learn](https://authzed.com/learn/rebac-key-components)）。其比較文章說，選擇 "depends on the authorization problems you have"（取決於你所面對的授權問題），而 SpiceDB 的 caveat "offer some of the benefits of policy engines without sacrificing the benefits of Google Zanzibar"（在不犧牲 Google Zanzibar 優點的情況下，提供政策引擎的部分好處）（[AuthZed blog，2023-11-29](https://authzed.com/blog/policy-based-access-control)）。SpiceDB FAQ 表明 "SpiceDB is not a policy engine"（SpiceDB 不是政策引擎）（[FAQ](https://authzed.com/docs/spicedb/getting-started/faq)）。在 2021 年的 HN 討論串中，一位 AuthZed 創辦人反駁了「ReBAC 系統無法做到 ABAC」的說法，而那篇 Oso 文章的作者也同意 Zanzibar 風格的系統可以與政策引擎結合（[HN 28543457](https://news.ycombinator.com/item?id=28543457)）。
+
+**來自實務者。** 在 2023 年的一則 HN 討論串中，一位留言者稱 Zanzibar "overkill for the majority of needs"（對大多數需求而言是過度設計），另一位則回應說託管服務隱藏了那份複雜度（[HN 36470943](https://news.ycombinator.com/item?id=36470943)）。在 2025 年一則關於以 Postgres 重寫 OpenFGA 的討論串中，被提到的痛點是 "keeping everything in sync all the time"（隨時讓所有東西保持同步）（[HN 45661547](https://news.ycombinator.com/item?id=45661547)）。
+
+這些立場的重疊程度比標題所顯示的更高：它們都同意關係資料與請求情境是不同種類的輸入，分歧在於應以哪一者為中心。
+
+## 混合部署
+
+組合在實務上是什麼樣子？以下是由上述模式組合而成的說明範例，並非有文件記載的參考架構。
+
+<Graph
+  width={630}
+  height={360}
+  minWidth={540}
+  title="混合部署"
+  desc="客戶端呼叫 API gateway，由 gateway 中的政策引擎做出粗粒度的請求層級決策，例如權杖範圍與 IP 範圍。gateway 轉送給應用程式服務。服務向 Zanzibar 風格的服務檢查分享與群組權限，後者將關係存放在自己的資料儲存區。服務將自己的資料寫入應用程式資料庫，而同一筆交易中的 outbox 表會被中繼到授權服務，成為元組寫入。授權服務的 Watch 串流餵送一個依權限篩選的搜尋索引。"
+  nodes={[
+    { id: "c", x: 60, y: 60, label: "客戶端", kind: "client" },
+    { id: "gw", x: 220, y: 60, label: "API gateway +\n政策引擎", kind: "server" },
+    { id: "svc", x: 420, y: 60, label: "應用程式\n服務", kind: "server" },
+    { id: "db", x: 420, y: 190, label: "應用程式資料庫\n+ outbox 表", kind: "store" },
+    { id: "relay", x: 420, y: 300, label: "outbox 中繼", kind: "server" },
+    { id: "z", x: 580, y: 190, label: "授權\n服務", kind: "server", on: true },
+    { id: "zs", x: 580, y: 300, label: "tuples", kind: "store", mono: true },
+    { id: "idx", x: 220, y: 190, label: "搜尋索引", kind: "store" },
+  ]}
+  edges={[
+    { from: "c", to: "gw", label: "請求" },
+    { from: "gw", to: "svc", label: "範圍、IP 通過" },
+    { from: "svc", to: "db", label: "一筆交易" },
+    { from: "svc", to: "z", label: "Check", on: true },
+    { from: "db", to: "relay", dashed: true },
+    { from: "relay", to: "z", label: "元組寫入", dashed: true },
+    { from: "z", to: "zs", dir: "both" },
+    { from: "z", to: "idx", label: "Watch", dashed: true, labelOffset: -10 },
+  ]}
+  groups={[
+    { x: 140, y: 15, w: 160, h: 95, label: "請求情境" },
+    { x: 510, y: 140, w: 120, h: 200, label: "關係" },
+  ]}
+  caption="在邊緣以政策處理情境，在單一服務中處理關係，並以 outbox 讓兩次寫入不會在無聲無息中產生偏差。"
+/>
+
+請注意，每一套系統都回答它持有資料的那個問題。gateway 只根據請求本身做決定；關係服務決定誰能看到哪份文件；outbox 將雙重寫入轉為一筆本地交易，再加上會重試的傳遞，這是 AuthZed [雙重寫入文章](https://authzed.com/blog/the-dual-write-problem)中的選項之一。Watch 箭頭依循論文自己的用法："Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API"（有些客戶端會為 Zanzibar 中的關係元組維護次要索引。它們可以透過我們的 Watch API 做到這一點）（§2.4.3），而 Expand 有助於 "build efficient search indices for access-controlled content"（為受存取控制的內容建構高效率的搜尋索引）（§2.4.5）。
+
+<Callout kind="note" title="本頁沒有定論的部分">
+
+這裡沒有任何來源在同一個工作負載上相互比較過這些選項。需求各列是定性的，延遲數字來自 Google，而大多數產品主張都出自廠商自己的頁面。
+
+</Callout>
+
+## 資料來源
+
+- Zanzibar 論文，§1、§2.1、§2.2、§2.3.1、§2.4.3、§2.4.5、§3、§4.2（本站的轉錄）
+- PostgreSQL documentation, WITH Queries: [postgresql.org/docs/current/queries-with.html](https://www.postgresql.org/docs/current/queries-with.html)
+- Cedar documentation: [docs.cedarpolicy.com](https://docs.cedarpolicy.com/)
+- Open Policy Agent, External Data: [openpolicyagent.org/docs/external-data](https://www.openpolicyagent.org/docs/external-data)
+- D. R. Kuhn, E. J. Coyne, T. R. Weil, Adding Attributes to Role-Based Access Control, IEEE Computer, 2010: [csrc.nist.gov](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf)
+- Evan Cordell, Policy-Based Access Control (PBAC) vs Google Zanzibar, AuthZed blog (2023-11-29): [authzed.com/blog/policy-based-access-control](https://authzed.com/blog/policy-based-access-control)
+- AuthZed, The Dual-Write Problem (2025-01-02): [authzed.com/blog/the-dual-write-problem](https://authzed.com/blog/the-dual-write-problem)
+- AuthZed, What are the key components of ReBAC?: [authzed.com/learn/rebac-key-components](https://authzed.com/learn/rebac-key-components)
+- AuthZed, SpiceDB FAQ: [authzed.com/docs/spicedb/getting-started/faq](https://authzed.com/docs/spicedb/getting-started/faq)
+- AuthZed, Protecting a List Endpoint: [authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)
+- Greg Sarjeant, Google Zanzibar Isn't Flexible, Oso blog (2024-11-01): [osohq.com/post/google-zanzibar-isnt-flexible](https://www.osohq.com/post/google-zanzibar-isnt-flexible)
+- Greg Sarjeant, Launching Local Authorization, Oso blog (2024-04-16): [osohq.com/post/local-authorization](https://www.osohq.com/post/local-authorization)
+- Oso Academy, Authorization in Microservices: [osohq.com/academy/microservices-authorization](https://www.osohq.com/academy/microservices-authorization)
+- Tom MacWright, Reading Zanzibar (2025-05-02): [macwright.com/2025/05/02/reading-zanzibar.html](https://macwright.com/2025/05/02/reading-zanzibar.html)
+- Hacker News, "Why Authorization Is Hard" (2021-09-15): [news.ycombinator.com/item?id=28543457](https://news.ycombinator.com/item?id=28543457)
+- Hacker News, "Why Google Zanzibar shines at building authorization" (2023-06-25): [news.ycombinator.com/item?id=36470943](https://news.ycombinator.com/item?id=36470943)
+- Hacker News, "We rewrote OpenFGA in pure Postgres" (2025-10-21): [news.ycombinator.com/item?id=45661547](https://news.ycombinator.com/item?id=45661547)

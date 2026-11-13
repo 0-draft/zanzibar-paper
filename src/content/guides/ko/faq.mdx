@@ -1,0 +1,74 @@
+---
+title: "흔한 오해"
+description: "\"로그인을 처리한다\"부터 \"원자 시계가 필요하다\"까지, 사람들이 Zanzibar에 대해 흔히 잘못 아는 열두 가지를 논문의 절이나 1차 출처로 바로잡는다."
+section: guide
+part: reference
+order: 15
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.2", "2.3.1", "2.4.4", "2.4.5", "3", "3.1.1", "3.2.3", "3.2.4", "3.2.5", "4.1", "4.2", "4.3", "5"]
+---
+
+아래의 오해들은 논문에 관한 공개 논의, 즉 Hacker News 스레드, 블로그 글, 벤더 자료에서 왔으며, 등장하는 곳에 링크했다. 각 제목은 오해를 서술하고, 그 아래 본문이 바로잡는다. 용어는 [용어집](../glossary/)에서 설명한다.
+
+## Zanzibar가 로그인을 처리한다
+
+그렇지 않다. 논문은 "a system for storing permissions and performing authorization checks based on the stored permissions"(권한을 저장하고 저장된 권한을 기반으로 인가 검사를 수행하는 시스템)를 소개한다(§1). 신원은 이미 확립된 채로 도착한다. Check는 "a putative user, often represented by an authentication token"(흔히 인증 토큰으로 표현되는 추정 사용자)을 지정하므로(§2.4.4), 다른 어떤 시스템이 먼저 사용자를 인증한 것이다. 논문에 관한 2019년 HN 스레드에서도 같은 정정이 나왔다. "This isn't a login service, this is an ACL service"(이것은 로그인 서비스가 아니라 ACL 서비스다)([HN 20132520](https://news.ycombinator.com/item?id=20132520)).
+
+## Google에서 Zanzibar를 살 수 있다
+
+Zanzibar 자체는 살 수 없다. 논문은 "including Calendar, Cloud, Drive, Maps, Photos, and YouTube"(Calendar, Cloud, Drive, Maps, Photos, YouTube를 포함한) Google 서비스가 쓰는 내부 시스템을 기술하며(§1), 2023년 HN 스레드에서 한 댓글 작성자는 "Google doesn't actually offer Zanzibar as a product/service (in GCP or otherwise) to customers"(Google은 실제로 Zanzibar를 고객에게 (GCP든 다른 형태든) 제품이나 서비스로 제공하지 않는다)라고 지적했다([HN 36470943](https://news.ycombinator.com/item?id=36470943)). Google Cloud 고객은 이를 간접적으로 쓴다. "Google's Cloud IAM system is built as a layer on top of Zanzibar’s ACL storage and evaluation system"(Google의 Cloud IAM 시스템은 Zanzibar의 ACL 저장 및 평가 시스템 위의 계층으로 구축되었다)(§5). 다른 이들이 판매하거나 공개하는 것은 재구현이며, [Zanzibar 계열 시스템 비교](../../ecosystem/compare/)에서 비교한다.
+
+## "Zanzibar에서 영감을 받았다"는 것은 논문 전체를 구현했다는 뜻이다
+
+보통은 데이터 모델과 API의 모양을 뜻한다. Tom MacWright는 모델(객체, 유저셋, 재작성 규칙)을 일관성과 규모를 위한 장치와 구분하며, "very clearly important to Google"(Google에게 매우 분명히 중요한) zookie가 일부 제품에는 대응물이 없다고 지적한다([Reading Zanzibar](https://macwright.com/2025/05/02/reading-zanzibar.html)). Leopard(§3.2.4)도 오픈 소스 프로젝트들이 대부분 빼놓는 부분이다. SpiceDB의 Leopard 같은 인덱스는 AuthZed 상용 제품의 일부다([SpiceDB 페이지](../../ecosystem/spicedb/)). 보장에 의존하기 전에 각 제품을 관심사별로 논문과 대조해 보라.
+
+## 가용성 99.999%는 1년에 약 5분의 다운타임을 뜻한다
+
+논문은 시계 시간을 측정하지 않는다. "We define availability as the fraction of 'qualified' RPCs the service answers successfully within latency thresholds: 5 seconds for a Safe request, and 15 seconds for a Recent request"(우리는 가용성을 서비스가 지연 시간 임계값 안에서 성공적으로 응답한 '적격' RPC의 비율로 정의한다. 임계값은 Safe 요청에 5초, Recent 요청에 15초다)(§4.3). 가용성은 프로버로 샘플링한 요청을 재생하여 측정하며, "success ratios over 90-day windows averaged across clusters"(클러스터 전체에 걸쳐 평균한 90일 구간의 성공 비율)를 집계한다. 시간으로 말하면 논문은 "for every quarter, Zanzibar has less than 2 minutes of global downtime and fewer than 13 minutes when the global error ratio exceeds 10%"(분기마다 Zanzibar의 전역 다운타임은 2분 미만이고, 전역 오류 비율이 10%를 넘는 시간은 13분 미만이다)라고 말한다(§4.3). 2019년 HN 스레드에서 이 수치를 연간 분으로 환산한 독자는 §4.3의 정의로 정정되었다([HN 20132520](https://news.ycombinator.com/item?id=20132520)).
+
+## 논문은 p95 지연 시간만 보고한다
+
+초록은 95번째 백분위수만 언급하지만, 평가는 그 이상을 다룬다. 표 2는 Check, Read, Expand, Write의 50, 95, 99번째 백분위수를 제시하며, Safe 검사의 경우 3.0, 9.46, 15.0 ms다(§4.2). 그림 4는 99.9번째를 더한다. "At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively"(50, 95, 99, 99.9번째 백분위수에서 각각 약 3, 11, 20, 93밀리초로 최고치)(§4.2). Recent 행은 꼬리에서 훨씬 느리며(Check의 p95가 60.0 ms), 그래서 논문은 두 종류를 따로 보고한다(§4.1).
+
+## ACL 항목의 순서가 중요하며, 거부는 부정 항목이다
+
+둘 다 모델의 일부가 아니다. 튜플은 ⟨*namespace*⟩, ⟨*object_id*⟩, ⟨*relation*⟩, ⟨*user*⟩로 식별되므로(§2.1), 객체의 튜플들은 위치가 없는 집합을 이룬다. 거부는 네임스페이스 설정에서 표현된다. 재작성 규칙은 유저셋을 "by operations such as union, intersection, and exclusion"(합집합, 교집합, 차집합 같은 연산으로) 결합하며(§2.3.1), 차집합은 집합 하나를 제거한다. 예를 들어 열람자에서 차단 목록을 빼는 것이다. 실제로 중요한 것은 *시간*상의 순서다. "ACL checks must respect the order in which users modify ACLs and object contents"(ACL 검사는 사용자가 ACL과 객체 내용을 수정하는 순서를 준수해야 한다)(§2.2). [일관성, 스냅샷, zookie](../consistency/)를 보라.
+
+## Check를 루프로 돌리거나 Expand를 호출하면 목록이 나온다
+
+어느 쪽도 "Anne이 볼 수 있는 모든 문서"를 반환하지 않는다. Expand는 반대 방향으로, 객체 하나에서 그 사용자들로 가며, 평평한 목록이 아니라 리프가 "usersets pointing to other ⟨*object#relation*⟩ pairs"(다른 ⟨*object#relation*⟩ 쌍을 가리키는 유저셋)일 수 있는 *유저셋 트리*를 반환한다(§2.4.5). Check 루프는 이미 가진 후보를 걸러낼 뿐이다. 논문의 검색 용도에는 페이지마다 "tens to hundreds of checks"(수십에서 수백 건의 검사)가 필요하다(§1). 제품들은 SpiceDB의 LookupResources와 OpenFGA의 ListObjects 같은 목록 API를 추가했으며, OpenFGA는 그 비용이 "vary drastically depending on the model complexity"(모델 복잡도에 따라 크게 달라진다)고 말한다([OpenFGA 문서](https://openfga.dev/docs/getting-started/perform-list-objects)). AuthZed는 조회, 일괄 검사, 비정규화 방식을 기술한다([AuthZed 문서](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)).
+
+## 모든 사용자–권한 쌍을 튜플로 저장해야 한다
+
+모델이 피하도록 설계된 것이 바로 그것이다. 파생된 튜플을 객체마다 저장하는 것은 "would be wasteful and make it hard to make modifications across all objects"(낭비이며 모든 객체에 걸친 수정을 어렵게 만든다)(§2.3.1). 대신 재작성 규칙이 그것을 도출하며, 유저셋은 ACL이 "refer to groups and thus supports representing nested group membership"(그룹을 참조할 수 있게 하여 중첩된 그룹 멤버십을 표현할 수 있게) 한다(§2.1). Zanzibar는 "avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)"(저장소 비정규화를 피하고 정규화된 데이터에만 의존한다(§3.2.4에서 기술한 경우는 제외))(§3.2.5). 그 예외가 [Leopard](../leopard/) 그룹 인덱스다. 2025년 HN 스레드에서 한 댓글 작성자도 경험으로 같은 점을 짚었다. 사용자 권한을 열거하면 조합 폭발이 일어나므로 그룹에 부여하라는 것이다([HN 45661547](https://news.ycombinator.com/item?id=45661547)).
+
+## 그래프 데이터베이스가 필요하다
+
+Zanzibar 자체도 그래프 데이터베이스를 쓰지 않는다. "Zanzibar stores ACLs and their metadata in Spanner databases"(Zanzibar는 ACL과 그 메타데이터를 Spanner 데이터베이스에 저장한다)이며, 튜플은 "(shard ID, object ID, relation, user, commit timestamp)"((샤드 ID, 객체 ID, 관계, 사용자, 커밋 타임스탬프))를 키로 하는 행에 있다(§3, §3.1.1). 그래프는 저장 엔진이 아니라 서버가 쿼리 시점에 순회한다. 오픈 소스 구현들도 관계형 저장소 위에서 동작한다. SpiceDB는 CockroachDB, Cloud Spanner, PostgreSQL, MySQL을 지원하고([SpiceDB datastores](https://authzed.com/docs/spicedb/concepts/datastores)), OpenFGA는 인메모리 저장소 외에 Postgres, MySQL, SQLite를 지원한다([OpenFGA configuration](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)).
+
+## AWS IAM과 같은 것이다
+
+철학은 공유하지만 그룹 모델은 공유하지 않는다. 논문은 Amazon, Google, Microsoft의 IAM 시스템을 같은 계열에 놓는다. "What all of these systems have in common is unified ACL storage and an RPC-based API, a philosophy also core to Zanzibar's design"(이 시스템들 모두의 공통점은 통합된 ACL 저장소와 RPC 기반 API이며, 이는 Zanzibar 설계의 핵심이기도 한 철학이다)(§5). 그러나 AWS IAM에서는 "User groups can't be nested; they can contain only users, not other IAM groups"(사용자 그룹은 중첩할 수 없다. 사용자만 담을 수 있고 다른 IAM 그룹은 담을 수 없다)([AWS IAM 문서](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html)), 반면 Zanzibar의 유저셋은 중첩되며 검사 시점에 재귀적으로 추적된다(§2.1, §3.2.3). AWS IAM은 또한 관계의 저장소가 아니라 신원과 리소스에 붙는 정책 언어다.
+
+## Zanzibar는 ABAC를 전혀 할 수 없다, 또는 ABAC를 기본으로 지원한다
+
+둘 다 틀렸다. 논문에는 속성 조건이 없다. 그 관계 설정은 유저셋을 합집합, 교집합, 차집합으로 결합하며(§2.3.1), 튜플에는 컨텍스트를 위한 필드가 없다(§2.1). 제품들은 확장으로 조건을 추가했다. CEL로 쓰는 SpiceDB caveat, OpenFGA 조건, Permify의 속성과 규칙이다([ACL, RBAC, ABAC, ReBAC](../access-control-models/) 참조). Oso의 "Why Authorization Is Hard"에 관한 2021년 HN 스레드에서 AuthZed 창업자 한 명은 ReBAC 시스템으로 ABAC를 할 수 없다는 주장에 반박했고, 그 글의 작성자는 Zanzibar 계열 시스템을 정책 엔진과 짝지을 수 있다는 데 동의했다([HN 28543457](https://news.ycombinator.com/item?id=28543457)).
+
+## TrueTime이나 원자 시계가 필요하다
+
+필요한 것은 쓰기의 순서를 정하고 일관된 스냅샷을 읽는 방법이다. TrueTime은 Google이 그것을 얻은 방법이다. 논문은 "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness"(하부 데이터베이스 시스템인 Spanner에 의존하여 외부 일관성과 오래된 정도가 제한된 스냅샷 읽기를 모두 제공한다)(§5). AuthZed는 SpiceDB가 다른 곳에서 같은 순서를 얻는 방법을 기술한다. 겹치는 키에 대해서만 외부 일관성을 제공하는 CockroachDB에서는 기본 전략이 "all relationship writes touch the same row"(모든 관계 쓰기가 같은 행을 건드리게) 하며, PostgreSQL은 외부 일관성을 직접 제공하지만 그 위에 스냅샷 읽기를 추가해야 한다([AuthZed 블로그, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). 어떤 제품이 new enemy 보장을 유지하는지는 시계 하드웨어가 아니라 이러한 세부에 달려 있다. [일관성, 스냅샷, zookie](../consistency/)를 보라.
+
+## 출처
+
+- Zanzibar paper, §1, §2.1, §2.2, §2.3.1, §2.4.4, §2.4.5, §3, §3.1.1, §3.2.3, §3.2.4, §3.2.5, §4.1, §4.2, §4.3, §5 (this site's transcription)
+- Hacker News, "Zanzibar: Consistent, Global Authorization System" (2019-06-08): [news.ycombinator.com/item?id=20132520](https://news.ycombinator.com/item?id=20132520)
+- Hacker News, "Why Google Zanzibar shines at building authorization" (2023-06-25): [news.ycombinator.com/item?id=36470943](https://news.ycombinator.com/item?id=36470943)
+- Hacker News, "Why Authorization Is Hard" (2021-09-15): [news.ycombinator.com/item?id=28543457](https://news.ycombinator.com/item?id=28543457)
+- Hacker News, "We rewrote OpenFGA in pure Postgres" (2025-10-21): [news.ycombinator.com/item?id=45661547](https://news.ycombinator.com/item?id=45661547)
+- Tom MacWright, Reading Zanzibar (2025-05-02): [macwright.com/2025/05/02/reading-zanzibar.html](https://macwright.com/2025/05/02/reading-zanzibar.html)
+- OpenFGA, Perform a List Objects call: [openfga.dev/docs/getting-started/perform-list-objects](https://openfga.dev/docs/getting-started/perform-list-objects)
+- AuthZed, Protecting a List Endpoint: [authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)
+- AuthZed, SpiceDB datastores: [authzed.com/docs/spicedb/concepts/datastores](https://authzed.com/docs/spicedb/concepts/datastores)
+- OpenFGA, Configure OpenFGA: [openfga.dev/docs/getting-started/setup-openfga/configure-openfga](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)
+- AWS, IAM user groups: [docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html)
+- AuthZed, The One Crucial Difference Between Spanner and CockroachDB (2021-10-14): [authzed.com/blog/prevent-newenemy-cockroachdb](https://authzed.com/blog/prevent-newenemy-cockroachdb)

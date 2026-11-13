@@ -258,7 +258,7 @@ Zanzibar는 자신의 내부 호출을 헤징하지 않는다. 검사마다 비�
 
 - CPU: 각 RPC는 "generic *cpu-seconds*"(일반화된 *CPU 초*)로 비용이 매겨진다. 각 클라이언트에는 전역 CPU 한도가 있으며, "its RPCs will be throttled if it exceeds the limit *and* there is no spare capacity in the overall system."(한도를 초과하고 *동시에* 시스템 전체에 여유 용량이 없으면 그 RPC는 스로틀링된다.)
 - 처리 중인 RPC: 각 서버는 전체 개수와 클라이언트별 개수를 제한한다.
-- Spanner: "the maximum number of concurrent reads per *(object, client)* and per client on each Spanner server."(각 Spanner 서버에서 *(객체, 클라이언트)*별 및 클라이언트별 최대 동시 읽기 수.)
+- Spanner: "the maximum number of concurrent reads per *(object, client)* and per client on each Spanner server."(각 Spanner 서버에서 <em>(객체, 클라이언트)</em>별 및 클라이언트별 최대 동시 읽기 수.)
 - 락 테이블: "different lock table keys for requests from different clients"(서로 다른 클라이언트의 요청에 서로 다른 락 테이블 키)를 사용하여, Spanner가 한 클라이언트를 스로틀링해도 다른 클라이언트가 막히지 않게 한다.
 
 ## Watch 경로
@@ -319,7 +319,7 @@ Zanzibar는 자신의 내부 호출을 헤징하지 않는다. 검사마다 비�
   caption="네임스페이스마다 튜플 데이터베이스 하나(왼쪽), 모든 네임스페이스가 공유하는 설정 데이터베이스 하나와 변경 로그 하나(오른쪽)."
 />
 
-**튜플 데이터베이스.** "We store relation tuples of each namespace in a separate database, where each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*."(우리는 각 네임스페이스의 관계 튜플을 별도의 데이터베이스에 저장하며, 각 행은 기본 키 *(샤드 ID, 객체 ID, 관계, 사용자, 커밋 타임스탬프)*로 식별된다.)(§3.1.1) 커밋 타임스탬프가 키의 일부이므로 오래된 버전은 자신의 행에 남으며, "so that we can evaluate checks and reads at any timestamp within the garbage collection window"(가비지 컬렉션 기간 안의 어떤 타임스탬프에서든 검사와 읽기를 평가할 수 있다). 예제의 튜플은 `doc`과 `group` 데이터베이스에 다음과 같이 놓일 것이다.
+**튜플 데이터베이스.** "We store relation tuples of each namespace in a separate database, where each row is identified by primary key *(shard ID, object ID, relation, user, commit timestamp)*."(우리는 각 네임스페이스의 관계 튜플을 별도의 데이터베이스에 저장하며, 각 행은 기본 키 <em>(샤드 ID, 객체 ID, 관계, 사용자, 커밋 타임스탬프)</em>로 식별된다.)(§3.1.1) 커밋 타임스탬프가 키의 일부이므로 오래된 버전은 자신의 행에 남으며, "so that we can evaluate checks and reads at any timestamp within the garbage collection window"(가비지 컬렉션 기간 안의 어떤 타임스탬프에서든 검사와 읽기를 평가할 수 있다). 예제의 튜플은 `doc`과 `group` 데이터베이스에 다음과 같이 놓일 것이다.
 
 | 데이터베이스 | 샤드 ID | 객체 ID | 관계 | 사용자 | 커밋 타임스탬프 |
 | --- | --- | --- | --- | --- | --- |
@@ -330,7 +330,7 @@ Zanzibar는 자신의 내부 호출을 헤징하지 않는다. 검사마다 비�
 
 한 객체의 행은 함께 정렬된다. 논문은 이 키 순서가 "allows us to look up all relation tuples for a given object ID or *(object ID, relation)* pair"(주어진 객체 ID 또는 *(객체 ID, 관계)* 쌍에 대한 모든 관계 튜플을 조회할 수 있게 한다)라고 말한다. "Usually the shard ID is determined solely by the object ID"(보통 샤드 ID는 객체 ID만으로 결정된다)이며, 멤버가 매우 많은 그룹에서는 "computed from both object ID and user"(객체 ID와 사용자 양쪽으로부터 계산)될 수 있다(§3.1.1). 논문은 샤드 함수를 제시하지 않으므로 위의 *s*(…)는 자리 표시자이며, 사용자 열의 정확한 인코딩도 기술되어 있지 않다.
 
-**변경 로그.** 모든 네임스페이스를 위한 데이터베이스 하나로, *(변경 로그 샤드 ID, 타임스탬프, 고유 갱신 ID)*를 키로 하며, "where a changelog shard is randomly selected for each write"(변경 로그 샤드는 쓰기마다 무작위로 선택된다)(§3.1.2).
+**변경 로그.** 모든 네임스페이스를 위한 데이터베이스 하나로, <em>(변경 로그 샤드 ID, 타임스탬프, 고유 갱신 ID)</em>를 키로 하며, "where a changelog shard is randomly selected for each write"(변경 로그 샤드는 쓰기마다 무작위로 선택된다)(§3.1.2).
 
 **네임스페이스 설정.** 테이블 두 개를 가진 데이터베이스 하나다. "keyed by namespace IDs"(네임스페이스 ID를 키로 하는) 설정 테이블과, "keyed by commit timestamps"(커밋 타임스탬프를 키로 하는) "a changelog of config updates"(설정 갱신의 변경 로그)다. 서버는 시작할 때 모든 설정을 로드하고 이후 그 변경 로그를 따라간다(§3.1.3).
 

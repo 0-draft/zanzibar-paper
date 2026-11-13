@@ -164,7 +164,7 @@ AuthZed 稱 ZedToken 為 "the SpiceDB equivalent of Google Zanzibar's Zookie con
 
 `fully_consistent` 是 `WriteRelationships`、`DeleteRelationships`、`ReadSchema` 與 `WriteSchema` 的預設值；其他所有 API 的預設值則是 `minimize_latency`（[consistency docs](https://authzed.com/docs/spicedb/concepts/consistency)）。
 
-ZedToken 如何阻止 Chen 看到他在編輯之前就已被移除的 readme？
+在編輯之前已從資料夾 A 中被移除的 Chen，ZedToken 如何阻止他看到編輯後的 readme？
 
 <Swimlane
   lanes={["應用程式", "SpiceDB", "應用程式資料庫"]}

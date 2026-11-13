@@ -1,0 +1,319 @@
+---
+title: "从 Multics 到 Zanzibar"
+description: "六十年的访问控制：从能力列表和 Multics ACL，经过 RBAC 和 ABAC，到 Zanzibar 以及其后的开源系统，每一步都附有原始来源。"
+section: guide
+part: background
+order: 2
+checked: "2026-11-13"
+paper: ["2.1", "3.2.4", "4", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Timeline from "../../../components/diagram/Timeline.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar 论文在 [§5 相关工作](../../#s5)中描述了自己的渊源。它在数据模型方面引用了 Multics、UNIX、POSIX ACL、VMS 和 Taos；在角色方面引用了 RBAC；在“通过 RPC API 提供统一 ACL 存储”的思路上引用了 Amazon、Google 和 Microsoft 的 IAM 系统；把 Facebook 的 TAO 作为规模相近的系统；在一致性问题上引用了 Lamport 时钟、Spanner、Chubby 和 ZooKeeper。本页按时间顺序沿着同样的几条线索展开。
+
+## 这些思想如何通向 Zanzibar
+
+最早的多用户系统必须决定谁能接触什么。1966 年，Dennis 和 Van Horn 为每个计算赋予一份*能力*（capability）列表，能力是一种不可伪造的令牌，它指名一个对象并授予对它的权限（[Dennis 和 Van Horn](https://doi.org/10.1145/365230.365252)）。Lampson 1971 年的访问矩阵表明，能力和访问控制列表是存储同一张表的两种方式，分别按行或按列存储（[Lampson](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)）。Multics 采取了按列的视角：每个段和目录都带有一个 ACL（[Saltzer](https://dl.acm.org/doi/10.1145/361011.361067)）。Zanzibar 也站在 ACL 这一边：它回答的是“谁能接触这个对象？”。
+
+随后，操作系统先把列表变得更廉价、更粗粒度，之后又变得更丰富。论文自己追溯了这一过程：在 UNIX 第一版中，文件标志说明 "whether owner and non-owner can read or write the file"（所有者和非所有者能否读写该文件）；到第四版，有了 "for owner, group, and others"（针对所有者、组和其他人）的读、写和执行位；POSIX ACL 增加了 "an arbitrary list of users and groups"（任意的用户和组列表）；VMS "supports ACL inheritance for files created within a directory tree"（支持对在目录树中创建的文件进行 ACL 继承）（§5）。权限、用户、组和继承这四个词，正是 Zanzibar 的数据模型着手支持的内容。
+
+从 1970 年代起，模型逐渐脱离按对象的列表。Bell–LaPadula 和 Biba 让系统而不是所有者依据标签作出决定；Zanzibar 是自主访问控制，因此它们是对照而不是祖先。基于角色的访问控制（1992）在用户和权限之间放入了角色；论文说角色 "are similar to Zanzibar relations"（与 Zanzibar 的关系相似）（§5）。基于属性的访问控制由 NIST 2014 年的指南 SP 800-162 定义，在请求时根据属性计算决策。基于关系的访问控制由 Gates 于 2007 年命名、由 Fong 于 2011 年形式化，它根据“是……的成员”或“是……的父文件夹”这类关系作出决定，而这些关系可以组合（[Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)）。论文从未使用 ReBAC 这个词，但它的关系元组就构成这样一张图。
+
+Google 的新东西在于规模和一致性。论文说，截至 2019 年 7 月的论文，Zanzibar "has been in production use for more than 5 years"（已在生产环境中使用超过 5 年）（§4），因此它最晚在 2014 年就已运行；没有任何公开来源给出开始的年份。它为 Calendar、Cloud、Drive、Maps、Photos 和 YouTube 提供服务（§1）。论文拿来比较的 TAO 提供 "eventual global consistency"（最终的全局一致性），而 Zanzibar 提供 "external consistency and snapshot reads with bounded staleness"（外部一致性和有界陈旧度的快照读），从而防范 “new enemy” 问题（§5）。Lamport 时钟被排除，因为它们 "require explicit participation of all “processes”"（需要所有“进程”显式参与），而 Zanzibar 的某些“进程”是 "external clients or even human users"（外部客户端甚至是人类用户）。Chubby 不支持 "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness"（大量数据、高效的范围读取，或在客户端指定的快照上进行有界陈旧度的读取），ZooKeeper 既不提供跨节点的外部一致性，也不提供有界陈旧度的快照读（§5）。保证来自 Spanner 及其 TrueTime 时钟（[Spanner，OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)）。
+
+论文发表之后，其他人以开源方式重建了这一设计。Ory Keto 于 2021 年围绕它进行了重写，SpiceDB、OpenFGA、Permify 和 Topaz 在之后约十八个月内相继出现。与此同时，ABAC 一脉的策略引擎 OPA 和 Cedar 日趋成熟，而 OpenID 基金会于 2023 年成立的 AuthZEN 工作组对“应用如何向授权引擎请求决策”进行了标准化：其 Authorization API 1.0 于 2026 年 1 月成为 OpenID 最终规范。各系统的细节见生态系统页面。
+
+## 时间线
+
+<Timeline
+  sourceLabel="来源"
+  items={[
+    {
+      era: "操作系统",
+      year: "1966",
+      title: "能力列表",
+      body: "Dennis 和 Van Horn 把一个计算的“保护域”（sphere of protection）描述为其能力列表，即 C-list。能力回答的是“这个主体能接触什么？”。",
+      href: "https://doi.org/10.1145/365230.365252",
+    },
+    {
+      era: "操作系统",
+      year: "1971",
+      title: "UNIX 第一版：所有者与非所有者位",
+      body: "chmod 有六个模式位：所有者和非所有者各自的读、写位，可执行位，以及 set-user-ID。没有组这一类别。（日期来自一份存档副本；未核对原始手册。）",
+      href: "http://man.cat-v.org/unix-1st/2/sys-chmod",
+    },
+    {
+      era: "操作系统",
+      year: "1973",
+      title: "UNIX 第四版：组权限位",
+      body: "日期为 8/5/73 的 chmod 页面增加了 set-group-ID，以及针对所有者、组和其他人的读、写、执行位。",
+      href: "https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2",
+    },
+    {
+      era: "操作系统",
+      year: "1973–1974",
+      title: "Saltzer 描述的 Multics ACL",
+      body: "每个段和目录上都有一个 ACL。1973 年 10 月在 SOSP 上发表，1974 年 7 月刊于 CACM；Multics 本身运行得更早。Zanzibar 参考文献 [23]。",
+      href: "https://dl.acm.org/doi/10.1145/361011.361067",
+    },
+    {
+      era: "操作系统",
+      year: "1997–1998",
+      title: "POSIX.1e ACL：草案 17，随后撤回",
+      body: "草案 17（1997 年 10 月）成为 Linux ACL 的基础；1003.1e 的发起于 1998 年 1 月被撤回。",
+      href: "https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html",
+    },
+    {
+      era: "模型与标准",
+      year: "1971",
+      title: "Lampson 的 “Protection”：访问矩阵",
+      body: "行是域（主体），列是对象，单元格是访问属性。ACL 是附在对象上的一列；能力是一个域的各条目。",
+      href: "https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf",
+    },
+    {
+      era: "模型与标准",
+      year: "1973",
+      title: "Bell–LaPadula",
+      body: "强制性机密性：不可上读，不可下写。MITRE MTR-2547 第 I 卷（1973 年 3 月）；*-属性（不可下写）出现在第 II 卷（1973 年 5 月）。引自 Bell 本人的回顾文章。",
+      href: "https://www.acsac.org/2005/papers/Bell.pdf",
+    },
+    {
+      era: "模型与标准",
+      year: "1975–1977",
+      title: "Biba 完整性模型",
+      body: "Bell–LaPadula 在完整性方面的对偶。MITRE MTR-3153（1975 年 6 月），通常引为 ESD-TR-76-372（1977 年 4 月）。",
+      href: "https://seclab.cs.ucdavis.edu/projects/history/CD/index.html",
+    },
+    {
+      era: "模型与标准",
+      year: "1992",
+      title: "基于角色的访问控制",
+      body: "Ferraiolo 和 Kuhn，第 15 届美国国家计算机安全会议。Zanzibar 参考文献 [17]。",
+      href: "https://csrc.nist.gov/projects/role-based-access-control",
+    },
+    {
+      era: "模型与标准",
+      year: "1996",
+      title: "RBAC96",
+      body: "Sandhu 等人于 1996 年 2 月在 IEEE Computer 上形式化了一族 RBAC 模型。",
+      href: "https://csrc.nist.gov/projects/role-based-access-control",
+    },
+    {
+      era: "模型与标准",
+      year: "2003",
+      title: "XACML 1.0，OASIS 标准",
+      body: "一种 XML 策略语言，把执行点与决策点分离。2003 年 2 月的具体批准日期因来源而异。",
+      href: "https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html",
+    },
+    {
+      era: "模型与标准",
+      year: "2004",
+      title: "ANSI INCITS 359-2004（RBAC）",
+      body: "统一的 NIST RBAC 模型于 2004 年 2 月 11 日成为 ANSI 标准；修订版为 INCITS 359-2012。",
+      href: "https://csrc.nist.gov/projects/role-based-access-control",
+    },
+    {
+      era: "模型与标准",
+      year: "2007",
+      title: "“Relationship-Based Access Control” 一词提出",
+      body: "Carrie Gates，W2SP 2007，依据 Fong 2011 年论文中的说法（摘要和参考文献 [18]）。未核对 Gates 的论文本身。",
+      href: "https://dl.acm.org/doi/10.1145/1943513.1943539",
+    },
+    {
+      era: "模型与标准",
+      year: "2011",
+      title: "Fong：一个 ReBAC 保护模型",
+      body: "依据社交网络中所有者与访问者之间的关系作出决策；与角色不同，关系可以组合。",
+      href: "https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf",
+    },
+    {
+      era: "模型与标准",
+      year: "2013",
+      title: "XACML 3.0，OASIS 标准",
+      body: "核心规范的日期为 2013 年 1 月 22 日。",
+      href: "https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html",
+    },
+    {
+      era: "模型与标准",
+      year: "2014",
+      title: "NIST SP 800-162（ABAC）",
+      body: "定义了基于属性的访问控制；2014 年 1 月发布，2019 年 8 月 2 日更新。",
+      href: "https://csrc.nist.gov/pubs/sp/800/162/upd2/final",
+    },
+    {
+      era: "全球规模",
+      year: "2012",
+      title: "Spanner",
+      body: "Google 的全球分布式数据库，具备 TrueTime 和外部一致性。Zanzibar 把元组存储在其中（参考文献 [15]）。",
+      href: "https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf",
+    },
+    {
+      era: "全球规模",
+      year: "不晚于 2014",
+      title: "Zanzibar 投入生产",
+      body: "论文说它 \"has been in production use for more than 5 years\"（已在生产环境中使用超过 5 年）（§4）。这意味着它开始于 2014 年年中之前；没有公开来源给出具体年份。",
+      href: "https://www.usenix.org/conference/atc19/presentation/pang",
+    },
+    {
+      era: "全球规模",
+      year: "2019",
+      title: "Zanzibar 论文，USENIX ATC '19",
+      body: "Pang 等人，2019 年 7 月在华盛顿州伦顿发表。即本站所翻译的论文。",
+      href: "https://www.usenix.org/conference/atc19/presentation/pang",
+      on: true,
+    },
+    {
+      era: "开源与标准",
+      year: "2016",
+      title: "Open Policy Agent v0.1.0",
+      body: "一个使用 Rego 语言的通用策略引擎；首个 GitHub 版本发布于 2016 年 7 月 14 日。",
+      href: "https://github.com/open-policy-agent/opa/releases",
+    },
+    {
+      era: "开源与标准",
+      year: "2021",
+      title: "OPA 从 CNCF 毕业",
+      body: "2021 年 2 月 4 日宣布。",
+      href: "https://www.cncf.io/announcements/2021/02/04/cloud-native-computing-foundation-announces-open-policy-agent-graduation/",
+    },
+    {
+      era: "开源与标准",
+      year: "2021",
+      title: "Ory Keto 的 Zanzibar 重写",
+      body: "v0.6.0-alpha.1，2021 年 4 月 7 日。Keto 本身始于 2018 年。",
+      href: "https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1",
+    },
+    {
+      era: "开源与标准",
+      year: "2021",
+      title: "SpiceDB 首个版本",
+      body: "2021 年 9 月 30 日，来自 AuthZed。",
+      href: "https://github.com/authzed/spicedb",
+    },
+    {
+      era: "开源与标准",
+      year: "2022",
+      title: "OpenFGA 首个版本",
+      body: "2022 年 6 月 10 日。由 Okta 员工开发；自 2025 年 11 月起为 CNCF 孵化项目（CNCF 博客，2025 年 11 月 11 日）。",
+      href: "https://github.com/openfga/openfga",
+    },
+    {
+      era: "开源与标准",
+      year: "2022",
+      title: "Permify 首个版本",
+      body: "2022 年 8 月 3 日。",
+      href: "https://github.com/Permify/permify",
+    },
+    {
+      era: "开源与标准",
+      year: "2022",
+      title: "Topaz 首个版本",
+      body: "2022 年 10 月 25 日，来自 Aserto。",
+      href: "https://github.com/aserto-dev/topaz",
+    },
+    {
+      era: "开源与标准",
+      year: "2023",
+      title: "Cedar 开源",
+      body: "AWS 于 2023 年 5 月 10 日以 Apache-2.0 许可证发布 Cedar 策略语言。",
+      href: "https://aws.amazon.com/about-aws/whats-new/2023/05/cedar-open-source-language-access-control",
+    },
+    {
+      era: "开源与标准",
+      year: "2023",
+      title: "Amazon Verified Permissions 正式发布",
+      body: "一项评估 Cedar 策略的托管服务，于 2023 年 6 月 13 日正式发布。",
+      href: "https://aws.amazon.com/about-aws/whats-new/2023/06/amazon-verified-permissions-generally-available/",
+    },
+    {
+      era: "开源与标准",
+      year: "2023",
+      title: "OpenID AuthZEN 工作组",
+      body: "2023 年 10 月 20 日宣布成立，旨在定义 \"standard mechanisms, protocols and formats for communication between authorization components\"（授权组件之间通信的标准机制、协议和格式）。",
+      href: "https://openid.net/announcing-authzen-working-group/",
+    },
+    {
+      era: "开源与标准",
+      year: "2026",
+      title: "AuthZEN Authorization API 1.0 最终版",
+      body: "被批准为 OpenID 最终规范，于 2026 年 1 月 12 日宣布（81 票赞成，1 票反对，25 票弃权）。该 API 让策略执行点（PEP）向策略决策点（PDP）请求决策。",
+      href: "https://openid.net/authorization-api-1-0-final-specification-approved/",
+    },
+  ]}
+/>
+
+## Zanzibar 从何处取得了什么
+
+论文仔细区分了“构建于某物之上”与“与某物相似”。它运行在 Spanner 和 Leopard 之上；它支持早期 ACL 系统的功能；它称 RBAC 的角色与其关系相似，称 Abadi 等人的 "blessings" 与其元组相似（§5）。
+
+哪些早期工作出现在 Zanzibar 的哪个部分？
+
+<Graph
+  width={620}
+  height={340}
+  minWidth={540}
+  title="Zanzibar 从何处取得了什么"
+  desc="左列是早期工作以及 Zanzibar 运行于其上的系统：Multics、UNIX、POSIX ACL、VMS（ACL、组、继承）；Abadi 等人，2015（blessings）；RBAC，1992（角色）；Spanner，2012（TrueTime、快照读），绿色；Leopard 索引，Zanzibar 的一个组件，绿色。右列是 Zanzibar 的组成部分：关系元组与用户集（§2.1）；关系与用户集重写（§2.3.1）；外部一致性与 zookie（§2.2）；嵌套组检查（§3.2.4）。标有“支持其功能”和“相似”的虚线箭头，分别从 ACL 系统和 Abadi 等人指向元组与用户集，以及从 RBAC 指向关系。标有“构建于其上”的实线箭头从 Spanner 指向外部一致性，从 Leopard 指向嵌套组检查。"
+  nodes={[
+    { id: "acl", x: 140, y: 40, label: "Multics、UNIX、POSIX ACL、VMS\nACL、组、继承", kind: "object" },
+    { id: "taos", x: 140, y: 110, label: "Abadi 等人（2015）\n\"blessings\"", kind: "object" },
+    { id: "rbac", x: 140, y: 180, label: "RBAC（1992）\n角色", kind: "object" },
+    { id: "span", x: 140, y: 250, label: "Spanner（2012）\nTrueTime、快照读", kind: "store" },
+    { id: "leo", x: 140, y: 315, label: "Leopard 索引\n（Zanzibar 的一部分）", kind: "store" },
+    { id: "tup", x: 505, y: 75, label: "关系元组\n与用户集（§2.1）", kind: "object", on: true },
+    { id: "rel", x: 505, y: 180, label: "关系与用户集\n重写（§2.3.1）", kind: "object", on: true },
+    { id: "ext", x: 505, y: 250, label: "外部一致性、\nzookie（§2.2）", kind: "object", on: true },
+    { id: "nest", x: 505, y: 315, label: "嵌套组\n检查（§3.2.4）", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "acl", to: "tup", label: "支持其功能", dashed: true },
+    { from: "taos", to: "tup", label: "相似", dashed: true },
+    { from: "rbac", to: "rel", label: "相似", dashed: true },
+    { from: "span", to: "ext", label: "构建于其上" },
+    { from: "leo", to: "nest", label: "构建于其上" },
+  ]}
+  caption="实线箭头：Zanzibar 运行于其上。虚线箭头：论文将其列为先例或相似的思想（§5、§3.2.4）。"
+/>
+
+注意其中的划分。上半部分的数据模型是旧思想的重新组合；论文自己声称的贡献是统一，用元组建模 "allows us to unify the concepts of ACLs and groups"（使我们能够统一 ACL 与组的概念）（§2.1），而 Abadi 等人则把二者分开（§5）。下半部分则是让它能在 Google 的规模下工作的东西：提供 "external consistency and snapshot reads with bounded staleness"（外部一致性和有界陈旧度的快照读）的 Spanner（§5），以及 Leopard，"an indexing system used to optimize operations on large and deeply nested sets"（一个用于优化大型和深度嵌套集合上操作的索引系统）（§3），用于指针追逐无法足够快地处理的组（§3.2.4）。
+
+<Callout kind="note" title="构建于其上的 IAM">
+
+论文还指出，Google 的 Cloud IAM 系统 "is built as a layer on top of Zanzibar’s ACL storage and evaluation system"（构建为 Zanzibar 的 ACL 存储与评估系统之上的一层）（§5）：一个运行在关系存储之上的基于角色的产品。各种模型如何结合，见 [ACL、RBAC、ABAC、ReBAC](../access-control-models/)。
+
+</Callout>
+
+<Callout kind="paper" title="论文出处">
+
+相关工作，包括本页提到的每个系统：§5。生产历史：§4。Leopard：§3 和 §3.2.4。
+
+</Callout>
+
+## 来源
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- J. B. Dennis and E. C. Van Horn, "Programming Semantics for Multiprogrammed Computations", CACM 9(3), 1966, [doi.org/10.1145/365230.365252](https://doi.org/10.1145/365230.365252)；早期版本为 MIT Project MAC TR-23，1965 年 12 月，[dspace.mit.edu](https://dspace.mit.edu/handle/1721.1/149345)
+- B. W. Lampson, "Protection", 1971; reprinted in ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
+- UNIX 第一版 sys-chmod(2)，存档副本，[man.cat-v.org/unix-1st/2/sys-chmod](http://man.cat-v.org/unix-1st/2/sys-chmod)
+- UNIX 第四版 chmod(2)，Unix history repository，[github.com/dspinellis/unix-history-repo](https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2)
+- J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
+- A. Grünbacher, "POSIX Access Control Lists on Linux", USENIX ATC 2003 FREENIX, [usenix.org](https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html)
+- D. E. Bell, "Looking Back at the Bell-La Padula Model", ACSAC 2005, [PDF](https://www.acsac.org/2005/papers/Bell.pdf)
+- UC Davis 计算机安全实验室历史档案（Biba），[seclab.cs.ucdavis.edu/projects/history/CD](https://seclab.cs.ucdavis.edu/projects/history/CD/index.html)
+- NIST，Role Based Access Control 项目，[csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
+- OASIS，XACML 3.0 核心规范，[docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html)
+- NIST SP 800-162，[csrc.nist.gov/pubs/sp/800/162/upd2/final](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)
+- P. W. L. Fong, "Relationship-Based Access Control: Protection Model and Policy Language", CODASPY '11, [dl.acm.org/doi/10.1145/1943513.1943539](https://dl.acm.org/doi/10.1145/1943513.1943539), [PDF](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)
+- J. C. Corbett et al., "Spanner: Google's Globally-Distributed Database", OSDI '12, [PDF](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
+- Open Policy Agent 版本发布，[github.com/open-policy-agent/opa/releases](https://github.com/open-policy-agent/opa/releases)；CNCF 毕业公告，[cncf.io](https://www.cncf.io/announcements/2021/02/04/cloud-native-computing-foundation-announces-open-policy-agent-graduation/)
+- Ory Keto v0.6.0-alpha.1，[github.com/ory/keto/releases/tag/v0.6.0-alpha.1](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)
+- SpiceDB，[github.com/authzed/spicedb](https://github.com/authzed/spicedb)
+- OpenFGA，[github.com/openfga/openfga](https://github.com/openfga/openfga)
+- Permify，[github.com/Permify/permify](https://github.com/Permify/permify)
+- Topaz，[github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
+- AWS，Cedar 开源公告，[aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/05/cedar-open-source-language-access-control)；Amazon Verified Permissions 正式发布，[aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/06/amazon-verified-permissions-generally-available/)
+- CNCF，OpenFGA 成为 CNCF 孵化项目，2025 年 11 月 11 日，[cncf.io](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
+- OpenID 基金会，AuthZEN 工作组公告，[openid.net/announcing-authzen-working-group](https://openid.net/announcing-authzen-working-group/)；Authorization API 1.0 最终版，[openid.net/authorization-api-1-0-final-specification-approved](https://openid.net/authorization-api-1-0-final-specification-approved/)；规范本身，[openid.net/specs/authorization-api-1_0.html](https://openid.net/specs/authorization-api-1_0.html)

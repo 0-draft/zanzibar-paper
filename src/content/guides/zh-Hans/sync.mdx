@@ -188,7 +188,7 @@ AuthZed 的文章列出了这些选择：什么都不做、带外一致性检查
   caption="把令牌与它所覆盖的数据行保存在同一个事务中，并在历史丢失时保留一条重建路径。"
 />
 
-注意索引泳道的第二行：令牌与它所产生的数据行存储在一起。如果索引器先保存令牌再崩溃，它就会跳过变更；如果它应用了数据行而在保存令牌之前崩溃，它就会重新应用这些行，而只有当索引写入是幂等的时这才无害。要挺过长时间的停机，就像该 issue 所说，把流复制到一个你控制的持久队列中，或者做好重建的准备。SpiceDB 的恢复字段是 `ChangesThrough`：文档建议 "in a loop, sending in the last received ZedToken from `ChangesThrough` if the call disconnects"（在循环中调用 Watch，如果调用断开，就传入从 `ChangesThrough` 最后收到的 ZedToken）（[Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)）。
+注意索引泳道的第一个事件：令牌与它所产生的数据行存储在一起。如果索引器先保存令牌再崩溃，它就会跳过变更；如果它应用了数据行而在保存令牌之前崩溃，它就会重新应用这些行，而只有当索引写入是幂等的时这才无害。要挺过长时间的停机，就像该 issue 所说，把流复制到一个你控制的持久队列中，或者做好重建的准备。SpiceDB 的恢复字段是 `ChangesThrough`：文档建议 "in a loop, sending in the last received ZedToken from `ChangesThrough` if the call disconnects"（在循环中调用 Watch，如果调用断开，就传入从 `ChangesThrough` 最后收到的 ZedToken）（[Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)）。
 
 ## zookie 与各方案
 
@@ -203,7 +203,7 @@ zookie 协议对客户端有两点要求：在保存内容时请求一个 zookie
 | 变更数据捕获 | 在日志被读取、发布和消费之后 | 与发件箱相同，但延迟的跳数更多 |
 | 由 Watch 馈送的索引 | 早已在其中；延迟在索引一侧 | 不能直接覆盖任何东西：zookie 是不透明的，因此索引无法判断自己是否与某个给定令牌一样新。用该令牌重新检查，或者比较索引自己保存的位置 |
 
-对于发件箱和 CDC 这两行，论文的保证比看上去要弱。§2.2 中的例 B 依赖于 ACL 变更（B1）在内容变更（B2）被检查之前已经进入 Zanzibar。中间有一个中继时，Anne 可以移除 Beto，一秒后保存新内容，并从一次在中继应用该移除之前运行的内容变更检查中得到一个 zookie。对于 Zanzibar 当时拥有的数据而言，这个 zookie 是正确的；只是那份数据落后了。有两种缓解办法，都不出自上述来源，也都未在此测试：让撤销直接经过授权服务，其次再记录到数据库中（把左侧那种失败模式当作一种可见的“仍在列表中但被拒绝”状态来接受）；或者让中继把它收到的令牌写回受影响的行，使之后的检查携带该令牌。
+对于发件箱和 CDC 这两行，论文的保证比看上去要弱。§2.2 中的例 B 依赖于 ACL 变更（B1）在内容变更（B2）被检查之前已经进入 Zanzibar。中间有一个中继时，Anne 可以移除 Beto，一秒后保存新内容，并从一次在中继应用该移除之前运行的内容变更检查中得到一个 zookie。对于 Zanzibar 当时拥有的数据而言，这个 zookie 是正确的；只是那份数据落后了。有两种缓解办法，都不出自上述来源，也都未在此测试：让撤销直接经过授权服务，其次再记录到数据库中（把右侧那种失败模式当作一种可见的“仍在列表中但被拒绝”状态来接受）；或者让中继把它收到的令牌写回受影响的行，使之后的检查携带该令牌。
 
 论文的不透明规则是有意为之：zookie 是不透明的，"to discourage our clients from choosing arbitrary timestamps and to allow future extensions"（是为了避免客户端选择任意时间戳，并为未来的扩展留有余地）（§2.4）。其代价体现在最后一行：客户端无法比较两个 zookie 来判断哪个更新。
 

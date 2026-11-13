@@ -1,0 +1,74 @@
+---
+title: "常見誤解"
+description: "人們對 Zanzibar 常有的十二個誤解，從「它負責登入」到「你需要原子鐘」，每一項都以論文章節或第一手來源加以更正。"
+section: guide
+part: reference
+order: 15
+checked: "2026-11-13"
+paper: ["1", "2.1", "2.2", "2.3.1", "2.4.4", "2.4.5", "3", "3.1.1", "3.2.3", "3.2.4", "3.2.5", "4.1", "4.2", "4.3", "5"]
+---
+
+以下的誤解出自對論文的公開討論：Hacker News 討論串、部落格文章與廠商資料，出現處皆附上連結。每個標題陳述一項誤解；其下的文字則是更正。術語說明見[術語表](../glossary/)。
+
+## Zanzibar 負責登入
+
+並不是。論文介紹的是 "a system for storing permissions and performing authorization checks based on the stored permissions"（一套用於儲存權限並根據所儲存之權限執行授權檢查的系統）（§1）。身分在抵達時就已確立：Check 指名的是 "a putative user, often represented by an authentication token"（一位推定的使用者，通常以驗證權杖表示）（§2.4.4），因此是其他系統先驗證了使用者。在 2019 年關於這篇論文的 HN 討論串中，也出現了同樣的更正："This isn't a login service, this is an ACL service"（這不是登入服務，這是 ACL 服務）（[HN 20132520](https://news.ycombinator.com/item?id=20132520)）。
+
+## 可以向 Google 購買 Zanzibar
+
+無法購買 Zanzibar 本身。論文描述的是一套由 Google 服務使用的內部系統，"including Calendar, Cloud, Drive, Maps, Photos, and YouTube"（包括 Calendar、Cloud、Drive、Maps、Photos 與 YouTube）（§1），而在 2023 年的一則 HN 討論串中，一位留言者指出 "Google doesn't actually offer Zanzibar as a product/service (in GCP or otherwise) to customers"（Google 實際上並未將 Zanzibar 作為產品／服務（在 GCP 或其他地方）提供給客戶）（[HN 36470943](https://news.ycombinator.com/item?id=36470943)）。Google Cloud 的客戶是間接使用它："Google's Cloud IAM system is built as a layer on top of Zanzibar’s ACL storage and evaluation system"（Google 的 Cloud IAM 系統是建構在 Zanzibar 的 ACL 儲存與評估系統之上的一層）（§5）。其他人販售或發布的是重新實作的版本，比較見 [Zanzibar 風格系統比較](../../ecosystem/compare/)。
+
+## 「受 Zanzibar 啟發」代表整篇論文都已實作
+
+通常指的是資料模型與 API 的形式。Tom MacWright 將模型（物件、使用者集合、改寫規則）與為一致性和規模而設的機制分開，並指出 zookie "very clearly important to Google"（對 Google 而言顯然非常重要），但在某些產品中卻沒有對應物（[Reading Zanzibar](https://macwright.com/2025/05/02/reading-zanzibar.html)）。Leopard（§3.2.4）是開源專案大多省略的另一個部分；SpiceDB 類似 Leopard 的索引屬於 AuthZed 的商業產品（[SpiceDB 頁面](../../ecosystem/spicedb/)）。在依賴任何保證之前，請逐一議題地將各產品與論文對照。
+
+## 99.999% 的可用性代表每年約五分鐘的停機
+
+論文衡量的不是時鐘時間。"We define availability as the fraction of 'qualified' RPCs the service answers successfully within latency thresholds: 5 seconds for a Safe request, and 15 seconds for a Recent request"（我們將可用性定義為服務在延遲門檻內成功回答之「合格」RPC 的比例：Safe 請求為 5 秒，Recent 請求為 15 秒）（§4.3）。它的衡量方式是以探測程式重播取樣的請求，並彙整 "success ratios over 90-day windows averaged across clusters"（各叢集平均的 90 天時間窗成功率）；以時間來表達，論文說 "for every quarter, Zanzibar has less than 2 minutes of global downtime and fewer than 13 minutes when the global error ratio exceeds 10%"（每一季，Zanzibar 的全域停機時間少於 2 分鐘，全域錯誤率超過 10% 的時間少於 13 分鐘）（§4.3）。在 2019 年的 HN 討論串中，一位將這個數字換算為每年分鐘數的讀者，被以 §4.3 的定義更正（[HN 20132520](https://news.ycombinator.com/item?id=20132520)）。
+
+## 論文只報告 p95 延遲
+
+摘要只提到第 95 百分位，但評估的內容更多。表 2 列出 Check、Read、Expand 與 Write 的第 50、95 與 99 百分位；Safe 檢查分別為 3.0、9.46 與 15.0 毫秒（§4.2）。圖 4 加上了第 99.9 百分位："At the 50th, 95th, 99th, and 99.9th percentiles it peaks at roughly 3, 11, 20, and 93 msec, respectively"（在第 50、95、99 與 99.9 百分位，尖峰分別約為 3、11、20 與 93 毫秒）（§4.2）。Recent 各列在尾端慢得多（Check 的 p95 為 60.0 毫秒），這正是論文將兩類請求分開報告的原因（§4.1）。
+
+## ACL 項目的順序很重要，拒絕是一筆負向項目
+
+兩者都不屬於這個模型。一筆元組由 ⟨*namespace*⟩、⟨*object_id*⟩、⟨*relation*⟩ 與 ⟨*user*⟩ 識別（§2.1），因此一個物件的元組構成一個沒有位置的集合。拒絕是在命名空間設定中表達的：改寫規則 "by operations such as union, intersection, and exclusion"（以聯集、交集與排除等運算）組合使用者集合（§2.3.1），而排除會移除一個集合，例如檢視者減去封鎖清單。真正重要的是*時間*上的順序："ACL checks must respect the order in which users modify ACLs and object contents"（ACL 檢查必須遵循使用者修改 ACL 與物件內容的順序）（§2.2）；見[一致性、快照與 zookie](../consistency/)。
+
+## 以迴圈執行 Check，或呼叫 Expand，就能得到清單
+
+兩者都不會傳回「Anne 能看到的所有文件」。Expand 的方向相反，從一個物件走向其使用者，並傳回一棵*使用者集合樹*，其葉節點可能是 "usersets pointing to other ⟨*object#relation*⟩ pairs"（指向其他 ⟨*object#relation*⟩ 配對的使用者集合）（§2.4.5），而不是扁平的清單。以迴圈執行 Check 只能篩選你已經擁有的候選項目；論文的搜尋使用情境每一頁需要 "tens to hundreds of checks"（數十到數百次檢查）（§1）。產品加入了列出用的 API，例如 SpiceDB 的 LookupResources 與 OpenFGA 的 ListObjects，OpenFGA 表示其成本可能 "vary drastically depending on the model complexity"（因模型複雜度而有極大差異）（[OpenFGA docs](https://openfga.dev/docs/getting-started/perform-list-objects)）；AuthZed 描述了查找、批次檢查與反正規化等做法（[AuthZed docs](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)）。
+
+## 應該將每一組使用者與權限都存成元組
+
+這正是這個模型設計上要避免的。為每個物件儲存一筆衍生元組 "would be wasteful and make it hard to make modifications across all objects"（既浪費，也會使跨所有物件的修改變得困難）（§2.3.1）；改寫規則會改為推導它，而使用者集合讓 ACL 能 "refer to groups and thus supports representing nested group membership"（參照群組，從而支援表示巢狀的群組成員資格）（§2.1）。Zanzibar "avoids storage denormalization and relies only on normalized data (except for the cases described in §3.2.4)"（避免儲存層的反正規化，只依賴正規化的資料（§3.2.4 所述的情況除外））（§3.2.5），例外就是 [Leopard](../leopard/) 群組索引。在 2025 年的一則 HN 討論串中，一位留言者以經驗提出了相同的觀點：逐一列舉使用者權限會導致組合爆炸，因此應該授權給群組（[HN 45661547](https://news.ycombinator.com/item?id=45661547)）。
+
+## 你需要圖資料庫
+
+Zanzibar 本身並未使用圖資料庫："Zanzibar stores ACLs and their metadata in Spanner databases"（Zanzibar 將 ACL 及其中繼資料儲存在 Spanner 資料庫中），元組存放在以 "(shard ID, object ID, relation, user, commit timestamp)"（（分片 ID、物件 ID、關係、使用者、提交時間戳記））為鍵的列中（§3、§3.1.1）。圖是在查詢時由伺服器走訪的，而不是由儲存引擎。開源實作同樣執行在關聯式儲存區上：SpiceDB 支援 CockroachDB、Cloud Spanner、PostgreSQL 與 MySQL（[SpiceDB datastores](https://authzed.com/docs/spicedb/concepts/datastores)），OpenFGA 則除了記憶體內儲存區之外，還支援 Postgres、MySQL 與 SQLite（[OpenFGA configuration](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)）。
+
+## 它與 AWS IAM 相同
+
+兩者共享一種理念，但群組模型不同。論文將 Amazon、Google 與 Microsoft 的 IAM 系統歸為同一類："What all of these systems have in common is unified ACL storage and an RPC-based API, a philosophy also core to Zanzibar's design"（這些系統的共同點是統一的 ACL 儲存與以 RPC 為基礎的 API，這同樣是 Zanzibar 設計核心的理念）（§5）。但在 AWS IAM 中，"User groups can't be nested; they can contain only users, not other IAM groups"（使用者群組無法巢狀；它們只能包含使用者，不能包含其他 IAM 群組）（[AWS IAM docs](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html)），而 Zanzibar 的使用者集合可以巢狀，並在檢查時被遞迴追蹤（§2.1、§3.2.3）。AWS IAM 也是一種附加在身分與資源上的政策語言，而不是關係的儲存區。
+
+## Zanzibar 完全無法做 ABAC，或原生支援 ABAC
+
+兩種說法都不對。論文沒有屬性條件：其關係設定以聯集、交集與排除組合使用者集合（§2.3.1），而元組沒有存放情境的欄位（§2.1）。產品以擴充的方式加入了條件：SpiceDB 以 CEL 撰寫的 caveat、OpenFGA 的條件、Permify 的屬性與規則（見 [ACL、RBAC、ABAC、ReBAC](../access-control-models/)）。在 2021 年關於 Oso〈Why Authorization Is Hard〉的 HN 討論串中，一位 AuthZed 創辦人反駁了「ReBAC 系統無法做到 ABAC」的說法，而該文章的作者也同意 Zanzibar 風格的系統可以與政策引擎搭配使用（[HN 28543457](https://news.ycombinator.com/item?id=28543457)）。
+
+## 你需要 TrueTime 或原子鐘
+
+你需要的是一種排序寫入並讀取一致快照的方式；TrueTime 是 Google 取得它的方法。論文 "relies on its underlying database system, Spanner, to offer both external consistency and snapshot reads with bounded staleness"（依賴其底層資料庫系統 Spanner，同時提供外部一致性與具有有界陳舊度的快照讀取）（§5）。AuthZed 描述了 SpiceDB 如何在其他資料庫上取得相同的排序：在只對重疊的鍵提供外部一致性的 CockroachDB 上，其預設策略讓 "all relationship writes touch the same row"（所有關係寫入都觸及同一列）；PostgreSQL 直接提供外部一致性，但需要在其上另外加入快照讀取（[AuthZed blog，2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)）。某個產品是否保有「new enemy」保證，取決於這些細節，而不是時鐘硬體；見[一致性、快照與 zookie](../consistency/)。
+
+## 資料來源
+
+- Zanzibar 論文，§1、§2.1、§2.2、§2.3.1、§2.4.4、§2.4.5、§3、§3.1.1、§3.2.3、§3.2.4、§3.2.5、§4.1、§4.2、§4.3、§5（本站的轉錄）
+- Hacker News, "Zanzibar: Consistent, Global Authorization System" (2019-06-08): [news.ycombinator.com/item?id=20132520](https://news.ycombinator.com/item?id=20132520)
+- Hacker News, "Why Google Zanzibar shines at building authorization" (2023-06-25): [news.ycombinator.com/item?id=36470943](https://news.ycombinator.com/item?id=36470943)
+- Hacker News, "Why Authorization Is Hard" (2021-09-15): [news.ycombinator.com/item?id=28543457](https://news.ycombinator.com/item?id=28543457)
+- Hacker News, "We rewrote OpenFGA in pure Postgres" (2025-10-21): [news.ycombinator.com/item?id=45661547](https://news.ycombinator.com/item?id=45661547)
+- Tom MacWright, Reading Zanzibar (2025-05-02): [macwright.com/2025/05/02/reading-zanzibar.html](https://macwright.com/2025/05/02/reading-zanzibar.html)
+- OpenFGA, Perform a List Objects call: [openfga.dev/docs/getting-started/perform-list-objects](https://openfga.dev/docs/getting-started/perform-list-objects)
+- AuthZed, Protecting a List Endpoint: [authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint](https://authzed.com/docs/spicedb/modeling/protecting-a-list-endpoint)
+- AuthZed, SpiceDB datastores: [authzed.com/docs/spicedb/concepts/datastores](https://authzed.com/docs/spicedb/concepts/datastores)
+- OpenFGA, Configure OpenFGA: [openfga.dev/docs/getting-started/setup-openfga/configure-openfga](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga)
+- AWS, IAM user groups: [docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_groups.html)
+- AuthZed, The One Crucial Difference Between Spanner and CockroachDB (2021-10-14): [authzed.com/blog/prevent-newenemy-cockroachdb](https://authzed.com/blog/prevent-newenemy-cockroachdb)

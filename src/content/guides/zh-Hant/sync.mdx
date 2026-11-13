@@ -188,7 +188,7 @@ AuthZed 的文章列出了各種選擇：什麼都不做、頻外一致性檢查
   caption="將權杖與它所涵蓋的列在同一筆交易中儲存，並保留一條在歷史消失時可用的重建路徑。"
 />
 
-請注意索引泳道的第二列：權杖與它所產生的列一併儲存。如果索引器先儲存權杖然後當機，就會跳過變更；如果它套用了列，卻在儲存權杖之前當機，就會重新套用這些列，而這只有在索引寫入是冪等的情況下才無害。要撐過長時間的中斷，就要如該 issue 所說，將串流複製到你能掌控的持久佇列中，或者準備好重建。SpiceDB 用於繼續的欄位是 `ChangesThrough`：文件建議 "in a loop, sending in the last received ZedToken from `ChangesThrough` if the call disconnects"（以迴圈方式呼叫 Watch，若呼叫斷線，就送入最後從 `ChangesThrough` 收到的 ZedToken）（[Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)）。
+請注意索引泳道的第一個事件：權杖與它所產生的列一併儲存。如果索引器先儲存權杖然後當機，就會跳過變更；如果它套用了列，卻在儲存權杖之前當機，就會重新套用這些列，而這只有在索引寫入是冪等的情況下才無害。要撐過長時間的中斷，就要如該 issue 所說，將串流複製到你能掌控的持久佇列中，或者準備好重建。SpiceDB 用於繼續的欄位是 `ChangesThrough`：文件建議 "in a loop, sending in the last received ZedToken from `ChangesThrough` if the call disconnects"（以迴圈方式呼叫 Watch，若呼叫斷線，就送入最後從 `ChangesThrough` 收到的 ZedToken）（[Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch)）。
 
 ## zookie 與各種做法
 
@@ -203,7 +203,7 @@ zookie 協定需要客戶端做兩件事：在儲存內容時請求一個 zookie
 | 變更資料擷取 | 在日誌被讀取、發布並消費之後 | 與 outbox 相同，但延遲經過更多段 |
 | 由 Watch 餵送的索引 | 已經在那裡；延遲在索引中 | 無法直接涵蓋：zookie 是不透明的，因此索引無法判斷自己是否與給定的權杖一樣新。以該權杖重新檢查，或比較索引自己儲存的位置 |
 
-對於 outbox 與 CDC 這兩列，論文的保證比看起來的更弱。§2.2 的例 B 依賴於 ACL 變更（B1）在內容變更（B2）被檢查之前就已進入 Zanzibar。若中間隔著一個中繼，Anne 可以移除 Beto，一秒後儲存新內容，並從一次在中繼套用移除之前執行的內容變更檢查中取得 zookie。對於 Zanzibar 當時擁有的資料而言，這個 zookie 是正確的；但那份資料是落後的。有兩種緩解方式，都不是出自上述來源，也都未在此測試：將撤銷直接送到授權服務，之後再記錄到資料庫中（接受左格的失敗模式，使其成為一種可見的「仍列出但被拒絕」狀態），或讓中繼將它收到的權杖寫回受影響的列，使之後的檢查會攜帶它。
+對於 outbox 與 CDC 這兩列，論文的保證比看起來的更弱。§2.2 的例 B 依賴於 ACL 變更（B1）在內容變更（B2）被檢查之前就已進入 Zanzibar。若中間隔著一個中繼，Anne 可以移除 Beto，一秒後儲存新內容，並從一次在中繼套用移除之前執行的內容變更檢查中取得 zookie。對於 Zanzibar 當時擁有的資料而言，這個 zookie 是正確的；但那份資料是落後的。有兩種緩解方式，都不是出自上述來源，也都未在此測試：將撤銷直接送到授權服務，之後再記錄到資料庫中（接受右格的失敗模式，使其成為一種可見的「仍列出但被拒絕」狀態），或讓中繼將它收到的權杖寫回受影響的列，使之後的檢查會攜帶它。
 
 論文的不透明規則是刻意的：zookie 之所以不透明，是為了 "to discourage our clients from choosing arbitrary timestamps and to allow future extensions"（避免客戶端選擇任意的時間戳記，並保留未來擴充的空間）（§2.4）。其代價在表格的最後一列：客戶端無法比較兩個 zookie 來判斷哪一個比較新。
 

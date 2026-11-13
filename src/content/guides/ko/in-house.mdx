@@ -26,7 +26,7 @@ Alan Yao가 Dipak Pawar, Blair Wu, Abhishek Parmar와 함께 쓴 "Himeji: A Scal
 - "Similar to Zanzibar, the basic unit of storage for Himeji is a tuple in the form entity # relation @ principal."(Zanzibar와 마찬가지로 Himeji의 기본 저장 단위는 entity # relation @ principal 형태의 튜플이다.) 엔터티는 삼중항 "(entity type : entity id : entity part)"(엔터티 타입 : 엔터티 ID : 엔터티 부분)이다.
 - 글의 예시 튜플: "LISTING : 10 # OWNER @ User(123)". 이 표기법으로 Anne이 readme를 소유하는 것은 `DOC : readme # OWNER @ User(anne)`가 된다. 이 줄은 설명을 위한 것이며 글에서 온 것이 아니다.
 - 규칙은 "a YAML-based configuration language that allows for the resolution of permissions checks via set algebra"(집합 대수로 권한 검사를 해석할 수 있게 하는 YAML 기반 설정 언어)로 작성된다. 글의 예는 listing의 `WRITE` 검사를 `WRITE`와 `OWNER`의 합집합으로, `READ`를 `READ`와 `WRITE`의 합집합으로 해석한다. 논문의 동심원 관계(§2.3.1, 그림 1)다.
-- *참조 튜플(reference tuple)*은 관계를 지정하지 않고 두 엔터티를 연결한다. 따라갈 관계는 설정에서 온다. "Where this approach differs from Zanzibar is that such a tuple does not contain a relation."(이 방식이 Zanzibar와 다른 점은 그런 튜플이 관계를 포함하지 않는다는 것이다.) 두 엔터티 타입 사이의 관계는 거의 달라지지 않으므로, 글은 이렇게 하면 N×M개 대신 약 N개의 튜플을 저장한다고 말한다.
+- <em>참조 튜플(reference tuple)</em>은 관계를 지정하지 않고 두 엔터티를 연결한다. 따라갈 관계는 설정에서 온다. "Where this approach differs from Zanzibar is that such a tuple does not contain a relation."(이 방식이 Zanzibar와 다른 점은 그런 튜플이 관계를 포함하지 않는다는 것이다.) 두 엔터티 타입 사이의 관계는 거의 달라지지 않으므로, 글은 이렇게 하면 N×M개 대신 약 N개의 튜플을 저장한다고 말한다.
 - Himeji는 쓰기 시점에 팬아웃한다. "Instead of fanning out at read time, we write all permissions data when resources are mutated"(읽기 시점에 팬아웃하는 대신, 리소스가 변경될 때 모든 권한 데이터를 쓴다)이며, 그 이유는 "given our read-heavy workload"(읽기가 많은 작업 부하이기 때문)다.
 
 ### 아키텍처

@@ -46,15 +46,15 @@ Where does the data a decision needs live, and who keeps it current?
 />
 
 <Graph
-  width={280}
+  width={320}
   height={240}
   title="Policy engine"
   desc="The application keeps its data in its own database. It asks the policy engine for a decision, sending the input and entities with the request. The engine also holds policies and, optionally, a replica of data loaded as bundles."
   nodes={[
     { id: "app", x: 80, y: 40, label: "application", kind: "client" },
     { id: "db", x: 80, y: 180, label: "app database", kind: "store" },
-    { id: "pe", x: 210, y: 110, label: "policy engine\n(OPA, Cedar)", kind: "server", on: true },
-    { id: "b", x: 210, y: 200, label: "policy + data\nbundles", kind: "note" },
+    { id: "pe", x: 240, y: 120, label: "policy engine\n(OPA, Cedar)", kind: "server", on: true },
+    { id: "b", x: 240, y: 205, label: "policy + data\nbundles", kind: "note" },
   ]}
   edges={[
     { from: "app", to: "db", dir: "both" },

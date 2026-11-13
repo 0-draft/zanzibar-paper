@@ -1,0 +1,319 @@
+---
+title: "Multics から Zanzibar へ"
+description: "ケイパビリティリストと Multics の ACL から、RBAC と ABAC を経て、Zanzibar とそれに続くオープンソースのシステムまで、60 年にわたるアクセス制御の歩みを、各段階の一次資料とともにたどる。"
+section: guide
+part: background
+order: 2
+checked: "2026-11-13"
+paper: ["2.1", "3.2.4", "4", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Timeline from "../../../components/diagram/Timeline.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+
+Zanzibar の論文は、自らの系譜を [§5 関連研究](../../#s5) で述べている。データモデルについては Multics、UNIX、POSIX ACL、VMS、Taos を、ロールについては RBAC を、RPC API の背後に 1 つの ACL ストアを置くという考え方については Amazon、Google、Microsoft の IAM システムを、同程度の規模のシステムとしては Facebook の TAO を、一貫性の問題については Lamport クロック、Spanner、Chubby、ZooKeeper を引いている。このページは同じ系譜を時系列でたどる。
+
+## 考え方はどのように Zanzibar へつながったか
+
+最初期のマルチユーザーシステムは、誰が何に触れてよいかを決める必要があった。1966 年、Dennis と Van Horn は各計算に *ケイパビリティ* のリストを与えた。ケイパビリティとは、オブジェクトを指し、それに対する権利を付与する、偽造できないトークンである ([Dennis and Van Horn](https://doi.org/10.1145/365230.365252))。Lampson の 1971 年のアクセス行列は、ケイパビリティとアクセス制御リストが同じ表を行ごとに格納するか列ごとに格納するかの違いにすぎないことを示した ([Lampson](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf))。Multics は列の見方をとり、すべてのセグメントとディレクトリが ACL を持った ([Saltzer](https://dl.acm.org/doi/10.1145/361011.361067))。Zanzibar も ACL の側にあり、「このオブジェクトに誰が触れられるか」に答える。
+
+その後、オペレーティングシステムはリストをより安価で粗いものにし、のちに再び豊かにした。論文自身がこの流れをたどっている。UNIX の初版では、ファイルのフラグが "whether owner and non-owner can read or write the file" (所有者と所有者以外がファイルを読み書きできるかどうか) を表す。第 4 版では "for owner, group, and others" (所有者、グループ、その他に対する) 読み取り・書き込み・実行のビットがある。POSIX ACL は "an arbitrary list of users and groups" (ユーザーとグループの任意のリスト) を加え、VMS は "supports ACL inheritance for files created within a directory tree" (ディレクトリツリー内に作成されたファイルに対する ACL の継承をサポートする) (§5)。権限、ユーザー、グループ、継承というこの 4 つの語が、Zanzibar のデータモデルがサポートしようとするものである。
+
+1970 年代から、モデルはオブジェクトごとのリストから離れていった。Bell–LaPadula と Biba は、所有者ではなくシステムがラベルによって判定する。Zanzibar は任意アクセス制御であるため、これらは祖先ではなく対比の対象である。ロールベースアクセス制御 (1992 年) は、ユーザーと権限の間にロールを置いた。論文はロールが "are similar to Zanzibar relations" (Zanzibar の関係に似ている) と述べている (§5)。属性ベースの制御は NIST の 2014 年のガイド SP 800-162 で定義され、リクエスト時に属性から判定を計算する。関係ベースの制御は 2007 年に Gates が名付け、2011 年に Fong が形式化したもので、「メンバーである」や「親フォルダである」のような、合成できる関係から判定する ([Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf))。論文は ReBAC という語を一度も使っていないが、そのリレーションタプルはまさにそのようなグラフである。
+
+Google で新しかったのは規模と一貫性である。論文は、2019 年 7 月の時点で Zanzibar が "has been in production use for more than 5 years" (5 年以上本番で使われてきた) と述べている (§4)。したがって遅くとも 2014 年には稼働していたが、開始年を示す公開資料はない。Zanzibar は Calendar、Cloud、Drive、Maps、Photos、YouTube に使われている (§1)。論文が比較対象とする TAO は "eventual global consistency" (グローバルな結果整合性) を提供するのに対し、Zanzibar は "external consistency and snapshot reads with bounded staleness" (外部一貫性と有界な古さを伴うスナップショット読み取り) を提供し、それによって「new enemy」問題を防ぐ (§5)。Lamport クロックは、"require explicit participation of all “processes”" (すべての「プロセス」の明示的な参加を必要とする) うえに、Zanzibar のプロセスの一部は "external clients or even human users" (外部のクライアントや、人間のユーザーでさえある) ため、採用されなかった。Chubby は "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness" (大量のデータ、効率的な範囲読み取り、クライアントが指定した有界な古さのスナップショットでの読み取り) をサポートせず、ZooKeeper はノードをまたぐ外部一貫性も、有界な古さを伴うスナップショット読み取りも提供しない (§5)。保証を与えたのは Spanner とその TrueTime クロックである ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf))。
+
+論文の公開後、他の人々がこの設計をオープンな形で作り直した。Ory Keto は 2021 年にこの設計を中心に書き直され、SpiceDB、OpenFGA、Permify、Topaz がおよそ 18 か月以内に続いた。同じ時期に、ABAC の系譜にあるポリシーエンジンの OPA と Cedar が成熟し、2023 年に結成された OpenID Foundation の AuthZEN ワーキンググループが、アプリケーションが認可エンジンに判定を問い合わせる方法を標準化した。その Authorization API 1.0 は 2026 年 1 月に OpenID Final Specification となった。各システムの詳細はエコシステムのページにある。
+
+## 年表
+
+<Timeline
+  sourceLabel="出典"
+  items={[
+    {
+      era: "オペレーティングシステム",
+      year: "1966",
+      title: "ケイパビリティリスト",
+      body: "Dennis と Van Horn は、計算の \"sphere of protection\" (保護圏) をそのケイパビリティのリスト、すなわち C-list として記述した。ケイパビリティは「この主体は何に触れられるか」に答える。",
+      href: "https://doi.org/10.1145/365230.365252",
+    },
+    {
+      era: "オペレーティングシステム",
+      year: "1971",
+      title: "UNIX 初版: 所有者と所有者以外のビット",
+      body: "chmod には 6 つのモードビットがある。所有者と所有者以外それぞれの読み取りと書き込み、実行可能、set-user-ID である。グループの区分はない。(日付はアーカイブのコピーによる。元のマニュアルは確認していない。)",
+      href: "http://man.cat-v.org/unix-1st/2/sys-chmod",
+    },
+    {
+      era: "オペレーティングシステム",
+      year: "1973",
+      title: "UNIX 第 4 版: グループのビット",
+      body: "8/5/73 付けの chmod のページは、set-group-ID と、所有者、グループ、その他に対する読み取り・書き込み・実行のビットを加えている。",
+      href: "https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2",
+    },
+    {
+      era: "オペレーティングシステム",
+      year: "1973–1974",
+      title: "Saltzer が記述した Multics の ACL",
+      body: "すべてのセグメントとディレクトリに ACL がある。1973 年 10 月に SOSP で発表され、1974 年 7 月に CACM に掲載された。Multics 自体はそれ以前から稼働していた。Zanzibar の参考文献 [23]。",
+      href: "https://dl.acm.org/doi/10.1145/361011.361067",
+    },
+    {
+      era: "オペレーティングシステム",
+      year: "1997–1998",
+      title: "POSIX.1e ACL: draft 17、その後取り下げ",
+      body: "draft 17 (1997 年 10 月) が Linux の ACL の基礎となった。1003.1e のスポンサーシップは 1998 年 1 月に取り下げられた。",
+      href: "https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html",
+    },
+    {
+      era: "モデルと標準",
+      year: "1971",
+      title: "Lampson「Protection」: アクセス行列",
+      body: "行はドメイン (主体)、列はオブジェクト、セルはアクセス属性である。ACL はオブジェクトに付随する 1 つの列であり、ケイパビリティはあるドメインのエントリである。",
+      href: "https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf",
+    },
+    {
+      era: "モデルと標準",
+      year: "1973",
+      title: "Bell–LaPadula",
+      body: "強制的な機密性。上位を読まず、下位に書かない。MITRE MTR-2547 Vol. I (1973 年 3 月)。*-property (下位に書かない) は Vol. II (1973 年 5 月) で登場する。Bell 自身の回顧録から引用。",
+      href: "https://www.acsac.org/2005/papers/Bell.pdf",
+    },
+    {
+      era: "モデルと標準",
+      year: "1975–1977",
+      title: "Biba 完全性モデル",
+      body: "Bell–LaPadula を完全性について双対にしたもの。MITRE MTR-3153 (1975 年 6 月)。通常は ESD-TR-76-372 (1977 年 4 月) として引用される。",
+      href: "https://seclab.cs.ucdavis.edu/projects/history/CD/index.html",
+    },
+    {
+      era: "モデルと標準",
+      year: "1992",
+      title: "ロールベースアクセス制御",
+      body: "Ferraiolo と Kuhn、第 15 回 National Computer Security Conference。Zanzibar の参考文献 [17]。",
+      href: "https://csrc.nist.gov/projects/role-based-access-control",
+    },
+    {
+      era: "モデルと標準",
+      year: "1996",
+      title: "RBAC96",
+      body: "Sandhu らが IEEE Computer 1996 年 2 月号で RBAC モデル群を形式化した。",
+      href: "https://csrc.nist.gov/projects/role-based-access-control",
+    },
+    {
+      era: "モデルと標準",
+      year: "2003",
+      title: "XACML 1.0、OASIS Standard",
+      body: "施行点と判定点を分離する XML のポリシー言語。2003 年 2 月の正確な承認日は資料によって異なる。",
+      href: "https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html",
+    },
+    {
+      era: "モデルと標準",
+      year: "2004",
+      title: "ANSI INCITS 359-2004 (RBAC)",
+      body: "統一された NIST RBAC モデルが 2004 年 2 月 11 日に ANSI 標準となった。INCITS 359-2012 として改訂された。",
+      href: "https://csrc.nist.gov/projects/role-based-access-control",
+    },
+    {
+      era: "モデルと標準",
+      year: "2007",
+      title: "「Relationship-Based Access Control」という語の誕生",
+      body: "Carrie Gates、W2SP 2007。Fong の 2011 年の論文 (概要と参考文献 [18]) による。Gates の論文自体は確認していない。",
+      href: "https://dl.acm.org/doi/10.1145/1943513.1943539",
+    },
+    {
+      era: "モデルと標準",
+      year: "2011",
+      title: "Fong: ReBAC の保護モデル",
+      body: "ソーシャルネットワークにおける所有者とアクセスする者の関係に基づいて判定する。ロールと異なり、関係は合成できる。",
+      href: "https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf",
+    },
+    {
+      era: "モデルと標準",
+      year: "2013",
+      title: "XACML 3.0、OASIS Standard",
+      body: "コア仕様の日付は 2013 年 1 月 22 日である。",
+      href: "https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html",
+    },
+    {
+      era: "モデルと標準",
+      year: "2014",
+      title: "NIST SP 800-162 (ABAC)",
+      body: "属性ベースアクセス制御を定義した。2014 年 1 月に公開され、2019 年 8 月 2 日に更新された。",
+      href: "https://csrc.nist.gov/pubs/sp/800/162/upd2/final",
+    },
+    {
+      era: "地球規模",
+      year: "2012",
+      title: "Spanner",
+      body: "TrueTime と外部一貫性を備えた、Google のグローバル分散データベース。Zanzibar はタプルをこれに格納している (参考文献 [15])。",
+      href: "https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf",
+    },
+    {
+      era: "地球規模",
+      year: "2014 年までに",
+      title: "Zanzibar の本番稼働",
+      body: "論文は \"has been in production use for more than 5 years\" (5 年以上本番で使われてきた) と述べている (§4)。これにより開始は 2014 年半ばより前となるが、その年を示す公開資料はない。",
+      href: "https://www.usenix.org/conference/atc19/presentation/pang",
+    },
+    {
+      era: "地球規模",
+      year: "2019",
+      title: "Zanzibar 論文、USENIX ATC '19",
+      body: "Pang ら。2019 年 7 月にワシントン州レントンで発表された。このサイトが翻訳している論文である。",
+      href: "https://www.usenix.org/conference/atc19/presentation/pang",
+      on: true,
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2016",
+      title: "Open Policy Agent v0.1.0",
+      body: "Rego 言語を備えた汎用のポリシーエンジン。GitHub での最初のリリースは 2016 年 7 月 14 日である。",
+      href: "https://github.com/open-policy-agent/opa/releases",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2021",
+      title: "OPA が CNCF を卒業",
+      body: "2021 年 2 月 4 日に発表された。",
+      href: "https://www.cncf.io/announcements/2021/02/04/cloud-native-computing-foundation-announces-open-policy-agent-graduation/",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2021",
+      title: "Ory Keto の Zanzibar 型への書き直し",
+      body: "v0.6.0-alpha.1、2021 年 4 月 7 日。Keto 自体は 2018 年からある。",
+      href: "https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2021",
+      title: "SpiceDB の最初のリリース",
+      body: "2021 年 9 月 30 日、AuthZed による。",
+      href: "https://github.com/authzed/spicedb",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2022",
+      title: "OpenFGA の最初のリリース",
+      body: "2022 年 6 月 10 日。Okta の従業員が開発した。2025 年 11 月から CNCF の Incubating プロジェクトである (CNCF ブログ、2025 年 11 月 11 日)。",
+      href: "https://github.com/openfga/openfga",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2022",
+      title: "Permify の最初のリリース",
+      body: "2022 年 8 月 3 日。",
+      href: "https://github.com/Permify/permify",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2022",
+      title: "Topaz の最初のリリース",
+      body: "2022 年 10 月 25 日、Aserto による。",
+      href: "https://github.com/aserto-dev/topaz",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2023",
+      title: "Cedar のオープンソース化",
+      body: "AWS が 2023 年 5 月 10 日に Cedar ポリシー言語を Apache-2.0 で公開した。",
+      href: "https://aws.amazon.com/about-aws/whats-new/2023/05/cedar-open-source-language-access-control",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2023",
+      title: "Amazon Verified Permissions の一般提供",
+      body: "Cedar のポリシーを評価するマネージドサービス。2023 年 6 月 13 日に一般提供が開始された。",
+      href: "https://aws.amazon.com/about-aws/whats-new/2023/06/amazon-verified-permissions-generally-available/",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2023",
+      title: "OpenID AuthZEN ワーキンググループ",
+      body: "2023 年 10 月 20 日に発表された。目的は \"standard mechanisms, protocols and formats for communication between authorization components\" (認可コンポーネント間の通信のための標準的な機構、プロトコル、形式) を定義することである。",
+      href: "https://openid.net/announcing-authzen-working-group/",
+    },
+    {
+      era: "オープンソースと標準",
+      year: "2026",
+      title: "AuthZEN Authorization API 1.0 Final",
+      body: "OpenID Final Specification として承認され、2026 年 1 月 12 日に発表された (賛成 81、反対 1、棄権 25)。この API により、ポリシー施行点 (PEP) がポリシー判定点 (PDP) に判定を問い合わせられる。",
+      href: "https://openid.net/authorization-api-1-0-final-specification-approved/",
+    },
+  ]}
+/>
+
+## Zanzibar はどこから何を取り入れたか
+
+論文は、何かの上に構築することと、何かに似ていることの違いに注意を払っている。Zanzibar は Spanner と Leopard の上で動いている。以前の ACL システムの機能をサポートしている。そして RBAC のロールを自らの関係に、Abadi らの "blessings" を自らのタプルに似ているとしている (§5)。
+
+先行研究のどれが Zanzibar のどの部分に現れているか。
+
+<Graph
+  width={620}
+  height={340}
+  minWidth={540}
+  title="Zanzibar はどこから何を取り入れたか"
+  desc="左の列は先行研究と Zanzibar が動作する基盤のシステム。Multics、UNIX、POSIX ACL、VMS (ACL、グループ、継承)、Abadi ら 2015 年 (blessings)、RBAC 1992 年 (ロール)、Spanner 2012 年 (TrueTime、スナップショット読み取り、緑)、Zanzibar の構成要素である Leopard インデックス (緑)。右の列は Zanzibar の部分。リレーションタプルとユーザーセット (§2.1)、関係とユーザーセット書き換え (§2.3.1)、外部一貫性と zookie (§2.2)、入れ子のグループのチェック (§3.2.4)。「機能をサポート」「類似」とラベルの付いた破線の矢印が、ACL システムと Abadi らからタプルとユーザーセットへ、RBAC から関係へ伸びる。「上に構築」とラベルの付いた実線の矢印が、Spanner から外部一貫性へ、Leopard から入れ子のグループのチェックへ伸びる。"
+  nodes={[
+    { id: "acl", x: 140, y: 40, label: "Multics, UNIX, POSIX ACL, VMS\nACL、グループ、継承", kind: "object" },
+    { id: "taos", x: 140, y: 110, label: "Abadi ら (2015)\n\"blessings\"", kind: "object" },
+    { id: "rbac", x: 140, y: 180, label: "RBAC (1992)\nロール", kind: "object" },
+    { id: "span", x: 140, y: 250, label: "Spanner (2012)\nTrueTime、スナップショット読み取り", kind: "store" },
+    { id: "leo", x: 140, y: 315, label: "Leopard インデックス\n(Zanzibar の一部)", kind: "store" },
+    { id: "tup", x: 505, y: 75, label: "リレーションタプルと\nユーザーセット (§2.1)", kind: "object", on: true },
+    { id: "rel", x: 505, y: 180, label: "関係とユーザーセット\n書き換え (§2.3.1)", kind: "object", on: true },
+    { id: "ext", x: 505, y: 250, label: "外部一貫性、\nzookie (§2.2)", kind: "object", on: true },
+    { id: "nest", x: 505, y: 315, label: "入れ子のグループの\nチェック (§3.2.4)", kind: "object", on: true },
+  ]}
+  edges={[
+    { from: "acl", to: "tup", label: "機能をサポート", dashed: true },
+    { from: "taos", to: "tup", label: "類似", dashed: true },
+    { from: "rbac", to: "rel", label: "類似", dashed: true },
+    { from: "span", to: "ext", label: "上に構築" },
+    { from: "leo", to: "nest", label: "上に構築" },
+  ]}
+  caption="実線の矢印: Zanzibar はその上で動作する。破線の矢印: 論文が先例または類似の考え方として挙げているもの (§5、§3.2.4)。"
+/>
+
+この分かれ方に注目したい。上半分のデータモデルは古い考え方の組み合わせ直しである。論文自身が主張しているのはその統一であり、タプルによるモデル化は "allows us to unify the concepts of ACLs and groups" (ACL とグループの概念を統一できる) (§2.1)。Abadi らはこれらを分けたままにしていた (§5)。下半分は Google の規模でそれを機能させたものである。"external consistency and snapshot reads with bounded staleness" (外部一貫性と有界な古さを伴うスナップショット読み取り) のための Spanner (§5) と、ポインタをたどるだけでは十分速く処理できないグループのための (§3.2.4)、"an indexing system used to optimize operations on large and deeply nested sets" (大規模で深く入れ子になった集合に対する操作を最適化するためのインデックスシステム) である Leopard (§3) である。
+
+<Callout kind="note" title="上に載る IAM">
+
+論文はまた、Google の Cloud IAM システムが "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (Zanzibar の ACL の格納・評価システムの上の層として構築されている) とも述べている (§5)。関係のストアの上で動くロールベースの製品である。各モデルの関係については [ACL、RBAC、ABAC、ReBAC](../access-control-models/) を参照。
+
+</Callout>
+
+<Callout kind="paper" title="論文では">
+
+このページで名前を挙げたすべてのシステムを含む関連研究: §5。本番運用の歴史: §4。Leopard: §3 と §3.2.4。
+
+</Callout>
+
+## 出典
+
+- Ruoming Pang et al., "Zanzibar: Google's Consistent, Global Authorization System", USENIX ATC '19, [usenix.org/conference/atc19/presentation/pang](https://www.usenix.org/conference/atc19/presentation/pang)
+- J. B. Dennis and E. C. Van Horn, "Programming Semantics for Multiprogrammed Computations", CACM 9(3), 1966, [doi.org/10.1145/365230.365252](https://doi.org/10.1145/365230.365252); earlier version MIT Project MAC TR-23, December 1965, [dspace.mit.edu](https://dspace.mit.edu/handle/1721.1/149345)
+- B. W. Lampson, "Protection", 1971; reprinted in ACM SIGOPS OSR 8(1), 1974, [PDF](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf)
+- UNIX First Edition sys-chmod(2), archive copy, [man.cat-v.org/unix-1st/2/sys-chmod](http://man.cat-v.org/unix-1st/2/sys-chmod)
+- UNIX Fourth Edition chmod(2), Unix history repository, [github.com/dspinellis/unix-history-repo](https://github.com/dspinellis/unix-history-repo/blob/Research-V4/man/man2/chmod.2)
+- J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
+- A. Grünbacher, "POSIX Access Control Lists on Linux", USENIX ATC 2003 FREENIX, [usenix.org](https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html)
+- D. E. Bell, "Looking Back at the Bell-La Padula Model", ACSAC 2005, [PDF](https://www.acsac.org/2005/papers/Bell.pdf)
+- UC Davis Computer Security Lab history archive (Biba), [seclab.cs.ucdavis.edu/projects/history/CD](https://seclab.cs.ucdavis.edu/projects/history/CD/index.html)
+- NIST, Role Based Access Control project, [csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
+- OASIS, XACML 3.0 core specification, [docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html)
+- NIST SP 800-162, [csrc.nist.gov/pubs/sp/800/162/upd2/final](https://csrc.nist.gov/pubs/sp/800/162/upd2/final)
+- P. W. L. Fong, "Relationship-Based Access Control: Protection Model and Policy Language", CODASPY '11, [dl.acm.org/doi/10.1145/1943513.1943539](https://dl.acm.org/doi/10.1145/1943513.1943539), [PDF](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)
+- J. C. Corbett et al., "Spanner: Google's Globally-Distributed Database", OSDI '12, [PDF](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)
+- Open Policy Agent releases, [github.com/open-policy-agent/opa/releases](https://github.com/open-policy-agent/opa/releases); CNCF graduation announcement, [cncf.io](https://www.cncf.io/announcements/2021/02/04/cloud-native-computing-foundation-announces-open-policy-agent-graduation/)
+- Ory Keto v0.6.0-alpha.1, [github.com/ory/keto/releases/tag/v0.6.0-alpha.1](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1)
+- SpiceDB, [github.com/authzed/spicedb](https://github.com/authzed/spicedb)
+- OpenFGA, [github.com/openfga/openfga](https://github.com/openfga/openfga)
+- Permify, [github.com/Permify/permify](https://github.com/Permify/permify)
+- Topaz, [github.com/aserto-dev/topaz](https://github.com/aserto-dev/topaz)
+- AWS, Cedar open-source announcement, [aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/05/cedar-open-source-language-access-control); Amazon Verified Permissions GA, [aws.amazon.com](https://aws.amazon.com/about-aws/whats-new/2023/06/amazon-verified-permissions-generally-available/)
+- CNCF, OpenFGA becomes a CNCF incubating project, 11 November 2025, [cncf.io](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)
+- OpenID Foundation, AuthZEN working group announcement, [openid.net/announcing-authzen-working-group](https://openid.net/announcing-authzen-working-group/); Authorization API 1.0 Final, [openid.net/authorization-api-1-0-final-specification-approved](https://openid.net/authorization-api-1-0-final-specification-approved/); the specification, [openid.net/specs/authorization-api-1_0.html](https://openid.net/specs/authorization-api-1_0.html)

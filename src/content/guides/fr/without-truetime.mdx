@@ -1,0 +1,256 @@
+---
+title: "Ordonner sans TrueTime"
+description: "Ce qu’un zookie exige de la base de données sous-jacente, comment les produits de type Zanzibar l’obtiennent de CockroachDB, PostgreSQL, MySQL et Spanner, et ce qui se passe lorsque rien ne le fournit."
+section: guide
+part: practice
+order: 12
+checked: "2026-11-13"
+paper: ["2.2", "2.4", "2.4.4", "3.2.5", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Zanzibar prévient le problème du « nouvel ennemi » au moyen des zookies, et les zookies fonctionnent parce que Spanner attribue à chaque écriture un horodatage qui respecte la causalité. La page [Cohérence, instantanés et zookies](../consistency/) explique ces deux points, y compris la manière dont TrueTime et l’attente de validation (commit wait) produisent ces horodatages. Presque personne en dehors de Google ne fonctionne avec TrueTime. Cette page examine ce que le protocole zookie exige réellement d’une base de données, et comment les produits construits sur d’autres bases de données l’obtiennent ou s’en passent.
+
+## Ce qu’un zookie exige du stockage de données
+
+Le protocole zookie repose sur deux propriétés que le §2.2 demande à la couche de stockage, "external consistency and snapshot reads with bounded staleness" (« la cohérence externe et les lectures d’instantané à obsolescence bornée ») :
+
+1. **L’ordre de validation suit la causalité.** Si l’écriture `x` s’est produite avant l’écriture `y` (par exemple, Anne a vu `x` réussir puis a effectué `y`), alors `T_x < T_y`. Selon les termes de l’article, deux mises à jour causalement liées `x ≺ y` "will be assigned timestamps that reflect the causal order: `T_x < T_y`" (« se voient attribuer des horodatages qui reflètent l’ordre causal : `T_x < T_y` ») (§2.2), et le protocole zookie "ensures that all prior ACL writes have lower timestamps" (« garantit que toutes les écritures d’ACL antérieures ont des horodatages inférieurs »).
+2. **Des lectures d’instantané à un point donné ou après celui-ci.** Une lecture à `T` "observes all updates with timestamps ≤ T" (« observe toutes les mises à jour dont l’horodatage est ≤ T ») (§2.2), et une vérification "is always evaluated at a consistent snapshot no earlier than the given zookie" (« est toujours évaluée sur un instantané cohérent qui n’est pas antérieur au zookie fourni ») (§2.4.4).
+
+Rien dans cette liste ne parle d’« horodatage » au sens de l’heure murale. La valeur contenue dans un zookie peut être n’importe quelle position dans un historique, pourvu que les deux propriétés soient vérifiées pour elle. C’est pourquoi l’article a rendu le zookie opaque : "to discourage our clients from choosing arbitrary timestamps and to allow future extensions" (« afin de dissuader nos clients de choisir des horodatages arbitraires et de permettre des extensions futures ») (§2.4).
+
+Comment les deux propriétés se combinent-elles pour empêcher Chen de voir le readme après qu’il a été retiré de folder A ?
+
+<Graph
+  width={640}
+  height={300}
+  minWidth={540}
+  title="Les deux propriétés sur lesquelles repose un zookie"
+  desc="L’écriture x retire Chen de folder:A. L’écriture y, effectuée après l’acquittement de x, déplace doc:readme dans folder:A. La propriété 1 dit que la position de validation de x est inférieure à celle de y. Le jeton renvoyé pour y désigne la position de y. Une vérification ultérieure transporte le jeton. La propriété 2 dit que la vérification lit un instantané situé au jeton ou après lui, qui contient donc y et, en raison de la propriété 1, également x. Chen est refusé."
+  nodes={[
+    { id: "x", x: 100, y: 60, label: "x : retirer Chen\nde folder:A", kind: "store" },
+    { id: "y", x: 100, y: 200, label: "y : déplacer readme\ndans folder:A", kind: "store" },
+    { id: "tok", x: 330, y: 200, label: "token = pos(y)", kind: "object", mono: true },
+    { id: "chk", x: 540, y: 200, label: "vérification à\ninstantané ≥ jeton", kind: "server", on: true },
+    { id: "res", x: 540, y: 60, label: "voit x et y :\nChen refusé", kind: "note" },
+  ]}
+  edges={[
+    { from: "x", to: "y", label: "① x ≺ y ⇒ pos(x) < pos(y)", on: true },
+    { from: "y", to: "tok", label: "renvoyé" },
+    { from: "tok", to: "chk", label: "transporté" },
+    { from: "chk", to: "res", label: "② tout ≤ instantané", on: true },
+  ]}
+  caption="Si ① est rompue, l’instantané peut contenir y sans x. Si ② est rompue, la vérification peut s’exécuter avant y. Dans les deux cas, Chen voit le readme."
+/>
+
+Remarquez que la propriété ① porte sur des *écritures que la base de données peut ne jamais percevoir comme liées*. Le §2.2 exige l’ordonnancement pour les "updates on different ACLs or objects and those coordinated via channels invisible to Zanzibar" (« mises à jour portant sur des ACL ou des objets différents et celles coordonnées par des canaux invisibles pour Zanzibar »). Dans l’exemple A de l’article, le lien entre les deux écritures est le fait qu’Alice s’adresse à Charlie, en dehors de tout système. La base de données doit malgré tout ordonner correctement les deux validations.
+
+## Trois manières d’obtenir un ordre
+
+Spanner obtient la propriété ① grâce à des horloges synchronisées dont la borne d’erreur est connue, au prix d’une attente qui couvre l’incertitude à chaque écriture ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf) ; illustré sur la [page consacrée à la cohérence](../consistency/#doù-viennent-les-horodatages--truetime)). D’autres bases de données l’obtiennent, entièrement ou en grande partie, de manières différentes. D’où vient l’ordre dans chacune d’elles ?
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={540}
+  title="D’où vient l’ordre de validation"
+  desc="Trois sources d’ordre. Spanner : les horodatages TrueTime et l’attente de validation donnent à chaque validation un horodatage causal, entre régions. CockroachDB : les horloges logiques hybrides donnent des horodatages qui respectent la causalité seulement entre transactions touchant les mêmes clés, aussi SpiceDB fait-il en sorte que les écritures touchent une clé commune. PostgreSQL et MySQL : un seul primaire décide de l’ordre de validation, si bien qu’un identifiant de transaction ou un instantané issu de ce primaire respecte déjà la causalité."
+  nodes={[
+    { id: "sp", x: 110, y: 60, label: "Spanner\nTrueTime + commit wait", kind: "store" },
+    { id: "cr", x: 330, y: 60, label: "CockroachDB\nhorloge logique hybride", kind: "store" },
+    { id: "pg", x: 540, y: 60, label: "PostgreSQL, MySQL\nun seul primaire", kind: "store" },
+    { id: "sp2", x: 110, y: 180, label: "toute validation\nordonnée", kind: "note" },
+    { id: "cr2", x: 330, y: 180, label: "ordonnée seulement si\nles clés se recouvrent", kind: "note" },
+    { id: "pg2", x: 540, y: 180, label: "toute validation\nordonnée, un seul site", kind: "note" },
+  ]}
+  edges={[
+    { from: "sp", to: "sp2" },
+    { from: "cr", to: "cr2", on: true },
+    { from: "pg", to: "pg2" },
+  ]}
+  caption="La colonne du milieu est celle qui a besoin de l’aide de la couche applicative."
+/>
+
+Remarquez que les bases de données à primaire unique obtiennent la propriété ① gratuitement, car un seul serveur voit toutes les validations dans l’ordre ; ce à quoi elles renoncent, c’est la réplication mondiale de l’article. CockroachDB réplique à l’échelle mondiale mais ne fournit qu’en partie la propriété ①. La section suivante porte sur cet écart.
+
+## CockroachDB : la règle des clés qui se recouvrent
+
+CockroachDB n’a pas TrueTime. Ses nœuds maintiennent des horloges approximativement synchronisées, et le cluster dispose d’un décalage d’horloge maximal, `--max-offset`, dont la valeur par défaut est `500ms` ; "If observed clock offsets exceed this limit, servers will crash to minimize the likelihood of reading inconsistent data" (« si les décalages d’horloge observés dépassent cette limite, les serveurs s’arrêtent brutalement afin de réduire au minimum la probabilité de lire des données incohérentes ») ([`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start)). La comparaison avec Spanner publiée par Cockroach Labs elle-même indique que "CockroachDB only goes as far as to claim serializability" (« CockroachDB se limite à revendiquer la sérialisabilité ») et nomme l’anomalie qu’elle autorise "causal reverse" (« inversion causale ») : des transactions causalement liées peuvent être validées avec des horodatages dans le mauvais ordre ([Living without atomic clocks, 2022-01-27](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/)).
+
+AuthZed a reproduit le problème du « nouvel ennemi » sur CockroachDB avec SpiceDB en 2021 ([The One Crucial Difference Between Spanner and CockroachDB, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). Le billet résume ainsi l’écart : "Cockroach does not provide external consistency for transactions involving _non-overlapping keys_." (« Cockroach ne fournit pas la cohérence externe pour les transactions portant sur des _clés qui ne se recouvrent pas_. ») Son test utilisait deux écritures et une vérification, exécutées "in sequence (not parallel)" (« en séquence (pas en parallèle) ») : écrire un tuple `excluded`, écrire un tuple `direct`, puis vérifier `allowed = direct - excluded` à la révision de la seconde écriture ; "the check in 3 will succeed" (« la vérification de l’étape 3 réussira »).
+
+À quoi cela ressemble-t-il avec l’exemple récurrent, si l’horloge d’un nœud est en avance ?
+
+<Frames>
+
+<Swimlane
+  lanes={["application d’Anne", "nœud 1 (+250 ms)", "nœud 2 (à l’heure)", "vérification de Chen"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="temps réel"
+  ticks={["10.000", "10.100"]}
+  title="Décalage d’horloge sans clés qui se recouvrent"
+  desc="Au temps réel 10.000, l’application d’Anne retire Chen de folder:A. Le nœud 1, dont l’horloge avance de 250 ms, la valide à l’horodatage 10.250. Après l’acquittement, au temps réel 10.100, l’application déplace le readme dans folder:A. Le nœud 2, dont l’horloge est exacte, valide cette écriture à l’horodatage 10.100 et la renvoie comme jeton. La vérification de Chen s’exécute à l’instantané 10.100. Elle voit le déplacement mais pas le retrait, qui a l’horodatage le plus élevé : Chen est donc autorisé. C’est le problème du « nouvel ennemi »."
+  events={[
+    { lane: 0, t: 0, label: "x : retirer Chen", kind: "write" },
+    { lane: 1, t: 0, label: "valide x\nà 10.250", kind: "write", mono: true },
+    { lane: 0, t: 1, label: "y : déplacer readme", kind: "write" },
+    { lane: 2, t: 1, label: "valide y\nà 10.100", kind: "bad", mono: true },
+    { lane: 3, t: 2, label: "vérification à\ninstantané 10.100", kind: "read", mono: true },
+    { lane: 3, t: 3, label: "voit y, pas x :\nChen autorisé", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [0, 1], label: "ack", dashed: true },
+    { from: [0, 1], to: [2, 1] },
+    { from: [2, 1], to: [3, 2], label: "jeton 10.100", dashed: true },
+  ]}
+  caption="Violation : y s’est produit après x, mais T_y < T_x. L’instantané à T_y n’est pas un préfixe de ce qui s’est passé."
+/>
+
+<Swimlane
+  lanes={["application d’Anne", "nœud 1 (+250 ms)", "nœud 2 (à l’heure)", "vérification de Chen"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="temps réel"
+  ticks={["10.000", "10.100"]}
+  title="Décalage d’horloge avec une clé de recouvrement"
+  desc="Les deux mêmes écritures, mais chaque écriture écrit aussi une clé de recouvrement partagée K. Le nœud 1 valide x, y compris K, à 10.250. Lorsque le nœud 2 valide y, il écrit aussi K, si bien que CockroachDB doit donner à y un horodatage supérieur à celui de l’écriture de x sur K, ici 10.251. Le jeton vaut 10.251, la vérification de Chen s’exécute à cet instantané, voit x et y, et Chen est refusé."
+  events={[
+    { lane: 0, t: 0, label: "x : retirer Chen", kind: "write" },
+    { lane: 1, t: 0, label: "valide x + K\nà 10.250", kind: "write", mono: true },
+    { lane: 0, t: 1, label: "y : déplacer readme", kind: "write" },
+    { lane: 2, t: 1, label: "valide y + K\nà 10.251", kind: "good", mono: true },
+    { lane: 3, t: 2, label: "vérification à\ninstantané 10.251", kind: "read", mono: true },
+    { lane: 3, t: 3, label: "voit x et y :\nChen refusé", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [0, 1], label: "ack", dashed: true },
+    { from: [0, 1], to: [2, 1] },
+    { from: [1, 0], to: [2, 1], label: "même clé K" },
+    { from: [2, 1], to: [3, 2], label: "jeton 10.251", dashed: true },
+  ]}
+  caption="Correction : deux écritures sur une même clé sont ordonnées par la clé, et non par les horloges."
+/>
+
+</Frames>
+
+Remarquez la flèche intitulée « même clé K » dans le cadre de droite. Aucune des deux horloges ne s’est améliorée ; ce qui a changé, c’est que les deux transactions sont désormais en conflit, et CockroachDB ordonne correctement les transactions en conflit. Les horodatages des deux cadres sont donnés à titre d’illustration ; le décalage reste largement inférieur à la valeur par défaut de `500ms`, si bien qu’aucun serveur ne s’arrêterait.
+
+AuthZed a constaté qu’une lecture partagée ne suffisait pas : "we needed both transactions to write to the same key" (« il fallait que les deux transactions écrivent sur la même clé »). Le pilote CockroachDB de SpiceDB ajoute donc une clé de recouvrement aux écritures, selon une stratégie choisie par `--datastore-tx-overlap-strategy` ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)) :
+
+| Stratégie | Documentation de SpiceDB |
+| --- | --- |
+| `static` (par défaut) | "All writes overlap to guarantee safety at the cost of write throughput" (toutes les écritures se recouvrent, ce qui garantit la sûreté au détriment du débit d’écriture) |
+| `prefix` | "Only writes that contain objects with same prefix overlap" (seules les écritures contenant des objets de même préfixe se recouvrent) |
+| `request` | "Only writes with the same io.spicedb.requestoverlapkey header overlap" (seules les écritures portant le même en-tête io.spicedb.requestoverlapkey se recouvrent) |
+| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem" (aucune écriture ne se recouvre, ce qui offre le meilleur débit d’écriture mais peut vous laisser exposé au problème du « nouvel ennemi ») |
+
+Le coût, selon les termes d’AuthZed : "This does add a small amount of latency to the write path, but it leaves the read paths performant." (« Cela ajoute un peu de latence au chemin d’écriture, mais laisse les chemins de lecture performants. ») Chaque écriture `static` entre en contention sur une même ligne : c’est le prix que l’article payait à la place par l’attente de validation.
+
+La documentation des stockages de données ajoute une autre réserve concernant CockroachDB, côté lecture : SpiceDB choisit une révision au moyen de `cluster_logical_timestamp()`, "which can differ across nodes by up to the cluster's" (« qui peut différer d’un nœud à l’autre jusqu’au… du cluster ») décalage maximal, et "A read may not see a recently committed write if the reading node's timestamp is behind the writing node's." (« une lecture peut ne pas voir une écriture récemment validée si l’horodatage du nœud qui lit est en retard sur celui du nœud qui écrit »). Par conséquent, "fully_consistent does not guarantee read-after-write consistency on CockroachDB." (« fully_consistent ne garantit pas la cohérence lecture-après-écriture sur CockroachDB »). Un ZedToken issu de l’écriture évite ce problème, car il désigne la révision propre à cette écriture ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)).
+
+## PostgreSQL et MySQL : un seul primaire décide
+
+Une base de données à primaire unique voit déjà toutes les validations dans l’ordre, si bien que la propriété ① ne nécessite aucune horloge. La question ouverte est la propriété ② : des lectures susceptibles d’aller vers un réplica en retard.
+
+Le pilote PostgreSQL de SpiceDB n’utilise pas du tout le temps pour ordonner. Une révision est l’identifiant de transaction et l’instantané issus de `pg_current_xact_id()` et `pg_current_snapshot()` ; un commentaire du pilote indique que "timestamps cannot be used for ordering transactions in PG" (« les horodatages ne peuvent pas servir à ordonner les transactions dans PG »), et que deux instantanés peuvent être "mutually uncomparable" (« mutuellement incomparables ») ([`postgres/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/postgres/revisions.go), v1.57.1). Un instantané pris après la validation de `x` répertorie `x` comme validée, ce qui est la propriété ① exprimée dans les termes propres à PostgreSQL. Le pilote MySQL écrit une ligne dans une table de transactions dont l’`id` est `AUTO_INCREMENT` et utilise cet identifiant comme révision ([`migrations`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/migrations/zz_migration.0001_initial_schema.go), [`revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/revisions.go)). Une écriture qui commence après la validation d’une autre insère sa ligne plus tard et obtient donc un identifiant plus grand ; ce raisonnement est celui de cette page, et n’est pas énoncé dans la documentation de SpiceDB.
+
+Les réplicas en lecture réintroduisent du retard. Comment SpiceDB maintient-il une vérification au moins aussi fraîche que son jeton lorsque le réplica est en retard ?
+
+<Swimlane
+  lanes={["application", "SpiceDB", "primaire", "réplica"]}
+  laneWidth={140}
+  rowHeight={60}
+  timeLabel="temps"
+  title="Repli sur le primaire lorsqu’un réplica est en retard"
+  desc="L’application retire Chen de folder:A. Le primaire valide cette écriture comme révision r105 et SpiceDB renvoie un ZedToken pour r105. Plus tard, une vérification arrive avec at_least_as_fresh r105. SpiceDB demande au réplica si r105 a été répliquée ; le réplica n’a atteint que r103, aussi SpiceDB envoie-t-il plutôt la lecture au primaire, qui répond à r105 ou au-delà. Chen est refusé."
+  events={[
+    { lane: 0, t: 0, label: "retirer Chen", kind: "write" },
+    { lane: 2, t: 0, label: "valide r105", kind: "write", mono: true },
+    { lane: 1, t: 1, label: "ZedToken r105", kind: "note", mono: true },
+    { lane: 0, t: 2, label: "vérif., jeton r105", kind: "read", mono: true },
+    { lane: 3, t: 2, label: "rejoué jusqu’à r103", kind: "bad", mono: true },
+    { lane: 1, t: 3, label: "r105 absente :\nutiliser le primaire", kind: "note" },
+    { lane: 2, t: 4, label: "lecture à ≥ r105", kind: "good", mono: true },
+    { lane: 0, t: 5, label: "Chen refusé", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [2, 0], to: [1, 1] },
+    { from: [1, 1], to: [0, 1], label: "written_at" },
+    { from: [0, 2], to: [1, 2] },
+    { from: [1, 2], to: [3, 2], label: "a r105 ?" },
+    { from: [1, 3], to: [2, 4] },
+    { from: [2, 4], to: [0, 5], dashed: true },
+  ]}
+  caption="Les numéros de révision sont donnés à titre d’illustration. Une vérification sans jeton récent a plus de chances d’obtenir sa réponse du réplica."
+/>
+
+La documentation décrit exactement ceci : le retard de réplication "would be problematic to SpiceDB's ability to solve the new enemy problem" (« compromettrait la capacité de SpiceDB à résoudre le problème du nouvel ennemi »), aussi SpiceDB vérifie-t-il "if the revision has been replicated into the target replica. If missing, it will fall back to the primary." (« si la révision a été répliquée dans le réplica cible. Si elle est absente, il se replie sur le primaire. »). Pour MySQL, cela "requires two roundtrips instead of one" (« nécessite deux allers-retours au lieu d’un »), et la documentation déconseille de placer un répartiteur de charge devant des réplicas MySQL "because SpiceDB will not be able to maintain consistency guarantees" (« car SpiceDB ne pourra pas maintenir les garanties de cohérence ») ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)).
+
+Permify, qui fonctionne sur PostgreSQL, construit son Snap Token de la même manière : le jeton contient un `XID8` PostgreSQL et une chaîne d’instantané ([`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go), v1.7.6). Sa documentation décrit seulement le jeton comme "a token that consists of an encoded timestamp" (« un jeton constitué d’un horodatage encodé ») ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)).
+
+## Spanner sans l’article
+
+SpiceDB fonctionne aussi sur Cloud Spanner, qui dispose de TrueTime. Là, le pilote "assumes the database is linearizable and skips the transaction overlap strategy" (« suppose que la base de données est linéarisable et ignore la stratégie de recouvrement des transactions ») ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)), et lit sa révision au moyen de `SELECT CURRENT_TIMESTAMP()` ([`spanner/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/spanner/revisions.go)). C’est la configuration la plus proche de l’article.
+
+## Sans aucun jeton
+
+OpenFGA n’a pas de zookie ; sa documentation indique que l’article "has a feature called `Zookies`" (« comporte une fonctionnalité appelée `Zookies` ») et qu’OpenFGA "is considering a similar feature in future releases" (« envisage une fonctionnalité similaire dans de futures versions ») ([consistency](https://openfga.dev/docs/interacting/consistency)). À la place, une requête choisit `MINIMIZE_LATENCY` (la valeur par défaut) ou `HIGHER_CONSISTENCY`, qui "will skip the cache and query the database directly" (« contourne le cache et interroge directement la base de données »). Sur PostgreSQL avec un stockage de données secondaire configuré (`datastore.secondaryUri`, "for postgres only" (« pour postgres uniquement »), [configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration)), `HIGHER_CONSISTENCY` sélectionne aussi le primaire : le commentaire du code indique "If we are using higher consistency, we need to use the write database" (« si nous utilisons une cohérence plus forte, nous devons utiliser la base de données d’écriture ») ([`postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go), v1.22.1).
+
+On obtient ainsi « aussi frais que le primaire », et non « au moins aussi frais que mon écriture ». La différence compte pour le coût : un zookie permet à la plupart des vérifications d’utiliser un cache ou un réplica et n’envoie au primaire que les vérifications récentes, alors que `HIGHER_CONSISTENCY` y envoie chacune de ces requêtes. La [page OpenFGA](../../ecosystem/openfga/#cohérence-sans-zookies) illustre le cas du cache ; la documentation suggère de choisir le mode pour chaque requête en comparant la date de dernière modification d’une ressource avec la durée de vie (TTL) du cache, ce qui oblige l’application à conserver elle-même une partie de l’information que porte un zookie.
+
+Autres produits :
+
+- **Ory Keto** comporte les champs `snaptoken` et `latest` dans son API Check, chacun marqué "This field is not implemented yet and has no effect" (« ce champ n’est pas encore implémenté et n’a aucun effet ») ([`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)).
+- **Warrant** lit un en-tête `Warrant-Token` et n’agit que sur la valeur `latest`, qui envoie la lecture vers le primaire ; toute autre valeur est ignorée, et le serveur open source ne renvoie aucun jeton ([`wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go), [Warrant](../../ecosystem/warrant/)).
+- **Topaz** ne documente aucun jeton ; voir la [page de comparaison](../../ecosystem/compare/#jeton-de-cohérence-et-modes).
+
+Les notes de lecture de Tom MacWright sur l’article font le même constat de l’extérieur : OpenFGA n’a rien de comparable aux zookies, et "neither does Ory Keto" (« Ory Keto non plus ») ([Reading Zanzibar, 2025-05-02](https://macwright.com/2025/05/02/reading-zanzibar.html)).
+
+Sans jeton, une application qui a besoin de la garantie de l’article dispose de deux options : lire depuis un stockage toujours à jour (un seul primaire, pas de cache), ou accepter une fenêtre pendant laquelle un utilisateur retiré peut encore être autorisé.
+
+## Mécanisme par produit
+
+| Produit et stockage de données | Origine de l’ordre | Jeton | Lectures au jeton ou après |
+| --- | --- | --- | --- |
+| Article (Spanner) | TrueTime + attente de validation | zookie | n’importe quel réplica ; attend si nécessaire (§3.2.5) |
+| SpiceDB sur Spanner | TrueTime ; stratégie de recouvrement ignorée | ZedToken | lecture d’instantané Spanner |
+| SpiceDB sur CockroachDB | horodatages HLC ; clé de recouvrement sur les écritures (`static` par défaut) | ZedToken | `AS OF SYSTEM TIME` ; `fully_consistent` peut manquer une écriture faite sur un autre nœud |
+| SpiceDB sur PostgreSQL | identifiant de transaction et instantané du primaire | ZedToken | réplica s’il dispose de la révision, sinon primaire |
+| SpiceDB sur MySQL | identifiant de transaction `AUTO_INCREMENT` | ZedToken | réplica s’il dispose de la révision, sinon primaire (deux allers-retours) |
+| Permify sur PostgreSQL | `XID8` et instantané du primaire | Snap Token | instantané issu du jeton |
+| OpenFGA | aucune exposée | aucun | `HIGHER_CONSISTENCY` : contourner le cache, utiliser le primaire |
+| Ory Keto | aucune exposée | champ `snaptoken`, non implémenté | non disponible |
+| Warrant | aucun (aucun jeton n’est renvoyé) | en-tête `Warrant-Token` | `latest` uniquement ; autres valeurs ignorées |
+
+Les sources de chaque ligne figurent dans les sections ci-dessus. Le chemin de lecture de Permify pour un jeton n’a pas été suivi dans son code source ; la ligne ne reflète que le contenu du jeton.
+
+<Callout kind="note" title="Non vérifié">
+
+Le billet d’AuthZed sur CockroachDB rapporte une reproduction réalisée en injectant un retard d’horloge et de réseau sur un nœud d’un cluster de trois nœuds ; les horodatages de cette page sont donnés à titre d’illustration et n’ont pas été mesurés. L’affirmation selon laquelle les identifiants `AUTO_INCREMENT` de MySQL suivent l’ordre causal est un raisonnement fondé sur la manière dont InnoDB attribue les identifiants, et non une affirmation de la documentation de SpiceDB.
+
+</Callout>
+
+## Sources
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.2, §2.4, §2.4.4, §3.2.5, §5.
+- James C. Corbett et al., [Spanner: Google's Globally-Distributed Database](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), OSDI '12.
+- AuthZed, [The One Crucial Difference Between Spanner and CockroachDB](https://authzed.com/blog/prevent-newenemy-cockroachdb), 2021-10-14 (blog d’éditeur).
+- AuthZed, [Enforcing Causal Ordering in Distributed Systems: The Importance of Permissions Checking](https://authzed.com/blog/new-enemies), 2021-02-17 (blog d’éditeur).
+- AuthZed, [Datastores](https://authzed.com/docs/spicedb/concepts/datastores), documentation de SpiceDB.
+- Code source de SpiceDB v1.57.1 : [`postgres/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/postgres/revisions.go), [`mysql/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/revisions.go), [schéma initial `mysql`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/migrations/zz_migration.0001_initial_schema.go), [`spanner/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/spanner/revisions.go).
+- Cockroach Labs, [`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start) (`--max-offset`).
+- Spencer Kimball et Irfan Sharif, [Living without atomic clocks: Where CockroachDB and Spanner diverge](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/), Cockroach Labs, 2022-01-27 (blog d’éditeur).
+- OpenFGA, [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency) et [Configuring OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configuration) ; code source v1.22.1 [`pkg/storage/postgres/postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go).
+- Permify, [Snap Tokens](https://fusionauth.io/permify-docs/operations/snap-tokens) ; code source v1.7.6 [`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go).
+- Ory Keto, [`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto).
+- Warrant, [`pkg/wookie/wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go).
+- Tom MacWright, [Reading Zanzibar](https://macwright.com/2025/05/02/reading-zanzibar.html), 2025-05-02.

@@ -210,7 +210,7 @@ That gives "as fresh as the primary", not "at least as fresh as my write". The d
 Other products:
 
 - **Ory Keto** has `snaptoken` and `latest` fields in its Check API, each marked "This field is not implemented yet and has no effect" ([`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)).
-- **Warrant** reads a `Warrant-Token` header and treats the value `latest` specially ([`wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go)); what other values do was not checked for this page.
+- **Warrant** reads a `Warrant-Token` header and acts only on the value `latest`, which sends the read to the primary; any other value is ignored, and the open-source server returns no token ([`wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go), [Warrant](../../ecosystem/warrant/)).
 - **Topaz** documents no token; see the [comparison page](../../ecosystem/compare/#consistency-token-and-modes).
 
 Tom MacWright's reading notes on the paper make the same observation from the outside: OpenFGA has nothing like zookies, and "neither does Ory Keto" ([Reading Zanzibar, 2025-05-02](https://macwright.com/2025/05/02/reading-zanzibar.html)).
@@ -229,7 +229,7 @@ Without a token, an application that needs the paper's guarantee has two options
 | Permify on PostgreSQL | primary's `XID8` and snapshot | Snap Token | snapshot from the token |
 | OpenFGA | none exposed | none | `HIGHER_CONSISTENCY`: skip cache, use primary |
 | Ory Keto | none exposed | `snaptoken` field, not implemented | not available |
-| Warrant | not checked | `Warrant-Token` header | `latest`; other values not checked |
+| Warrant | none (no token is returned) | `Warrant-Token` header | `latest` only; other values ignored |
 
 Sources for each row are in the sections above. Permify's read path for a token was not traced in its source; the row reflects the token's contents only.
 

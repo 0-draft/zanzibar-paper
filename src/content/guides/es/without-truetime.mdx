@@ -1,0 +1,256 @@
+---
+title: "Orden sin TrueTime"
+description: "Qué necesita un zookie de la base de datos subyacente, cómo lo obtienen de CockroachDB, PostgreSQL, MySQL y Spanner los productos de estilo Zanzibar, y qué ocurre cuando nada lo proporciona."
+section: guide
+part: practice
+order: 12
+checked: "2026-11-13"
+paper: ["2.2", "2.4", "2.4.4", "3.2.5", "5"]
+---
+
+import Graph from "../../../components/diagram/Graph.astro";
+import Swimlane from "../../../components/diagram/Swimlane.astro";
+import Callout from "../../../components/diagram/Callout.astro";
+import Frames from "../../../components/diagram/Frames.astro";
+
+Zanzibar evita el problema del “nuevo enemigo” con zookies, y los zookies funcionan porque Spanner da a cada escritura una marca de tiempo que respeta la causalidad. [Consistencia, instantáneas y zookies](../consistency/) explica ambas cosas, incluido cómo producen esas marcas de tiempo TrueTime y la espera de confirmación. Casi nadie fuera de Google funciona sobre TrueTime. Esta página se pregunta qué necesita realmente de una base de datos el protocolo de zookies, y cómo lo obtienen, o prescinden de ello, los productos construidos sobre otras bases de datos.
+
+## Qué necesita un zookie del almacén de datos
+
+El protocolo de zookies descansa en dos propiedades que §2.2 exige a la capa de almacenamiento, "external consistency and snapshot reads with bounded staleness" (consistencia externa y lecturas de instantánea con desactualización acotada):
+
+1. **El orden de confirmación sigue a la causalidad.** Si la escritura `x` ocurrió antes que la escritura `y` (por ejemplo, Anne vio que `x` tenía éxito y después hizo `y`), entonces `T_x < T_y`. En palabras del artículo, a dos actualizaciones causalmente relacionadas `x ≺ y` se les "will be assigned timestamps that reflect the causal order: `T_x < T_y`" (asignarán marcas de tiempo que reflejen el orden causal: `T_x < T_y`) (§2.2), y el protocolo de zookies "ensures that all prior ACL writes have lower timestamps" (garantiza que todas las escrituras de ACL anteriores tengan marcas de tiempo menores).
+2. **Lecturas de instantánea en un punto dado o después.** Una lectura en `T` "observes all updates with timestamps ≤ T" (observa todas las actualizaciones con marcas de tiempo ≤ T) (§2.2), y una comprobación "is always evaluated at a consistent snapshot no earlier than the given zookie" (se evalúa siempre en una instantánea consistente no anterior al zookie dado) (§2.4.4).
+
+Nada en esta lista dice “marca de tiempo” en el sentido de hora de reloj. El valor que hay dentro de un zookie puede ser cualquier posición en una historia, siempre que las dos propiedades se cumplan para él. Por eso el artículo hizo opaco el zookie: "to discourage our clients from choosing arbitrary timestamps and to allow future extensions" (para disuadir a nuestros clientes de elegir marcas de tiempo arbitrarias y para permitir extensiones futuras) (§2.4).
+
+¿Cómo se combinan las dos propiedades para impedir que Chen vea el readme después de que se le quitara de la carpeta A?
+
+<Graph
+  width={640}
+  height={300}
+  minWidth={540}
+  title="Las dos propiedades en las que se apoya un zookie"
+  desc="La escritura x quita a Chen de folder:A. La escritura y, hecha después de que se confirmara x, mueve doc:readme a folder:A. La propiedad 1 dice que la posición de confirmación de x es menor que la de y. El token devuelto para y nombra la posición de y. Una comprobación posterior lleva el token. La propiedad 2 dice que la comprobación lee una instantánea en el token o posterior, que por tanto contiene y y, por la propiedad 1, también x. A Chen se le deniega el acceso."
+  nodes={[
+    { id: "x", x: 100, y: 60, label: "x: quita a Chen\nde folder:A", kind: "store" },
+    { id: "y", x: 100, y: 200, label: "y: mueve el readme\na folder:A", kind: "store" },
+    { id: "tok", x: 330, y: 200, label: "token = pos(y)", kind: "object", mono: true },
+    { id: "chk", x: 540, y: 200, label: "comprobación en\ninstantánea ≥ token", kind: "server", on: true },
+    { id: "res", x: 540, y: 60, label: "ve x e y:\nChen denegado", kind: "note" },
+  ]}
+  edges={[
+    { from: "x", to: "y", label: "① x ≺ y ⇒ pos(x) < pos(y)", on: true },
+    { from: "y", to: "tok", label: "devuelto" },
+    { from: "tok", to: "chk", label: "llevado" },
+    { from: "chk", to: "res", label: "② todo ≤ instantánea", on: true },
+  ]}
+  caption="Si se rompe ①, la instantánea puede contener y sin x. Si se rompe ②, la comprobación puede ejecutarse antes de y. En ambos casos Chen ve el readme."
+/>
+
+Obsérvese que la propiedad ① se refiere a *escrituras que la base de datos puede no ver nunca como relacionadas*. §2.2 exige el orden para las "updates on different ACLs or objects and those coordinated via channels invisible to Zanzibar" (actualizaciones sobre ACL u objetos distintos y las coordinadas a través de canales invisibles para Zanzibar). En el Ejemplo A del artículo, el vínculo entre las dos escrituras es Alice pidiéndoselo a Charlie, fuera de cualquier sistema. Aun así, la base de datos tiene que ordenar correctamente las dos confirmaciones.
+
+## Tres formas de obtener un orden
+
+Spanner obtiene la propiedad ① de relojes sincronizados con una cota de error conocida, a cambio de esperar a que pase la incertidumbre en cada escritura ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf); dibujado en la [página de consistencia](../consistency/#de-dónde-vienen-las-marcas-de-tiempo-truetime)). Otras bases de datos la obtienen, o la obtienen en gran parte, de otras maneras. ¿De dónde sale el orden en cada una?
+
+<Graph
+  width={640}
+  height={250}
+  minWidth={540}
+  title="De dónde sale el orden de confirmación"
+  desc="Tres fuentes de orden. Spanner: las marcas de tiempo de TrueTime más la espera de confirmación dan a cada confirmación una marca de tiempo causal, entre regiones. CockroachDB: los relojes lógicos híbridos dan marcas de tiempo que respetan la causalidad solo entre transacciones que tocan las mismas claves, así que SpiceDB hace que las escrituras toquen una clave común. PostgreSQL y MySQL: un único primario decide el orden de confirmación, así que un ID de transacción o una instantánea de ese primario ya respeta la causalidad."
+  nodes={[
+    { id: "sp", x: 110, y: 60, label: "Spanner\nTrueTime + espera\nde confirmación", kind: "store" },
+    { id: "cr", x: 330, y: 60, label: "CockroachDB\nreloj lógico híbrido", kind: "store" },
+    { id: "pg", x: 540, y: 60, label: "PostgreSQL, MySQL\nun único primario", kind: "store" },
+    { id: "sp2", x: 110, y: 180, label: "todas las confirmaciones\nordenadas", kind: "note" },
+    { id: "cr2", x: 330, y: 180, label: "ordenadas solo si\nlas claves se solapan", kind: "note" },
+    { id: "pg2", x: 540, y: 180, label: "todas ordenadas,\nun solo sitio", kind: "note" },
+  ]}
+  edges={[
+    { from: "sp", to: "sp2" },
+    { from: "cr", to: "cr2", on: true },
+    { from: "pg", to: "pg2" },
+  ]}
+  caption="La columna central es la que necesita ayuda de la capa de aplicación."
+/>
+
+Obsérvese que las bases de datos con un único primario obtienen la propiedad ① gratis, porque un solo servidor ve todas las confirmaciones en orden; a lo que renuncian es a la replicación global del artículo. CockroachDB replica globalmente, pero solo proporciona en parte la propiedad ①. La sección siguiente trata de ese hueco.
+
+## CockroachDB: la regla de las claves solapadas
+
+CockroachDB no tiene TrueTime. Sus nodos mantienen relojes sincronizados de forma aproximada, y el clúster tiene un desfase de reloj máximo, `--max-offset`, con un valor predeterminado de `500ms`; "If observed clock offsets exceed this limit, servers will crash to minimize the likelihood of reading inconsistent data" (si los desfases de reloj observados superan este límite, los servidores se caerán para minimizar la probabilidad de leer datos inconsistentes) ([`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start)). La propia comparación de Cockroach Labs con Spanner dice que "CockroachDB only goes as far as to claim serializability" (CockroachDB solo llega a afirmar serializabilidad), y nombra la anomalía que permite, "causal reverse" (inversión causal): transacciones causalmente relacionadas pueden confirmarse con marcas de tiempo en el orden equivocado ([Living without atomic clocks, 2022-01-27](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/)).
+
+AuthZed reprodujo el problema del “nuevo enemigo” en CockroachDB con SpiceDB en 2021 ([The One Crucial Difference Between Spanner and CockroachDB, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). El resumen del hueco en la entrada: "Cockroach does not provide external consistency for transactions involving _non-overlapping keys_." (Cockroach no proporciona consistencia externa para transacciones que implican _claves que no se solapan_.) Su prueba usó dos escrituras y una comprobación, ejecutadas "in sequence (not parallel)" (en secuencia, no en paralelo): escribir una tupla `excluded`, escribir una tupla `direct` y después comprobar `allowed = direct - excluded` en la revisión de la segunda escritura; "the check in 3 will succeed" (la comprobación de 3 tendrá éxito).
+
+¿Qué aspecto tiene eso con el ejemplo de referencia, si el reloj de un nodo va adelantado?
+
+<Frames>
+
+<Swimlane
+  lanes={["app de Anne", "nodo 1 (+250 ms)", "nodo 2 (en hora)", "comprobación de Chen"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="tiempo real"
+  ticks={["10.000", "10.100"]}
+  title="Desfase de reloj sin claves solapadas"
+  desc="En el tiempo real 10.000, la app de Anne quita a Chen de folder:A. El nodo 1, cuyo reloj va 250 ms adelantado, lo confirma con la marca de tiempo 10.250. Tras la confirmación, en el tiempo real 10.100, la app mueve el readme a folder:A. El nodo 2, cuyo reloj es correcto, lo confirma en 10.100 y lo devuelve como token. La comprobación de Chen se ejecuta en la instantánea 10.100. Ve el movimiento pero no la eliminación, que tiene la marca de tiempo mayor, así que a Chen se le permite el acceso. Este es el problema del nuevo enemigo."
+  events={[
+    { lane: 0, t: 0, label: "x: quita a Chen", kind: "write" },
+    { lane: 1, t: 0, label: "confirma x\nen 10.250", kind: "write", mono: true },
+    { lane: 0, t: 1, label: "y: mueve el readme", kind: "write" },
+    { lane: 2, t: 1, label: "confirma y\nen 10.100", kind: "bad", mono: true },
+    { lane: 3, t: 2, label: "comprobación en\ninstantánea 10.100", kind: "read", mono: true },
+    { lane: 3, t: 3, label: "ve y, no x:\nChen permitido", kind: "bad" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [0, 1], label: "ack", dashed: true },
+    { from: [0, 1], to: [2, 1] },
+    { from: [2, 1], to: [3, 2], label: "token 10.100", dashed: true },
+  ]}
+  caption="Violación: y ocurrió después de x, pero T_y < T_x. La instantánea en T_y no es un prefijo de lo que ocurrió."
+/>
+
+<Swimlane
+  lanes={["app de Anne", "nodo 1 (+250 ms)", "nodo 2 (en hora)", "comprobación de Chen"]}
+  laneWidth={132}
+  rowHeight={64}
+  timeLabel="tiempo real"
+  ticks={["10.000", "10.100"]}
+  title="Desfase de reloj con una clave de solapamiento"
+  desc="Las mismas dos escrituras, pero cada escritura escribe además una clave de solapamiento compartida K. El nodo 1 confirma x, incluida K, en 10.250. Cuando el nodo 2 confirma y, también escribe K, así que CockroachDB tiene que dar a y una marca de tiempo posterior a la escritura de K hecha por x, aquí 10.251. El token es 10.251, la comprobación de Chen se ejecuta en esa instantánea, ve x e y, y a Chen se le deniega el acceso."
+  events={[
+    { lane: 0, t: 0, label: "x: quita a Chen", kind: "write" },
+    { lane: 1, t: 0, label: "confirma x + K\nen 10.250", kind: "write", mono: true },
+    { lane: 0, t: 1, label: "y: mueve el readme", kind: "write" },
+    { lane: 2, t: 1, label: "confirma y + K\nen 10.251", kind: "good", mono: true },
+    { lane: 3, t: 2, label: "comprobación en\ninstantánea 10.251", kind: "read", mono: true },
+    { lane: 3, t: 3, label: "ve x e y:\nChen denegado", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [1, 0] },
+    { from: [1, 0], to: [0, 1], label: "ack", dashed: true },
+    { from: [0, 1], to: [2, 1] },
+    { from: [1, 0], to: [2, 1], label: "misma clave K" },
+    { from: [2, 1], to: [3, 2], label: "token 10.251", dashed: true },
+  ]}
+  caption="Solución: dos escrituras en una misma clave quedan ordenadas por la clave, no por los relojes."
+/>
+
+</Frames>
+
+Obsérvese la flecha con la etiqueta “misma clave K” en la viñeta derecha. Ningún reloj ha mejorado; lo que cambia es que las dos transacciones ahora entran en conflicto, y CockroachDB ordena correctamente las transacciones en conflicto. Las marcas de tiempo de ambas viñetas son ilustrativas; el desfase está muy por debajo del valor predeterminado de `500ms`, así que ningún servidor se caería.
+
+AuthZed comprobó que una lectura compartida no bastaba: "we needed both transactions to write to the same key" (necesitábamos que ambas transacciones escribieran en la misma clave). Por eso el controlador de CockroachDB de SpiceDB añade una clave de solapamiento a las escrituras, con una estrategia elegida mediante `--datastore-tx-overlap-strategy` ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)):
+
+| Estrategia | Documentación de SpiceDB |
+| --- | --- |
+| `static` (predeterminada) | "All writes overlap to guarantee safety at the cost of write throughput" (todas las escrituras se solapan para garantizar la seguridad a costa del rendimiento de escritura) |
+| `prefix` | "Only writes that contain objects with same prefix overlap" (solo se solapan las escrituras que contienen objetos con el mismo prefijo) |
+| `request` | "Only writes with the same io.spicedb.requestoverlapkey header overlap" (solo se solapan las escrituras con la misma cabecera io.spicedb.requestoverlapkey) |
+| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem" (ninguna escritura se solapa, lo que da el mejor rendimiento de escritura pero puede dejarle expuesto al problema del nuevo enemigo) |
+
+El coste, en palabras de AuthZed: "This does add a small amount of latency to the write path, but it leaves the read paths performant." (Esto añade un poco de latencia a la ruta de escritura, pero mantiene el rendimiento de las rutas de lectura.) Cada escritura `static` compite por una misma fila, que es el precio que el artículo pagaba en su lugar con la espera de confirmación.
+
+La documentación de los almacenes de datos añade una advertencia más sobre CockroachDB, en el lado de la lectura: SpiceDB elige una revisión con `cluster_logical_timestamp()`, "which can differ across nodes by up to the cluster's" (que puede diferir entre nodos hasta el) desfase máximo del clúster, y "A read may not see a recently committed write if the reading node's timestamp is behind the writing node's." (Una lectura puede no ver una escritura confirmada recientemente si la marca de tiempo del nodo que lee va por detrás de la del nodo que escribe.) En consecuencia, "fully_consistent does not guarantee read-after-write consistency on CockroachDB." (fully_consistent no garantiza la consistencia de lectura tras escritura en CockroachDB.) Un ZedToken de la escritura lo evita, porque nombra la propia revisión de la escritura ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)).
+
+## PostgreSQL y MySQL: decide un único primario
+
+Una base de datos con un único primario ya ve todas las confirmaciones en orden, así que la propiedad ① no necesita relojes. La cuestión abierta es la propiedad ②: lecturas que pueden ir a una réplica que va por detrás.
+
+El controlador de PostgreSQL de SpiceDB no usa el tiempo en absoluto para ordenar. Una revisión es el ID de transacción y la instantánea de `pg_current_xact_id()` y `pg_current_snapshot()`; un comentario del controlador dice que "timestamps cannot be used for ordering transactions in PG" (las marcas de tiempo no pueden usarse para ordenar transacciones en PG), y que dos instantáneas pueden ser "mutually uncomparable" (mutuamente incomparables) ([`postgres/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/postgres/revisions.go), v1.57.1). Una instantánea tomada después de que `x` se confirmara enumera `x` como confirmada, que es la propiedad ① expresada en los términos propios de PostgreSQL. El controlador de MySQL escribe una fila en una tabla de transacciones cuyo `id` es `AUTO_INCREMENT` y usa ese ID como revisión ([`migrations`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/migrations/zz_migration.0001_initial_schema.go), [`revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/revisions.go)). Una escritura que empieza después de que otra se haya confirmado inserta su fila más tarde, así que obtiene un ID mayor; ese razonamiento es de esta página, no lo afirma la documentación de SpiceDB.
+
+Las réplicas de lectura reintroducen el retraso. ¿Cómo mantiene SpiceDB una comprobación al menos tan reciente como su token cuando la réplica va por detrás?
+
+<Swimlane
+  lanes={["aplicación", "SpiceDB", "primario", "réplica"]}
+  laneWidth={140}
+  rowHeight={60}
+  timeLabel="tiempo"
+  title="Volver al primario cuando una réplica va por detrás"
+  desc="La aplicación quita a Chen de folder:A. El primario lo confirma como la revisión r105 y SpiceDB devuelve un ZedToken para r105. Más tarde llega una comprobación con at_least_as_fresh r105. SpiceDB pregunta a la réplica si r105 se ha replicado; la réplica solo ha llegado a r103, así que SpiceDB envía la lectura al primario, que responde en r105 o posterior. A Chen se le deniega el acceso."
+  events={[
+    { lane: 0, t: 0, label: "quita a Chen", kind: "write" },
+    { lane: 2, t: 0, label: "confirma r105", kind: "write", mono: true },
+    { lane: 1, t: 1, label: "ZedToken r105", kind: "note", mono: true },
+    { lane: 0, t: 2, label: "comprobación,\ntoken r105", kind: "read", mono: true },
+    { lane: 3, t: 2, label: "reproducido\nhasta r103", kind: "bad", mono: true },
+    { lane: 1, t: 3, label: "falta r105:\nusa el primario", kind: "note" },
+    { lane: 2, t: 4, label: "lee en ≥ r105", kind: "good", mono: true },
+    { lane: 0, t: 5, label: "Chen denegado", kind: "good" },
+  ]}
+  arrows={[
+    { from: [0, 0], to: [2, 0] },
+    { from: [2, 0], to: [1, 1] },
+    { from: [1, 1], to: [0, 1], label: "written_at" },
+    { from: [0, 2], to: [1, 2] },
+    { from: [1, 2], to: [3, 2], label: "¿tiene r105?" },
+    { from: [1, 3], to: [2, 4] },
+    { from: [2, 4], to: [0, 5], dashed: true },
+  ]}
+  caption="Los números de revisión son ilustrativos. Una comprobación sin un token reciente tiene más probabilidades de responderla la réplica."
+/>
+
+La documentación describe exactamente esto: el retraso de replicación "would be problematic to SpiceDB's ability to solve the new enemy problem" (sería un problema para la capacidad de SpiceDB de resolver el problema del nuevo enemigo), así que SpiceDB comprueba "if the revision has been replicated into the target replica. If missing, it will fall back to the primary." (si la revisión se ha replicado en la réplica de destino. Si falta, recurrirá al primario.) En MySQL esto "requires two roundtrips instead of one" (requiere dos viajes de ida y vuelta en lugar de uno), y la documentación desaconseja poner un balanceador de carga delante de las réplicas de MySQL "because SpiceDB will not be able to maintain consistency guarantees" (porque SpiceDB no podrá mantener las garantías de consistencia) ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)).
+
+Permify, que funciona sobre PostgreSQL, construye su Snap Token de la misma manera: el token contiene un `XID8` de PostgreSQL y una cadena de instantánea ([`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go), v1.7.6). Su documentación describe el token solo como "a token that consists of an encoded timestamp" (un token que consiste en una marca de tiempo codificada) ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)).
+
+## Spanner sin el artículo
+
+SpiceDB también funciona sobre Cloud Spanner, que tiene TrueTime. Allí el controlador "assumes the database is linearizable and skips the transaction overlap strategy" (supone que la base de datos es linealizable y omite la estrategia de solapamiento de transacciones) ([datastores](https://authzed.com/docs/spicedb/concepts/datastores)), y lee su revisión con `SELECT CURRENT_TIMESTAMP()` ([`spanner/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/spanner/revisions.go)). Es la configuración más cercana al artículo.
+
+## Sin ningún token
+
+OpenFGA no tiene zookie; su documentación dice que el artículo "has a feature called `Zookies`" (tiene una función llamada `Zookies`) y que OpenFGA "is considering a similar feature in future releases" (está considerando una función similar para versiones futuras) ([consistency](https://openfga.dev/docs/interacting/consistency)). En su lugar, una consulta elige `MINIMIZE_LATENCY` (el predeterminado) o `HIGHER_CONSISTENCY`, que "will skip the cache and query the database directly" (se saltará la caché y consultará directamente la base de datos). En PostgreSQL con un almacén de datos secundario configurado (`datastore.secondaryUri`, "for postgres only", solo para postgres, [configuración](https://openfga.dev/docs/getting-started/setup-openfga/configuration)), `HIGHER_CONSISTENCY` también selecciona el primario: el comentario del código dice "If we are using higher consistency, we need to use the write database" (si usamos una consistencia mayor, necesitamos usar la base de datos de escritura) ([`postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go), v1.22.1).
+
+Eso da “tan reciente como el primario”, no “al menos tan reciente como mi escritura”. La diferencia importa por el coste: un zookie permite que la mayoría de las comprobaciones usen una caché o una réplica y que solo las recientes vayan al primario, mientras que `HIGHER_CONSISTENCY` envía allí todas esas consultas. La [página de OpenFGA](../../ecosystem/openfga/#consistencia-sin-zookies) dibuja el caso de la caché; la documentación sugiere elegir el modo por solicitud comparando la hora de última modificación de un recurso con el TTL de la caché, lo que hace que la propia aplicación guarde parte de la información de un zookie.
+
+Otros productos:
+
+- **Ory Keto** tiene campos `snaptoken` y `latest` en su API Check, cada uno marcado como "This field is not implemented yet and has no effect" (este campo aún no está implementado y no tiene efecto) ([`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto)).
+- **Warrant** lee una cabecera `Warrant-Token` y solo actúa ante el valor `latest`, que envía la lectura a la primaria; cualquier otro valor se ignora, y el servidor de código abierto no devuelve ningún token ([`wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go), [Warrant](../../ecosystem/warrant/)).
+- **Topaz** no documenta ningún token; véase la [página de comparación](../../ecosystem/compare/#token-de-consistencia-y-modos).
+
+Las notas de lectura de Tom MacWright sobre el artículo hacen la misma observación desde fuera: OpenFGA no tiene nada parecido a los zookies, y "neither does Ory Keto" (Ory Keto tampoco) ([Reading Zanzibar, 2025-05-02](https://macwright.com/2025/05/02/reading-zanzibar.html)).
+
+Sin un token, una aplicación que necesite la garantía del artículo tiene dos opciones: leer de un almacén que esté siempre al día (un único primario, sin caché) o aceptar un intervalo en el que un usuario eliminado todavía puede tener acceso.
+
+## Mecanismo por producto
+
+| Producto y almacén de datos | De dónde sale el orden | Token | Lecturas en el token o después |
+| --- | --- | --- | --- |
+| Artículo (Spanner) | TrueTime + espera de confirmación | zookie | cualquier réplica; espera si hace falta (§3.2.5) |
+| SpiceDB sobre Spanner | TrueTime; se omite la estrategia de solapamiento | ZedToken | lectura de instantánea de Spanner |
+| SpiceDB sobre CockroachDB | Marcas de tiempo HLC; clave de solapamiento en las escrituras (`static` por defecto) | ZedToken | `AS OF SYSTEM TIME`; `fully_consistent` puede no ver una escritura de otro nodo |
+| SpiceDB sobre PostgreSQL | ID de transacción e instantánea del primario | ZedToken | la réplica si tiene la revisión; si no, el primario |
+| SpiceDB sobre MySQL | ID de transacción `AUTO_INCREMENT` | ZedToken | la réplica si tiene la revisión; si no, el primario (dos viajes de ida y vuelta) |
+| Permify sobre PostgreSQL | `XID8` e instantánea del primario | Snap Token | instantánea del token |
+| OpenFGA | ninguno expuesto | ninguno | `HIGHER_CONSISTENCY`: saltar la caché, usar el primario |
+| Ory Keto | ninguno expuesto | campo `snaptoken`, no implementado | no disponible |
+| Warrant | ninguno (no se devuelve ningún token) | cabecera `Warrant-Token` | solo `latest`; los demás valores se ignoran |
+
+Las fuentes de cada fila están en las secciones anteriores. No se ha seguido en el código fuente la ruta de lectura de Permify para un token; la fila refleja solo el contenido del token.
+
+<Callout kind="note" title="Sin verificar">
+
+La entrada de AuthZed sobre CockroachDB describe su reproducción con retrasos de reloj y de red inyectados en un nodo de un clúster de tres nodos; las marcas de tiempo de esta página son ilustrativas y no se han medido. La afirmación de que los ID `AUTO_INCREMENT` de MySQL siguen el orden causal es un razonamiento a partir de cómo asigna InnoDB los ID, no una afirmación de la documentación de SpiceDB.
+
+</Callout>
+
+## Fuentes
+
+- Ruoming Pang et al., [Zanzibar: Google's Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang), USENIX ATC '19, §2.2, §2.4, §2.4.4, §3.2.5, §5.
+- James C. Corbett et al., [Spanner: Google's Globally-Distributed Database](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf), OSDI '12.
+- AuthZed, [The One Crucial Difference Between Spanner and CockroachDB](https://authzed.com/blog/prevent-newenemy-cockroachdb), 2021-10-14 (blog del proveedor).
+- AuthZed, [Enforcing Causal Ordering in Distributed Systems: The Importance of Permissions Checking](https://authzed.com/blog/new-enemies), 2021-02-17 (blog del proveedor).
+- AuthZed, [Datastores](https://authzed.com/docs/spicedb/concepts/datastores), documentación de SpiceDB.
+- Código fuente de SpiceDB v1.57.1: [`postgres/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/postgres/revisions.go), [`mysql/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/revisions.go), [esquema inicial de `mysql`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/mysql/migrations/zz_migration.0001_initial_schema.go), [`spanner/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/spanner/revisions.go).
+- Cockroach Labs, [`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start) (`--max-offset`).
+- Spencer Kimball e Irfan Sharif, [Living without atomic clocks: Where CockroachDB and Spanner diverge](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/), Cockroach Labs, 2022-01-27 (blog del proveedor).
+- OpenFGA, [Query Consistency Modes](https://openfga.dev/docs/interacting/consistency) y [Configuring OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configuration); código fuente v1.22.1 [`pkg/storage/postgres/postgres.go`](https://github.com/openfga/openfga/blob/v1.22.1/pkg/storage/postgres/postgres.go).
+- Permify, [Snap Tokens](https://fusionauth.io/permify-docs/operations/snap-tokens); código fuente v1.7.6 [`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go).
+- Ory Keto, [`check_service.proto`](https://github.com/ory/keto/blob/master/proto/ory/keto/relation_tuples/v1alpha2/check_service.proto).
+- Warrant, [`pkg/wookie/wookie.go`](https://github.com/warrant-dev/warrant/blob/main/pkg/wookie/wookie.go).
+- Tom MacWright, [Reading Zanzibar](https://macwright.com/2025/05/02/reading-zanzibar.html), 2025-05-02.
