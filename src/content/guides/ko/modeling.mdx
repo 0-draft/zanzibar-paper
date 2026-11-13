@@ -138,7 +138,7 @@ Anne의 `edit`는 어디에서 오는가?
 
 ### 관계는 몇 개나 되는가
 
-이 방식에 대한 흔한 비판은 이름에 관한 것이다. Oso의 블로그 글 "Google Zanzibar Isn't Flexible"(Oso는 경쟁 인가 제품을 판매한다)에서 Greg Sarjeant는 "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`"(ReBAC에 관한 문헌에는 `can_delete`나 `can_archive` 같은 “관계”가 넘쳐난다)라고 쓰고, 이를 "essentially the same thing as creating a relation for every authorized action"(인가되는 모든 동작마다 관계를 만드는 것과 본질적으로 같다)이라고 부르며, 이것이 "an indication that relations are the wrong abstraction for authorization"(관계가 인가에 맞지 않는 추상화라는 징후)이라고 결론짓는다([Oso, 2024-11-01, 2025-11-07 갱신](https://www.osohq.com/post/google-zanzibar-isnt-flexible)).
+이 방식에 대한 흔한 비판은 이름에 관한 것이다. Oso의 블로그 글 "Google Zanzibar Isn't Flexible"(Oso는 경쟁 인가 제품을 판매한다)에서 Greg Sarjeant는 "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`"(ReBAC에 관한 문헌에는 `can_delete`나 `can_archive` 같은 “관계”가 넘쳐난다)라고 쓰고, 이를 "essentially the same thing as creating a relation for every authorized action"(인가되는 모든 동작마다 관계를 만드는 것과 본질적으로 같다)라고 부르며, 이것이 "an indication that relations are the wrong abstraction for authorization"(관계가 인가에 맞지 않는 추상화라는 징후)라고 결론짓는다([Oso, 2024-11-01, 2025-11-07 갱신](https://www.osohq.com/post/google-zanzibar-isnt-flexible)).
 
 개수는 실제로 늘어난다. 애플리케이션이 검사하는 모든 동작에는 스키마의 이름이 필요하다. 재작성 규칙이 적게 유지하는 것은 저장된 튜플의 수와, 누군가가 쓰기를 하는 관계의 수다. 위의 스키마에서 튜플을 가진 관계는 셋(`owner`, `editor`, `viewer`)이고 권한은 그것들의 순수 함수이므로, `can_archive`를 추가하면 스키마를 한 번 고칠 뿐 튜플은 건드리지 않는다. 논문 자신이 재작성을 도입한 동기도 같다. 파생된 관계를 객체마다 튜플로 저장하는 것은 "would be wasteful and make it hard to make modifications across all objects"(낭비이며 모든 객체에 걸친 수정을 어렵게 만든다)(§2.3.1). 스키마의 권한 이름이 비용인지 문서인지는 Oso와 Zanzibar 계열 제품들이 서로 의견을 달리하는 지점이며, 이 페이지는 그 문제를 결론짓지 않는다.
 
@@ -497,7 +497,7 @@ Anne은 왜 거부되는가?
 
 ## 사용자 정의 역할
 
-질문: 관리자가 실행 시간에 새 역할 "reviewer"를 정의하고 그 역할에 readme 열람 권한을 준다. 그 역할을 가진 Chen은 readme를 열람할 수 있는가? 스키마에 고정된 역할(owner, editor)은 스키마가 바뀔 때에만 바뀐다. 사용자 정의 역할은 데이터다.
+질문: 관리자가 런타임에 새 역할 "reviewer"를 정의하고 그 역할에 readme 열람 권한을 준다. 그 역할을 가진 Chen은 readme를 열람할 수 있는가? 스키마에 고정된 역할(owner, editor)은 스키마가 바뀔 때에만 바뀐다. 사용자 정의 역할은 데이터다.
 
 OpenFGA의 [사용자 정의 역할 가이드](https://openfga.dev/docs/modeling/custom-roles)는 이를 별도의 타입으로 모델링한다. "because our roles are going to be dynamic and might change frequently"(역할이 동적이고 자주 바뀔 수 있기 때문)다. 사용자는 `role` 객체에 `assignee`로 관계되고, 역할의 담당자는 유저셋으로서 관계를 부여받는다(`role:media-manager#assignee`가 `asset-category:logos`의 `editor`). AuthZed의 [사용자 정의 역할 글](https://authzed.com/blog/user-defined-roles)(2021-10-27)도 `role#member`로 같은 일을 한다.
 
@@ -550,7 +550,7 @@ type doc
 
 *OpenFGA DSL. 2026-11-13 기준으로 문서화된 문법을 따른다. 검증기는 실행하지 않았다.*
 
-실행 시간에 만든 역할은 어떻게 접근을 부여하는가?
+런타임에 만든 역할은 어떻게 접근을 부여하는가?
 
 <Graph
   width={600}
@@ -588,7 +588,7 @@ write   doc:readme#owner@user:beto
 논문의 Write API가 이를 다룬다. 클라이언트는 "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control"(낙관적 동시성 제어를 사용하는 읽기-수정-쓰기 과정을 통해 객체와 관련된 모든 튜플을 수정할 수도 있다). 객체별 "락" 튜플을 포함하여 객체의 튜플을 읽고, 쓰기를 "along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read"(락 튜플에 대한 touch와 함께 … 읽기 이후 락 튜플이 수정되지 않은 경우에만 쓰기가 커밋된다는 조건으로) 보내고, 그렇지 않으면 재시도한다(§2.4.2). 락 튜플은 동시에 일어나는 두 이전이 모두 성공하는 것을 막는다.
 
 - **SpiceDB.** `WriteRelationships`는 "atomically writes and/or deletes a set of specified relationships"(지정된 관계 집합을 원자적으로 쓰거나 삭제하며), "if any preconditions fail, the entire transaction will be reverted"(전제 조건 중 하나라도 실패하면 트랜잭션 전체가 되돌려진다)([`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)). `doc:readme#owner@user:anne`에 대한 `MUST_MATCH` 전제 조건이 논문의 락 튜플 역할을 한다. Anne이 더 이상 소유자가 아니면 이전은 실패한다.
-- **OpenFGA.** "You can combine both writes and deletes in a single transactional API request"(하나의 트랜잭션 API 요청에서 쓰기와 삭제를 함께 할 수 있으며), "all operations in the request will either succeed together or fail together"(요청의 모든 작업은 함께 성공하거나 함께 실패한다). 요청당 튜플은 최대 100개다([update tuples](https://openfga.dev/docs/getting-started/update-tuples)). 같은 페이지는 이미 존재하는 튜플을 쓰면 "would normally cause the whole request to fail"(보통 요청 전체가 실패한다)이라고 하며, "deleting tuples that might not exist"(존재하지 않을 수 있는 튜플을 삭제하는 경우)를 위해 `on_missing: "ignore"`를 제공한다(OpenFGA v1.10.0 이상). 이는 존재하지 않는 튜플의 삭제가 기본적으로 요청을 실패시킨다는 것을 시사하며, 그렇다면 삭제가 락 튜플처럼 작동한다. 그 페이지는 이 기본값을 명시적으로 말하지 않으며, 여기서 실행해 보지도 않았다.
+- **OpenFGA.** "You can combine both writes and deletes in a single transactional API request"(하나의 트랜잭션 API 요청에서 쓰기와 삭제를 함께 할 수 있으며), "all operations in the request will either succeed together or fail together"(요청의 모든 작업은 함께 성공하거나 함께 실패한다). 요청당 튜플은 최대 100개다([update tuples](https://openfga.dev/docs/getting-started/update-tuples)). 같은 페이지는 이미 존재하는 튜플을 쓰면 "would normally cause the whole request to fail"(보통 요청 전체가 실패한다)라고 하며, "deleting tuples that might not exist"(존재하지 않을 수 있는 튜플을 삭제하는 경우)를 위해 `on_missing: "ignore"`를 제공한다(OpenFGA v1.10.0 이상). 이는 존재하지 않는 튜플의 삭제가 기본적으로 요청을 실패시킨다는 것을 시사하며, 그렇다면 삭제가 락 튜플처럼 작동한다. 그 페이지는 이 기본값을 명시적으로 말하지 않으며, 여기서 실행해 보지도 않았다.
 
 무엇이 바뀌는가?
 

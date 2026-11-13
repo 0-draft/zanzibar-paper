@@ -4,7 +4,7 @@ description: "인가 관계를 위한 AuthZed의 오픈 소스 데이터베이�
 section: ecosystem
 order: 1
 checked: "2026-11-13"
-paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4"]
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.1", "3.2.4", "3.2.5"]
 product:
   name: SpiceDB
   maintainer: AuthZed, Inc.
@@ -151,7 +151,7 @@ SpiceDB 배포 하나는 검사에 어떻게 답하는가? AuthZed는 SpiceDB를
 
 ## 일관성: ZedToken과 zookie
 
-AuthZed는 ZedToken을 "the SpiceDB equivalent of Google Zanzibar's Zookie concept which protects users from the New Enemy Problem"(사용자를 New Enemy 문제로부터 보호하는 Google Zanzibar의 Zookie 개념에 해당하는 SpiceDB의 것)이라고 부른다([consistency 문서](https://authzed.com/docs/spicedb/concepts/consistency)). 쓰기는 ZedToken을 반환하고(`written_at`), 검사도 반환한다(`checked_at`). 요청은 네 가지 모드 중 하나를 고를 수 있다.
+AuthZed는 ZedToken을 "the SpiceDB equivalent of Google Zanzibar's Zookie concept which protects users from the New Enemy Problem"(사용자를 New Enemy 문제로부터 보호하는 Google Zanzibar의 Zookie 개념에 해당하는 SpiceDB의 대응물)이라고 부른다([consistency 문서](https://authzed.com/docs/spicedb/concepts/consistency)). 쓰기는 ZedToken을 반환하고(`written_at`), 검사도 반환한다(`checked_at`). 요청은 네 가지 모드 중 하나를 고를 수 있다.
 
 | 모드 | 요청하는 것 | 논문의 대응 |
 | --- | --- | --- |

@@ -36,7 +36,7 @@ zookie 프로토콜은 §2.2가 저장 계층에 요구하는 두 가지 속성,
     { id: "x", x: 100, y: 60, label: "x: folder:A에서\nChen 제거", kind: "store" },
     { id: "y", x: 100, y: 200, label: "y: readme를\nfolder:A로 이동", kind: "store" },
     { id: "tok", x: 330, y: 200, label: "token = pos(y)", kind: "object", mono: true },
-    { id: "chk", x: 540, y: 200, label: "스냅샷 ≥ token\n에서 검사", kind: "server", on: true },
+    { id: "chk", x: 540, y: 200, label: "스냅샷 ≥ 토큰\n에서 검사", kind: "server", on: true },
     { id: "res", x: 540, y: 60, label: "x와 y를 봄:\nChen 거부", kind: "note" },
   ]}
   edges={[
@@ -82,7 +82,7 @@ Spanner는 오차 한계가 알려진 동기화된 시계로 속성 ①을 얻�
 
 CockroachDB에는 TrueTime이 없다. 노드들은 느슨하게 동기화된 시계를 유지하며, 클러스터에는 최대 시계 오차 `--max-offset`이 있고 기본값은 `500ms`다. "If observed clock offsets exceed this limit, servers will crash to minimize the likelihood of reading inconsistent data"(관측된 시계 오차가 이 한도를 넘으면 서버는 일관되지 않은 데이터를 읽을 가능성을 최소화하기 위해 중단된다)([`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start)). Cockroach Labs가 직접 Spanner와 비교한 글은 "CockroachDB only goes as far as to claim serializability"(CockroachDB는 직렬화 가능성까지만 주장한다)라고 하며, 허용하는 이상 현상을 "causal reverse"(인과 역전)라고 부른다. 인과적으로 관련된 트랜잭션이 잘못된 순서의 타임스탬프로 커밋될 수 있다는 것이다([Living without atomic clocks, 2022-01-27](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/)).
 
-AuthZed는 2021년에 CockroachDB 위의 SpiceDB에서 new enemy 문제를 재현했다([The One Crucial Difference Between Spanner and CockroachDB, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). 그 글이 요약한 틈은 이렇다. "Cockroach does not provide external consistency for transactions involving _non-overlapping keys_."(Cockroach는 _겹치지 않는 키_를 포함하는 트랜잭션에 대해 외부 일관성을 제공하지 않는다.) 그 시험은 쓰기 두 번과 검사 한 번을 "in sequence (not parallel)"(병렬이 아니라 순차적으로) 실행했다. `excluded` 튜플을 쓰고, `direct` 튜플을 쓰고, 두 번째 쓰기의 리비전에서 `allowed = direct - excluded`를 검사하면 "the check in 3 will succeed"(3의 검사가 성공한다).
+AuthZed는 2021년에 CockroachDB 위의 SpiceDB에서 new enemy 문제를 재현했다([The One Crucial Difference Between Spanner and CockroachDB, 2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)). 그 글이 요약한 틈은 이렇다. "Cockroach does not provide external consistency for transactions involving _non-overlapping keys_."(Cockroach는 <em>겹치지 않는 키</em>를 포함하는 트랜잭션에 대해 외부 일관성을 제공하지 않는다.) 그 시험은 쓰기 두 번과 검사 한 번을 "in sequence (not parallel)"(병렬이 아니라 순차적으로) 실행했다. `excluded` 튜플을 쓰고, `direct` 튜플을 쓰고, 두 번째 쓰기의 리비전에서 `allowed = direct - excluded`를 검사하면 "the check in 3 will succeed"(3의 검사가 성공한다).
 
 한 노드의 시계가 앞서 가면, 예제로는 어떻게 보이는가?
 

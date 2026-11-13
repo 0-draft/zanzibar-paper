@@ -121,7 +121,7 @@ A는 readme에 대해 B에게 물어야 한다는 것을 어떻게 알았는가?
 
 readme의 `viewer`와 `owner`가 같은 서버에서 만난다는 점에 주목하라. 객체를 키로 삼는 이유가 이것이다. "processing a check on ⟨*object#relation*⟩ often involves indirect ACL checks on other relations of the same object and reading relation tuples of the object. These checks and reads can be processed by the same server since they share the same forwarding key with the parent check request."(⟨*object#relation*⟩에 대한 검사를 처리하는 데에는 흔히 같은 객체의 다른 관계에 대한 간접 ACL 검사와 그 객체의 관계 튜플 읽기가 수반된다. 이러한 검사와 읽기는 상위 검사 요청과 같은 포워딩 키를 공유하므로 같은 서버에서 처리될 수 있다.)(§3.2.5) Karger et al.은 캐시가 추가되거나 제거될 때 부하 균형을 유지하는 데 필요한 최소한의 비율의 객체만 이동하도록 일관된 해싱을 설계했으며, 그래서 캐시에 잘 맞는다.
 
-뜨거운 키에 대해 논문은 [Slicer](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya)를 사용하여 "to help distribute hot keys to multiple servers"(핫 키를 여러 서버에 분산하는 데 도움을 받는다)라고 덧붙인다(§3.2.5).
+핫 키에 대해 논문은 [Slicer](https://www.usenix.org/conference/osdi16/technical-sessions/presentation/adya)를 사용하여 "to help distribute hot keys to multiple servers"(핫 키를 여러 서버에 분산하는 데 도움을 받는다)라고 덧붙인다(§3.2.5).
 
 ### 호출의 양쪽 끝이 답을 캐시한다
 
@@ -184,7 +184,7 @@ readme의 `viewer`와 `owner`가 같은 서버에서 만난다는 점에 주목�
 
 논문: "we maintain a *lock table* on each server to track outstanding reads and checks. Among requests sharing the same cache key only one request will begin processing; the rest block until the cache is populated."(우리는 처리 중인 읽기와 검사를 추적하기 위해 각 서버에 *락 테이블*을 유지한다. 같은 캐시 키를 공유하는 요청 중 하나만 처리를 시작하고, 나머지는 캐시가 채워질 때까지 대기한다.)(§3.2.5) 검사의 경우 락 테이블은 위임받는 쪽에서 "an additional 12%"(추가로 12%)를, 위임하는 쪽에서 "an additional 3%"(추가로 3%)를 절약했다(§4.4).
 
-나중에 두 가지 개선이 더해졌다(§3.2.5). 매우 인기 있는 객체에 대해 Zanzibar는 ⟨*object#relation*⟩의 *모든* 튜플을 한꺼번에 읽어 캐시하며, 이는 "trading read bandwidth for cacheability"(읽기 대역폭을 캐시 가능성과 맞바꾸는 것)다. 그리고 취소된 하위 검사는 캐시 키를 비워 두므로, "eager cancellation when there are waiters on the corresponding lock table entry"(해당 락 테이블 항목에 대기자가 있을 때의 조기 취소)를 늦춘다.
+나중에 두 가지 개선이 더해졌다(§3.2.5). 매우 인기 있는 객체에 대해 Zanzibar는 ⟨*object#relation*⟩의 *모든* 튜플을 한꺼번에 읽어 캐시하며, 이는 "trading read bandwidth for cacheability"(읽기 대역폭을 캐시 가능성과 맞바꾸는 것)다. 그리고 취소된 하위 검사는 캐시 키를 비워 두므로, Zanzibar는 "eager cancellation when there are waiters on the corresponding lock table entry"(해당 락 테이블 항목에 대기자가 있을 때의 조기 취소)를 늦춘다.
 
 ### Spanner로 가는 읽기는 풀링된다
 

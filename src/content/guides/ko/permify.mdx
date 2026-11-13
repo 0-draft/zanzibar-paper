@@ -186,7 +186,7 @@ Permify의 snap token은 zookie의 역할을 한다. Write가 이를 반환하�
 ## 논문과의 차이
 
 - **속성과 규칙.** Permify Schema는 속성 기반 검사를 위해 `attribute`와 `rule`을 추가한다. 예: `permission view = check_ip_range(ip_range) or admin`([modeling](https://fusionauth.io/permify-docs/getting-started/modeling)). Zanzibar의 재작성은 튜플에 대해서만 작동한다(§2.3.1).
-- **컨텍스트 튜플.** "dynamically added to permission request operations"(권한 요청 작업에 동적으로 추가되는) 관계는 저장된 관계와 함께 평가되며 결코 쓰이지 않는다([contextual tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples)).
+- **컨텍스트 튜플.** "dynamically added to permission request operations"(권한 요청 작업에 동적으로 추가되는) 관계는 저장된 관계와 함께 평가되며 저장소에 기록되지 않는다([contextual tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples)).
 - **테넌트.** `Tenancy` 서비스가 테넌트를 생성, 나열, 삭제한다([service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto)). 논문에는 테넌트 개념이 없다.
 - **저장소.** TrueTime 메커니즘이 모든 ACL 쓰기에 타임스탬프를 부여하는 Spanner(§2.2, §3.1) 대신, MVCC 스냅샷을 가진 PostgreSQL이다. 분산 캐시는 "across availability zones (within an AWS region)"(가용 영역에 걸쳐(AWS 리전 하나 안에서)) 작동한다([cache](https://fusionauth.io/permify-docs/operations/cache)).
 - **비정규화 인덱스 없음.** 논문은 깊게 중첩된 그룹 검사에 Leopard로 답한다(§3.2.4). Permify는 결과 캐싱과 일관된 해싱을 문서화할 뿐, 집합 인덱스는 문서화하지 않는다.
