@@ -22,7 +22,7 @@ interface Props {
   /** Error pages: no canonical URL, not indexed */
   noindex?: boolean;
   /** Fix which text the paper page shows; the saved preference is ignored (/en/ is the original alone). */
-  view?: "original";
+  view?: "original" | undefined;
 }
 const { lang, title, description, path, alternates = false, noindex = false, view } = Astro.props;
 const site = Astro.site!;

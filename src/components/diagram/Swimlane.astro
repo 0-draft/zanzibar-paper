@@ -96,7 +96,7 @@ const boxes = events.map((e) => ({ x: cx(e.lane) - boxW / 2, y: cy(e.t) - boxH /
           const y2 = cy(a.to[1]);
           const sx = Math.sign(x2 - x1) || 0;
           const sy = Math.sign(y2 - y1) || 0;
-          const pad = (dx: number, dy: number) =>
+          const pad = (dx: number, dy: number): [number, number] =>
             dx !== 0 && Math.abs(dy) < Math.abs(dx) ? [(boxW / 2 + 2) * Math.sign(dx), 0] : [0, (boxH / 2 + 2) * Math.sign(dy)];
           const [ax, ay] = pad(x2 - x1, y2 - y1);
           const [bx, by] = pad(x1 - x2, y1 - y2);
