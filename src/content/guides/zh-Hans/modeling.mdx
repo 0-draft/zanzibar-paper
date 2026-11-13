@@ -12,7 +12,7 @@ import Graph from "../../../components/diagram/Graph.astro";
 import Frames from "../../../components/diagram/Frames.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 
-论文描述了其数据模型和配置语言，但只给出了一个完整的策略示例，即图 1。其结论给出的说法更宽：其 "simple yet flexible data model and configuration language support a variety of access control policies from both consumer and enterprise applications"（简单而灵活的数据模型和配置语言支持来自消费级和企业级应用的各种访问控制策略）（§6）。其相关工作一节列出了它所覆盖的模式："Zanzibar’s data model supports permissions, users, groups, and inheritance"（Zanzibar 的数据模型支持权限、用户、组和继承），即 Multics、UNIX、POSIX ACL 和 VMS 中的那些模式，以及 "a number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language"（若干 Zanzibar 客户端已在 Zanzibar 的命名空间配置语言之上实现了 RBAC 策略）（§5）。
+论文描述了其数据模型和配置语言，但只给出了一个完整的策略示例，即图 1。其结论的主张更进一步：其 "simple yet flexible data model and configuration language support a variety of access control policies from both consumer and enterprise applications"（简单而灵活的数据模型和配置语言支持来自消费级和企业级应用的各种访问控制策略）（§6）。其相关工作一节列出了它所覆盖的模式："Zanzibar’s data model supports permissions, users, groups, and inheritance"（Zanzibar 的数据模型支持权限、用户、组和继承），即 Multics、UNIX、POSIX ACL 和 VMS 中的那些模式，以及 "a number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language"（若干 Zanzibar 客户端已在 Zanzibar 的命名空间配置语言之上实现了 RBAC 策略）（§5）。
 
 本页写出实践中常见的八种需求。每一节给出该模式要回答的问题、元组、在论文能够表达时用图 1 的论文记法写出的规则、用 SpiceDB 的 schema 语言和 OpenFGA 的 DSL 写出的同一规则，以及一张高亮了决定答案的路径的元组图。模式列表沿用 OpenFGA 的[建模指南](https://openfga.dev/docs/modeling)；记法见[元组页面](../relation-tuples/)。
 
@@ -115,7 +115,7 @@ Anne 的 `edit` 从何而来？
   height={220}
   minWidth={500}
   title="角色与权限：Anne 的 edit"
-  desc="user:anne 有一条已存储的 owner 边指向 doc:readme#owner。一条标有 rewrite 的虚线箭头从 doc:readme#owner 指向虚线框 doc:readme#edit，另一条从 edit 指向虚线框 doc:readme#view。从 Anne 经 owner 到 edit 的路径被高亮。user:beto 经由组到达 doc:readme#viewer，而 viewer 只有一条指向 view 的虚线箭头。"
+  desc="user:anne 有一条已存储的 owner 边指向 doc:readme#owner。一条标有“重写”的虚线箭头从 doc:readme#owner 指向虚线框 doc:readme#edit，另一条从 edit 指向虚线框 doc:readme#view。从 Anne 经 owner 到 edit 的路径被高亮。user:beto 经由组到达 doc:readme#viewer，而 viewer 只有一条指向 view 的虚线箭头。"
   nodes={[
     { id: "anne", x: 80, y: 50, label: "user:anne", kind: "subject", mono: true, on: true },
     { id: "beto", x: 80, y: 170, label: "user:beto", kind: "subject", mono: true },
@@ -138,7 +138,7 @@ Anne 的 `edit` 从何而来？
 
 ### 关系的数量
 
-对这种风格的一个常见批评针对的是命名。在 Oso 的博客文章 "Google Zanzibar Isn't Flexible"（Oso 销售一款与之竞争的授权产品）中，Greg Sarjeant 写道 "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`"（关于 ReBAC 的文献中充斥着 `can_delete`、`can_archive` 这样的“关系”），称这 "essentially the same thing as creating a relation for every authorized action"（本质上等同于为每个被授权的操作创建一个关系），并得出结论说这是 "an indication that relations are the wrong abstraction for authorization"（关系不是适合授权的抽象的一个迹象）（[Oso，2024-11-01，2025-11-07 更新](https://www.osohq.com/post/google-zanzibar-isnt-flexible)）。
+对这种风格的一个常见批评针对的是命名。在 Oso 的博客文章 "Google Zanzibar Isn't Flexible"（Oso 销售一款与之竞争的授权产品）中，Greg Sarjeant 写道 "the literature about ReBAC is rife with “relations” like `can_delete` and `can_archive`"（关于 ReBAC 的文献中充斥着 `can_delete`、`can_archive` 这样的“关系”），称这 "essentially the same thing as creating a relation for every authorized action"（本质上等同于为每个被授权的操作创建一个关系），并得出结论说这是 "an indication that relations are the wrong abstraction for authorization"（表明关系是不适合授权的抽象）（[Oso，2024-11-01，2025-11-07 更新](https://www.osohq.com/post/google-zanzibar-isnt-flexible)）。
 
 数量确实会增长：应用要检查的每个操作都需要在 schema 中有一个名称。重写规则能让其保持很少的，是已存储元组的数量以及有人写入的关系的数量。在上面的 schema 中，三个关系存放元组（`owner`、`editor`、`viewer`），权限是它们的纯函数，因此新增 `can_archive` 只改一次 schema，不涉及任何元组。论文自己引入重写的动机也是如此：为每个对象把派生关系存为元组 "would be wasteful and make it hard to make modifications across all objects"（既浪费，又使得跨所有对象的修改变得困难）（§2.3.1）。schema 中的权限名称是成本还是文档，正是 Oso 与 Zanzibar 风格产品意见分歧之处；本页不对此下结论。
 
@@ -239,7 +239,7 @@ type doc
   caption="没有任何元组同时提到 Chen 和 readme。parent 元组把关于 readme 的问题变成关于文件夹 A 的问题。"
 />
 
-注意，把 readme 移到另一个文件夹只需改动一个元组（删除一个 `parent` 元组，写入另一个），所有继承来的授权都会随之改变。这正是论文的 new enemy 例 A 所讨论的操作："document ACLs inherit from folder ACLs"（文档 ACL 继承自文件夹 ACL）（§2.2），因此 ACL 变更与移动的顺序很重要；参见[一致性](../consistency/)。
+注意，把 readme 移到另一个文件夹只需改动一个元组（删除一个 `parent` 元组，写入另一个），所有继承来的授权都会随之改变。这正是论文中“new enemy”问题的例 A 所讨论的操作："document ACLs inherit from folder ACLs"（文档 ACL 继承自文件夹 ACL）（§2.2），因此 ACL 变更与移动的顺序很重要；参见[一致性](../consistency/)。
 
 ## 组与嵌套组
 
@@ -497,7 +497,7 @@ type doc
 
 ## 自定义角色
 
-问题：管理员在运行时定义了一个新角色 “reviewer”，并授予它对 readme 的查看权限。持有该角色的 Chen 能查看吗？固定在 schema 中的角色（owner、editor）只有在 schema 改变时才会变；自定义角色则是数据。
+问题：管理员在运行时定义了一个新角色“reviewer”，并授予它对 readme 的查看权限。持有该角色的 Chen 能查看吗？固定在 schema 中的角色（owner、editor）只有在 schema 改变时才会变；自定义角色则是数据。
 
 OpenFGA 的[自定义角色指南](https://openfga.dev/docs/modeling/custom-roles)把它们建模为一个单独的类型，"because our roles are going to be dynamic and might change frequently"（因为我们的角色是动态的，可能经常变化）：用户以 `assignee` 关系关联到一个 `role` 对象，再把该角色的 assignee 作为用户集授予关系（`role:media-manager#assignee` 作为 `asset-category:logos` 的 `editor`）。AuthZed 的[用户自定义角色文章](https://authzed.com/blog/user-defined-roles)（2021-10-27）用 `role#member` 做了同样的事。
 
@@ -585,7 +585,7 @@ delete  doc:readme#owner@user:anne
 write   doc:readme#owner@user:beto
 ```
 
-论文的 Write API 涵盖了这种情况。客户端 "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control"（也可以通过带乐观并发控制的读-改-写过程修改与一个对象相关的所有元组）：读取该对象的元组，包括每个对象一个的 “lock” 元组，然后发送写入，"along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read"（连同对锁元组的一次 touch 操作……条件是仅当锁元组自读取以来未被修改时才提交这些写入），否则重试（§2.4.2）。锁元组可以阻止两次并发的转移同时成功。
+论文的 Write API 涵盖了这种情况。客户端 "may also modify all tuples related to an object via a read-modify-write process with optimistic concurrency control"（也可以通过带乐观并发控制的读-改-写过程修改与一个对象相关的所有元组）：读取该对象的元组，包括每个对象各一个的“lock”元组，然后发送写入，"along with a touch on the lock tuple … with the condition that the writes will be committed only if the lock tuple has not been modified since the read"（连同对锁元组的一次 touch 操作……条件是仅当锁元组自读取以来未被修改时才提交这些写入），否则重试（§2.4.2）。锁元组可以阻止两次并发的转移同时成功。
 
 - **SpiceDB。** `WriteRelationships` "atomically writes and/or deletes a set of specified relationships"（以原子方式写入和/或删除一组指定的关系），并且 "if any preconditions fail, the entire transaction will be reverted"（任何前置条件不满足时，整个事务都会回滚）（[`permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto)）。对 `doc:readme#owner@user:anne` 设置一个 `MUST_MATCH` 前置条件，就起到论文中锁元组的作用：如果 Anne 已不再是所有者，转移就会失败。
 - **OpenFGA。** "You can combine both writes and deletes in a single transactional API request"（可以在单个事务性 API 请求中同时组合写入和删除），并且 "all operations in the request will either succeed together or fail together"（请求中的所有操作要么一起成功，要么一起失败），每个请求最多 100 个元组（[更新元组](https://openfga.dev/docs/getting-started/update-tuples)）。同一页面说，写入一个已存在的元组 "would normally cause the whole request to fail"（通常会导致整个请求失败），并为 "deleting tuples that might not exist"（删除可能不存在的元组）提供了 `on_missing: "ignore"`（OpenFGA v1.10.0 及以后）。这意味着默认情况下删除一个不存在的元组会使请求失败，从而让删除起到锁元组的作用；该页面并没有直接写明这一默认行为，这里也没有实际运行验证。

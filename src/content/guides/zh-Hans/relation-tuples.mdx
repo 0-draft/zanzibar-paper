@@ -205,7 +205,7 @@ Check 请求给出一个用户集 ⟨*object#relation*⟩ 和一个用户，询�
 
 <Callout kind="note" title="分帧展示，而非时间线">
 
-这些帧一次只展示一个分支，以便每一帧都能单独阅读。Zanzibar 并不会这样依次等待：它 "all leaf nodes of the boolean expression tree concurrently"（并发地评估布尔表达式树的所有叶节点），并在某个节点决定了子树的结果后取消该子树其余的部分（§3.2.3）。
+这些帧一次只展示一个分支，以便每一帧都能单独阅读。Zanzibar 并不会这样依次等待：它会评估 "all leaf nodes of the boolean expression tree concurrently"（并发地评估布尔表达式树的所有叶节点），并在某个节点决定了子树的结果后取消该子树其余的部分（§3.2.3）。
 
 </Callout>
 
@@ -333,7 +333,7 @@ Chen 是文件夹 A 的查看者吗？
 
 ## Read 与 Expand
 
-有两个 API 调用从不同的高度观察同一份数据。
+有两个 API 调用从不同的层面观察同一份数据。
 
 **Read**（§2.4.1）只返回已存储的元组。请求给出一个或多个*元组集*：单个元组键，或命名空间中某个对象 ID 或某个用户集的所有元组，并可选地限定为一个关系。论文明确指出 "Read results only depend on contents of relation tuples and do not reflect userset rewrite rules"（Read 的结果仅取决于关系元组的内容，不反映用户集重写规则）（§2.4.1）。在贯穿示例中，以关系 `viewer` 读取 `doc:readme` 会返回一行：
 

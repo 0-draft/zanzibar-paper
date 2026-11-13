@@ -17,7 +17,7 @@ ACL 检查回答的是“此用户现在能否做这件事”。在一个跨全�
 
 ## “new enemy”问题
 
-论文以一条规则开启 §2.2："ACL checks must respect the order in which users modify ACLs and object contents to avoid unexpected sharing behaviors."（ACL 检查必须遵循用户修改 ACL 和对象内容的顺序，以避免出现意外的共享行为。）它把这种失效称为 “new enemy” 问题：一个刚被从 ACL 中移除的用户，仍然看到了这次移除本应隐藏的内容。
+论文以一条规则开启 §2.2："ACL checks must respect the order in which users modify ACLs and object contents to avoid unexpected sharing behaviors."（ACL 检查必须遵循用户修改 ACL 和对象内容的顺序，以避免出现意外的共享行为。）它把这种失效称为“new enemy”问题：一个刚被从 ACL 中移除的用户，仍然看到了这次移除本应隐藏的内容。
 
 论文给出了两个例子。为了便于与 §2.2 对照阅读，本页在这两个例子中沿用论文自己的人名 Alice、Bob 和 Charlie；其他地方则使用 Anne、Beto 和 Chen 的贯穿示例。
 
@@ -134,7 +134,7 @@ ACL 检查回答的是“此用户现在能否做这件事”。在一个跨全�
 
 §2.2 列出了两个性质：*外部一致性*和*有界陈旧度的快照读*。论文为外部一致性引用了 [Gifford 1981 年的博士论文](#来源)。Spanner 论文为事务表述了同一性质："if a transaction T1 commits before another transaction T2 starts, then T1's commit timestamp is smaller than T2's"（如果事务 T1 在另一个事务 T2 开始之前提交，那么 T1 的提交时间戳小于 T2 的），并指出这 "equivalently, linearizability"（等价于可线性化），引用了 [Herlihy 和 Wing（1990）](https://doi.org/10.1145/78969.78972)。
 
-用 Zanzibar 的话说（§2.2），两个具有因果关系的更新 `x ≺ y` 获得的时间戳满足 `T_x < T_y`。在时间戳 `T` 上的快照读 "observes all updates with timestamps ≤ T"（会观察到所有时间戳 ≤ T 的更新）。合起来就是：如果一次读取看到了 `y`，它也会看到在 `y` 之前发生的一切。这之所以可行，是因为存储是多版本的：Spanner 把快照读定义为 "a read in the past that executes without locking"（一种在过去的时间点上、无需加锁执行的读取）（[Spanner §4.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)），而在多版本存储中 "each write on a data item produces a new copy (or version)"（对数据项的每次写入都会产生一个新的副本（或版本））（[Bernstein 和 Goodman，1983](https://doi.org/10.1145/319996.319998)）。
+用 Zanzibar 的话说（§2.2），两个具有因果关系的更新 `x ≺ y` 获得的时间戳满足 `T_x < T_y`。在时间戳 `T` 上的快照读 "observes all updates with timestamps ≤ T"（会观察到所有时间戳 ≤ T 的更新）。合起来就是：如果一次读取看到了 `y`，它也会看到在 `y` 之前发生的一切。这之所以可行，是因为存储是多版本的：Spanner 把快照读定义为 "a read in the past that executes without locking"（一种在过去的时间点上、无需加锁执行的读取）（[Spanner §4.1](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)），而在多版本存储中 "each write on a data item produces a new copy (or version)"（对数据项的每次写入都会产生一个新的副本或版本）（[Bernstein 和 Goodman，1983](https://doi.org/10.1145/319996.319998)）。
 
 在这一规则下读者会看到什么？最终一致副本的读者又可能看到什么？在这个变体中，readme 起初不在 `folder:A` 中。Anne 先把 Chen 从 `folder:A` 的查看者中移除（`x`，提交于 T=10），然后把 `doc:readme` 移入 `folder:A`（`y`，提交于 T=20）。
 
@@ -158,7 +158,7 @@ ACL 检查回答的是“此用户现在能否做这件事”。在一个跨全�
   caption="任意 T 上的快照都是因果顺序的一个前缀。最终一致副本在追上之前，可能呈现有 y 而无 x 的状态。"
 />
 
-注意，两次快照读看到的内容在*多少*上不同，但在*顺序*上从不不同：每一次都是历史的一个前缀。最终一致副本最终也会收敛，但在此之前它可能呈现一个从未存在过的状态。论文在 §5 中自己作了这一对比：TAO "offers eventual global consistency with asynchronous replication"（通过异步复制提供最终的全局一致性），而 Zanzibar "provides external consistency and snapshot reads with bounded staleness"（提供外部一致性和有界陈旧度的快照读）。
+注意，两次快照读看到的内容*多少*不同，但*顺序*始终一致：每一次都是历史的一个前缀。最终一致副本最终也会收敛，但在此之前它可能呈现一个从未存在过的状态。论文在 §5 中自己作了这一对比：TAO "offers eventual global consistency with asynchronous replication"（通过异步复制提供最终的全局一致性），而 Zanzibar "provides external consistency and snapshot reads with bounded staleness"（提供外部一致性和有界陈旧度的快照读）。
 
 ## 时间戳从何而来：TrueTime
 
@@ -193,7 +193,7 @@ Zanzibar 并不自己计算这些时间戳。它把 ACL 存储在 Spanner 中，
     { from: "vis", to: "next", label: "引起" },
   ]}
   minWidth={520}
-  caption="时间从左向右推进，再向下到下一次写入。等过不确定度意味着，在任何人能基于这次写入采取行动之前，s 已经成为过去。"
+  caption="时间从左向右推进，再向下到下一次写入。等待不确定度过去意味着，在任何人能基于这次写入采取行动之前，s 已经成为过去。"
 />
 
 注意最后一步：由这次写入引起的任何事情，都在客户端得到通知之后才开始，也就是在 `s` 确定已经过去之后，因此它自己的 `TT.now().latest` 以及它的时间戳都大于 `s`。这就是外部一致性，代价是每次写入几毫秒的等待。Zanzibar 论文 §5 对此作了概括：Zanzibar "builds on Spanner’s TrueTime abstraction"（构建在 Spanner 的 TrueTime 抽象之上），以 "provide linearizable commit timestamps encoded as zookies"（提供编码为 zookie 的可线性化提交时间戳）。
@@ -234,7 +234,7 @@ Zanzibar 并不自己计算这些时间戳。它把 ACL 存储在 Spanner 中，
     { from: [2, 1], to: [3, 1] },
     { from: [2, 2], to: [0, 2], label: "zookie z" },
     { from: [0, 3], to: [1, 3], label: "原子写入" },
-    { from: [1, 3], to: [0, 4], label: "加载 v2, z", dashed: true },
+    { from: [1, 3], to: [0, 4], label: "加载 v2、z", dashed: true },
     { from: [0, 5], to: [2, 5], label: "携带 z" },
     { from: [2, 5], to: [3, 5] },
     { from: [2, 6], to: [0, 6] },
@@ -252,7 +252,7 @@ Zanzibar 并不自己计算这些时间戳。它把 ACL 存储在 Spanner 中，
 
 在例 B 中，与新内容一起存储的 zookie 编码了 `T_B2`，而 `T_B2 > T_B1`，因此 Bob 在第 5 步的检查必然会看到他被移除这一事实。
 
-zookie 是有意设计成不透明的。论文使用 "an opaque cookie instead of the actual timestamp to discourage our clients from choosing arbitrary timestamps and to allow future extensions"（不透明的 cookie 而不是实际时间戳，是为了避免客户端选择任意时间戳，并为未来的扩展留有余地）（§2.4）。§5 补充说，该协议 "does *not* let clients read or evaluate ACLs at an arbitrary snapshot"（*不*允许客户端在任意快照上读取或评估 ACL），正是这一点把选择权留给了 Zanzibar。
+zookie 是有意设计成不透明的。论文使用 "an opaque cookie instead of the actual timestamp to discourage our clients from choosing arbitrary timestamps and to allow future extensions"（不透明的 cookie 而不是实际时间戳，是为了劝阻客户端选择任意时间戳，并为未来的扩展留有余地）（§2.4）。§5 补充说，该协议 "does *not* let clients read or evaluate ACLs at an arbitrary snapshot"（*不*允许客户端在任意快照上读取或评估 ACL），正是这一点把选择权留给了 Zanzibar。
 
 ## 为什么是“至少一样新”而不是“恰好在”
 

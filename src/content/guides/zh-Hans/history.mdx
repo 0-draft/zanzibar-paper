@@ -22,7 +22,7 @@ Zanzibar 论文在 [§5 相关工作](../../#s5)中描述了自己的渊源。�
 
 从 1970 年代起，模型逐渐脱离按对象的列表。Bell–LaPadula 和 Biba 让系统而不是所有者依据标签作出决定；Zanzibar 是自主访问控制，因此它们是对照而不是祖先。基于角色的访问控制（1992）在用户和权限之间放入了角色；论文说角色 "are similar to Zanzibar relations"（与 Zanzibar 的关系相似）（§5）。基于属性的访问控制由 NIST 2014 年的指南 SP 800-162 定义，在请求时根据属性计算决策。基于关系的访问控制由 Gates 于 2007 年命名、由 Fong 于 2011 年形式化，它根据“是……的成员”或“是……的父文件夹”这类关系作出决定，而这些关系可以组合（[Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf)）。论文从未使用 ReBAC 这个词，但它的关系元组就构成这样一张图。
 
-Google 的新东西在于规模和一致性。论文说，截至 2019 年 7 月的论文，Zanzibar "has been in production use for more than 5 years"（已在生产环境中使用超过 5 年）（§4），因此它最晚在 2014 年就已运行；没有任何公开来源给出开始的年份。它为 Calendar、Cloud、Drive、Maps、Photos 和 YouTube 提供服务（§1）。论文拿来比较的 TAO 提供 "eventual global consistency"（最终的全局一致性），而 Zanzibar 提供 "external consistency and snapshot reads with bounded staleness"（外部一致性和有界陈旧度的快照读），从而防范 “new enemy” 问题（§5）。Lamport 时钟被排除，因为它们 "require explicit participation of all “processes”"（需要所有“进程”显式参与），而 Zanzibar 的某些“进程”是 "external clients or even human users"（外部客户端甚至是人类用户）。Chubby 不支持 "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness"（大量数据、高效的范围读取，或在客户端指定的快照上进行有界陈旧度的读取），ZooKeeper 既不提供跨节点的外部一致性，也不提供有界陈旧度的快照读（§5）。保证来自 Spanner 及其 TrueTime 时钟（[Spanner，OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)）。
+Google 的新东西在于规模和一致性。论文说，截至 2019 年 7 月论文发表时，Zanzibar "has been in production use for more than 5 years"（已在生产环境中使用超过 5 年）（§4），因此它最晚在 2014 年就已运行；没有任何公开来源给出开始的年份。它为 Calendar、Cloud、Drive、Maps、Photos 和 YouTube 提供服务（§1）。论文拿来比较的 TAO 提供 "eventual global consistency"（最终的全局一致性），而 Zanzibar 提供 "external consistency and snapshot reads with bounded staleness"（外部一致性和有界陈旧度的快照读），从而防范“new enemy”问题（§5）。Lamport 时钟被排除，因为它们 "require explicit participation of all “processes”"（需要所有“进程”显式参与），而 Zanzibar 的某些“进程”是 "external clients or even human users"（外部客户端甚至是人类用户）。Chubby 不支持 "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness"（大量数据、高效的范围读取，或在客户端指定的快照上进行有界陈旧度的读取），ZooKeeper 既不提供跨节点的外部一致性，也不提供有界陈旧度的快照读（§5）。保证来自 Spanner 及其 TrueTime 时钟（[Spanner，OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)）。
 
 论文发表之后，其他人以开源方式重建了这一设计。Ory Keto 于 2021 年围绕它进行了重写，SpiceDB、OpenFGA、Permify 和 Topaz 在之后约十八个月内相继出现。与此同时，ABAC 一脉的策略引擎 OPA 和 Cedar 日趋成熟，而 OpenID 基金会于 2023 年成立的 AuthZEN 工作组对“应用如何向授权引擎请求决策”进行了标准化：其 Authorization API 1.0 于 2026 年 1 月成为 OpenID 最终规范。各系统的细节见生态系统页面。
 
@@ -63,13 +63,13 @@ Google 的新东西在于规模和一致性。论文说，截至 2019 年 7 月�
       era: "操作系统",
       year: "1997–1998",
       title: "POSIX.1e ACL：草案 17，随后撤回",
-      body: "草案 17（1997 年 10 月）成为 Linux ACL 的基础；1003.1e 的发起于 1998 年 1 月被撤回。",
+      body: "草案 17（1997 年 10 月）成为 Linux ACL 的基础；1003.1e 的赞助于 1998 年 1 月被撤回。",
       href: "https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html",
     },
     {
       era: "模型与标准",
       year: "1971",
-      title: "Lampson 的 “Protection”：访问矩阵",
+      title: "Lampson 的“Protection”：访问矩阵",
       body: "行是域（主体），列是对象，单元格是访问属性。ACL 是附在对象上的一列；能力是一个域的各条目。",
       href: "https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf",
     },
@@ -84,7 +84,7 @@ Google 的新东西在于规模和一致性。论文说，截至 2019 年 7 月�
       era: "模型与标准",
       year: "1975–1977",
       title: "Biba 完整性模型",
-      body: "Bell–LaPadula 在完整性方面的对偶。MITRE MTR-3153（1975 年 6 月），通常引为 ESD-TR-76-372（1977 年 4 月）。",
+      body: "Bell–LaPadula 在完整性方面的对偶。MITRE MTR-3153（1975 年 6 月）；修订版 MTR-3153 Rev. 1 于 1977 年 4 月以 ESD-TR-76-372 发布（DTIC AD-A039324）。",
       href: "https://seclab.cs.ucdavis.edu/projects/history/CD/index.html",
     },
     {
@@ -118,7 +118,7 @@ Google 的新东西在于规模和一致性。论文说，截至 2019 年 7 月�
     {
       era: "模型与标准",
       year: "2007",
-      title: "“Relationship-Based Access Control” 一词提出",
+      title: "“Relationship-Based Access Control”一词提出",
       body: "Carrie Gates，W2SP 2007，依据 Fong 2011 年论文中的说法（摘要和参考文献 [18]）。未核对 Gates 的论文本身。",
       href: "https://dl.acm.org/doi/10.1145/1943513.1943539",
     },
@@ -197,7 +197,7 @@ Google 的新东西在于规模和一致性。论文说，截至 2019 年 7 月�
       era: "开源与标准",
       year: "2022",
       title: "OpenFGA 首个版本",
-      body: "2022 年 6 月 10 日。由 Okta 员工开发；自 2025 年 11 月起为 CNCF 孵化项目（CNCF 博客，2025 年 11 月 11 日）。",
+      body: "2022 年 6 月 10 日。由 Okta 员工开发；自 2025 年 10 月 28 日起为 CNCF 孵化项目，CNCF 博客于 2025 年 11 月 11 日宣布。",
       href: "https://github.com/openfga/openfga",
     },
     {
@@ -302,6 +302,7 @@ Google 的新东西在于规模和一致性。论文说，截至 2019 年 7 月�
 - J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
 - A. Grünbacher, "POSIX Access Control Lists on Linux", USENIX ATC 2003 FREENIX, [usenix.org](https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html)
 - D. E. Bell, "Looking Back at the Bell-La Padula Model", ACSAC 2005, [PDF](https://www.acsac.org/2005/papers/Bell.pdf)
+- K. J. Biba, "Integrity Considerations for Secure Computer Systems", MTR-3153 Rev. 1 / ESD-TR-76-372，1977 年 4 月，[DTIC AD-A039324](https://apps.dtic.mil/sti/html/tr/ADA039324/index.html)
 - UC Davis 计算机安全实验室历史档案（Biba），[seclab.cs.ucdavis.edu/projects/history/CD](https://seclab.cs.ucdavis.edu/projects/history/CD/index.html)
 - NIST，Role Based Access Control 项目，[csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
 - OASIS，XACML 3.0 核心规范，[docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html)

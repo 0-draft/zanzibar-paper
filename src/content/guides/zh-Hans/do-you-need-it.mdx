@@ -18,7 +18,7 @@ import Callout from "../../../components/diagram/Callout.astro";
 
 ## 四个选项
 
-**自有数据库中的角色表。** 授权是与其所保护的数据放在一起的行，例如 `(user_id, role, doc_id)`，应用通过查询来检查它们。“Anne 能看到的文档”列表就是一次 join。嵌套组需要一个沿着成员关系边前进的查询；在 PostgreSQL 中，"Using `RECURSIVE`, a `WITH` query can refer to its own output"（使用 `RECURSIVE` 时，`WITH` 查询可以引用自己的输出）（[PostgreSQL 文档](https://www.postgresql.org/docs/current/queries-with.html)）。在 2021 年 Hacker News 上关于 Oso 的 “Why Authorization Is Hard” 的讨论中，有一位评论者认为，既然许多项目主要就是关于数据库访问的，在数据库本身中执行规则可能就足够了（[HN 28543457](https://news.ycombinator.com/item?id=28543457)）。
+**自有数据库中的角色表。** 授权是与其所保护的数据放在一起的行，例如 `(user_id, role, doc_id)`，应用通过查询来检查它们。“Anne 能看到的文档”列表就是一次 join。嵌套组需要一个沿着成员关系边前进的查询；在 PostgreSQL 中，"Using `RECURSIVE`, a `WITH` query can refer to its own output"（使用 `RECURSIVE` 时，`WITH` 查询可以引用自己的输出）（[PostgreSQL 文档](https://www.postgresql.org/docs/current/queries-with.html)）。在 2021 年 Hacker News 上关于 Oso 的“Why Authorization Is Hard”的讨论中，有一位评论者认为，既然许多项目主要就是关于数据库访问的，在数据库本身中执行规则可能就足够了（[HN 28543457](https://news.ycombinator.com/item?id=28543457)）。
 
 **策略引擎。** 规则写在策略语言中，并依据应用提供的或引擎缓存的数据进行评估。"Cedar is a language for writing authorization policies and making authorization decisions based on those policies"（Cedar 是一种用于编写授权策略并根据这些策略作出授权决策的语言），并且 "Cedar evaluates each request against the provided policies and entities to make an allow or deny decision"（Cedar 依据所提供的策略和实体评估每个请求，作出允许或拒绝的决策）（[Cedar 文档](https://docs.cedarpolicy.com/)）。OPA 保留 "a cache or replica of that data, just as OPA has a cache/replica of policy"（该数据的缓存或副本，就像 OPA 保有策略的缓存/副本一样），这些数据通过 bundle、推送、请求输入或评估期间的调用加载；使用 bundle 时，"OPA stores the entire datasource at once in memory"（OPA 会一次性把整个数据源存储在内存中）（[OPA external data](https://www.openpolicyagent.org/docs/external-data)）。
 
@@ -102,7 +102,7 @@ import Callout from "../../../components/diagram/Callout.astro";
 | 运维成本 | 除数据库外没有 | 把策略和数据分发到每个引擎 | 又一个有状态服务和数据存储 | 两者兼有 |
 | 数据同步 | 无 | 复制数据，或在每次请求时传入 | 应用进行双写 | 仅关系需要双写 |
 
-延迟这一行是最常被过度解读的。论文的数字（表 2，§4.2）来自 Google 的部署和缓存；它们对单节点安装说明不了任何问题，而策略引擎的求值时间也没有包含调用方获取数据所花的时间。AuthZed 为了自身利益提出了第二点（[AuthZed 博客](https://authzed.com/blog/policy-based-access-control)）；这是厂商的论点，此处没有测量过。
+延迟这一行是最常被过度解读的。论文的数字（表 2，§4.2）来自 Google 的部署和缓存；它们对单节点安装说明不了任何问题，而策略引擎的求值时间也没有包含调用方获取数据所花的时间。AuthZed 把第二点当作对自己有利的论据提出（[AuthZed 博客](https://authzed.com/blog/policy-based-access-control)）；这是厂商的论点，此处没有测量过。
 
 ## 大致的提问顺序
 
@@ -132,7 +132,7 @@ import Callout from "../../../components/diagram/Callout.astro";
     { from: "a2", to: "q3", dashed: true },
     { from: "q3", to: "a4", label: "是" },
   ]}
-  caption="这是从本页来源中归纳出的经验法则，而不是规则。规模和团队技能会移动这些边界。"
+  caption="这是从本页来源中归纳出的经验法则，而不是规则。规模和团队能力都会让这些边界移动。"
 />
 
 注意，上下文是一条独立的轴。论文没有属性条件；用户集重写用 "union, intersection, and exclusion"（并集、交集和排除）组合用户集（§2.3.1）。无论前两个问题的答案是什么，关于时间或网络的规则都需要产品扩展或第二个系统。
@@ -141,9 +141,9 @@ import Callout from "../../../components/diagram/Callout.astro";
 
 这场争论是公开的，部分带有商业色彩。下面是其主要的已发表立场，并注明了作者。
 
-**“Zanzibar isn't flexible”**（Greg Sarjeant，Oso，2024-11-01；Oso 销售基于策略的授权服务）。论点是：应用问的是操作，但 "Your authorization service only lets you define relations"（你的授权服务只允许你定义关系），因此团队最终会把权限编码为关系；而受限的语言使得准确表达本意变得更难（[Oso 博客](https://www.osohq.com/post/google-zanzibar-isnt-flexible)）。Oso 还写过在微服务中集中授权数据的同步成本（[Oso Academy](https://www.osohq.com/academy/microservices-authorization)），并推出了 “Local Authorization”，其中 Oso 可以回答“是，如果……”，由应用在自己的数据库上评估该条件（[Oso 博客，2024-04-16](https://www.osohq.com/post/local-authorization)）。
+**“Zanzibar isn't flexible”**（Greg Sarjeant，Oso，2024-11-01；Oso 销售基于策略的授权服务）。论点是：应用问的是操作，但 "Your authorization service only lets you define relations"（你的授权服务只允许你定义关系），因此团队最终会把权限编码为关系；而受限的语言使得准确表达本意变得更难（[Oso 博客](https://www.osohq.com/post/google-zanzibar-isnt-flexible)）。Oso 还写过在微服务中集中授权数据的同步成本（[Oso Academy](https://www.osohq.com/academy/microservices-authorization)），并推出了“Local Authorization”，其中 Oso 可以回答“是，如果……”，由应用在自己的数据库上评估该条件（[Oso 博客，2024-04-16](https://www.osohq.com/post/local-authorization)）。
 
-**“Reading Zanzibar”**（Tom MacWright，2025-05-02；一位独立开发者）。该文把论文的模型（对象、用户集、重写规则）与其实现一致性和规模的机制分开，指出 "Zookies are very clearly important to Google"（Zookie 对 Google 而言显然非常重要），而几个类 Zanzibar 产品并没有对应物，并得出结论："For my own needs, zookies and distributed consistency to the degree described in the Zanzibar paper are overkill."（就我自己的需求而言，Zanzibar 论文所描述程度的 zookie 和分布式一致性是大材小用。）MacWright 想要的是 "the API surface that Zanzibar describes"（Zanzibar 所描述的 API 接口），以 "some scalability for simplicity"（一些可扩展性换取简单性）（[macwright.com](https://macwright.com/2025/05/02/reading-zanzibar.html)）。
+**“Reading Zanzibar”**（Tom MacWright，2025-05-02；一位独立开发者）。该文把论文的模型（对象、用户集、重写规则）与其实现一致性和规模的机制分开，指出 "Zookies are very clearly important to Google"（zookie 对 Google 而言显然非常重要），而几个类 Zanzibar 产品并没有对应物，并得出结论："For my own needs, zookies and distributed consistency to the degree described in the Zanzibar paper are overkill."（就我自己的需求而言，Zanzibar 论文所描述程度的 zookie 和分布式一致性是大材小用。）MacWright 想要的是 "the API surface that Zanzibar describes"（Zanzibar 所描述的 API 接口），以 "some scalability for simplicity"（一些可扩展性换取简单性）（[macwright.com](https://macwright.com/2025/05/02/reading-zanzibar.html)）。
 
 **策略与 ReBAC 互为补充**（AuthZed，SpiceDB 的开发者）。AuthZed 的学习页面说，对于无法映射为已存储关系的情形，"Policy engines like Cerbos and OPA primarily focus on ABAC but can be used alongside ReBAC systems"（Cerbos 和 OPA 等策略引擎主要关注 ABAC，但可以与 ReBAC 系统一起使用）（[AuthZed learn](https://authzed.com/learn/rebac-key-components)）。其对比文章说，选择 "depends on the authorization problems you have"（取决于你所面对的授权问题），并说 SpiceDB 的 caveat "offer some of the benefits of policy engines without sacrificing the benefits of Google Zanzibar"（在不牺牲 Google Zanzibar 优势的前提下提供了策略引擎的部分好处）（[AuthZed 博客，2023-11-29](https://authzed.com/blog/policy-based-access-control)）。SpiceDB FAQ 写道 "SpiceDB is not a policy engine"（SpiceDB 不是策略引擎）（[FAQ](https://authzed.com/docs/spicedb/getting-started/faq)）。在 2021 年的 HN 讨论中，一位 AuthZed 创始人反驳了“ReBAC 系统无法实现 ABAC”的说法，而 Oso 文章的作者也同意 Zanzibar 风格的系统可以与策略引擎结合（[HN 28543457](https://news.ycombinator.com/item?id=28543457)）。
 
@@ -192,7 +192,7 @@ import Callout from "../../../components/diagram/Callout.astro";
 
 <Callout kind="note" title="本页没有解决的问题">
 
-这里没有任何来源在同一工作负载上对这些选项进行过相互比较的测量。需求各行是定性的，延迟数字来自 Google，而大多数产品说法来自厂商自己的页面。
+这里没有任何来源在同一工作负载上对这些选项做过对比测量。需求各行是定性的，延迟数字来自 Google，而大多数产品说法来自厂商自己的页面。
 
 </Callout>
 

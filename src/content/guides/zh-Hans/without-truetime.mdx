@@ -13,7 +13,7 @@ import Swimlane from "../../../components/diagram/Swimlane.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 import Frames from "../../../components/diagram/Frames.astro";
 
-Zanzibar 用 zookie 防止 new enemy 问题，而 zookie 之所以有效，是因为 Spanner 为每次写入分配一个遵循因果关系的时间戳。[一致性、快照与 zookie](../consistency/) 解释了这两点，包括 TrueTime 和提交等待如何产生这些时间戳。Google 之外几乎没有人运行在 TrueTime 之上。本页探讨 zookie 协议实际上需要数据库提供什么，以及构建在其他数据库上的产品如何获得它，或者如何在没有它的情况下运作。
+Zanzibar 用 zookie 防止“new enemy”问题，而 zookie 之所以有效，是因为 Spanner 为每次写入分配一个遵循因果关系的时间戳。[一致性、快照与 zookie](../consistency/) 解释了这两点，包括 TrueTime 和提交等待如何产生这些时间戳。Google 之外几乎没有人运行在 TrueTime 之上。本页探讨 zookie 协议实际上需要数据库提供什么，以及构建在其他数据库上的产品如何获得它，或者如何在没有它的情况下运作。
 
 ## zookie 需要数据存储提供什么
 
@@ -52,7 +52,7 @@ zookie 协议依赖于 §2.2 对存储层提出的两个性质，"external consi
 
 ## 获得顺序的三种方式
 
-Spanner 通过具有已知误差界的同步时钟获得性质 ①，代价是在每次写入时等过不确定度（[Spanner，OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)；画在[一致性页面](../consistency/#时间戳从何而来truetime)上）。其他数据库以不同方式获得它，或获得其中的大部分。在每种数据库中，顺序从何而来？
+Spanner 通过具有已知误差界的同步时钟获得性质 ①，代价是每次写入都要等待不确定区间过去（[Spanner，OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf)；图示见[一致性页面](../consistency/#时间戳从何而来truetime)）。其他数据库以不同方式获得它，或获得其中的大部分。在每种数据库中，顺序从何而来？
 
 <Graph
   width={640}
@@ -76,13 +76,13 @@ Spanner 通过具有已知误差界的同步时钟获得性质 ①，代价是�
   caption="中间一列需要应用层的帮助。"
 />
 
-注意，单主库数据库免费获得性质 ①，因为一台服务器按顺序看到每次提交；它们放弃的是论文中的全球复制。CockroachDB 在全球复制，但只部分提供性质 ①。下一节讨论这一缺口。
+注意，单主库数据库天然具备性质 ①，因为一台服务器按顺序看到每次提交；它们放弃的是论文中的全球复制。CockroachDB 在全球复制，但只部分提供性质 ①。下一节讨论这一缺口。
 
 ## CockroachDB：键重叠规则
 
 CockroachDB 没有 TrueTime。其节点保持松散同步的时钟，集群有一个最大时钟偏移 `--max-offset`，默认为 `500ms`；"If observed clock offsets exceed this limit, servers will crash to minimize the likelihood of reading inconsistent data"（如果观测到的时钟偏移超过该限制，服务器会崩溃，以尽量降低读到不一致数据的可能性）（[`cockroach start`](https://docs.cockroachlabs.com/docs/stable/cockroach-start)）。Cockroach Labs 自己与 Spanner 的对比文章说 "CockroachDB only goes as far as to claim serializability"（CockroachDB 只声称做到了可串行化），并把它所允许的异常称为 "causal reverse"（因果倒置）：具有因果关系的事务可能以错误的时间戳顺序提交（[Living without atomic clocks，2022-01-27](https://www.cockroachlabs.com/blog/living-without-atomic-clocks/)）。
 
-AuthZed 于 2021 年用 SpiceDB 在 CockroachDB 上复现了 new enemy 问题（[The One Crucial Difference Between Spanner and CockroachDB，2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)）。文章对这一缺口的概括是："Cockroach does not provide external consistency for transactions involving _non-overlapping keys_."（对于涉及*不重叠键*的事务，Cockroach 不提供外部一致性。）其测试使用两次写入和一次检查，"in sequence (not parallel)"（按顺序（而非并行））运行：写入一个 `excluded` 元组，写入一个 `direct` 元组，然后在第二次写入的修订版本上检查 `allowed = direct - excluded`；"the check in 3 will succeed"（第 3 步中的检查会成功）。
+AuthZed 于 2021 年用 SpiceDB 在 CockroachDB 上复现了“new enemy”问题（[The One Crucial Difference Between Spanner and CockroachDB，2021-10-14](https://authzed.com/blog/prevent-newenemy-cockroachdb)）。文章对这一缺口的概括是："Cockroach does not provide external consistency for transactions involving _non-overlapping keys_."（对于涉及*不重叠键*的事务，Cockroach 不提供外部一致性。）其测试使用两次写入和一次检查，"in sequence (not parallel)"（按顺序（而非并行））运行：写入一个 `excluded` 元组，写入一个 `direct` 元组，然后在第二次写入的修订版本上检查 `allowed = direct - excluded`；"the check in 3 will succeed"（第 3 步中的检查会成功）。
 
 如果某个节点的时钟走快了，用贯穿示例来看会是什么样子？
 
@@ -95,7 +95,7 @@ AuthZed 于 2021 年用 SpiceDB 在 CockroachDB 上复现了 new enemy 问题（
   timeLabel="真实时间"
   ticks={["10.000", "10.100"]}
   title="键不重叠时的时钟偏差"
-  desc="在真实时间 10.000，Anne 的应用把 Chen 从 folder:A 中移除。节点 1 的时钟快了 250 毫秒，它在时间戳 10.250 提交该写入。收到确认之后，在真实时间 10.100，应用把 readme 移入 folder:A。节点 2 的时钟准确，它在时间戳 10.100 提交该写入，并把它作为令牌返回。Chen 的检查在快照 10.100 上运行。它看到了移动，却没有看到时间戳更高的移除，因此 Chen 被允许。这就是 new enemy 问题。"
+  desc="在真实时间 10.000，Anne 的应用把 Chen 从 folder:A 中移除。节点 1 的时钟快了 250 毫秒，它在时间戳 10.250 提交该写入。收到确认之后，在真实时间 10.100，应用把 readme 移入 folder:A。节点 2 的时钟准确，它在时间戳 10.100 提交该写入，并把它作为令牌返回。Chen 的检查在快照 10.100 上运行。它看到了移动，却没有看到时间戳更高的移除，因此 Chen 被允许。这就是“new enemy”问题。"
   events={[
     { lane: 0, t: 0, label: "x：移除 Chen", kind: "write" },
     { lane: 1, t: 0, label: "commit x\nat 10.250", kind: "write", mono: true },
@@ -150,7 +150,7 @@ AuthZed 发现共享读取还不够："we needed both transactions to write to t
 | `static`（默认） | "All writes overlap to guarantee safety at the cost of write throughput"（所有写入都重叠，以写吞吐量为代价保证安全） |
 | `prefix` | "Only writes that contain objects with same prefix overlap"（只有包含相同前缀对象的写入才重叠） |
 | `request` | "Only writes with the same io.spicedb.requestoverlapkey header overlap"（只有带相同 io.spicedb.requestoverlapkey 请求头的写入才重叠） |
-| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem"（写入都不重叠，提供最好的写吞吐量，但可能使你容易受到 New Enemy 问题的影响） |
+| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem"（写入都不重叠，提供最好的写吞吐量，但可能使你容易受到“new enemy”问题的影响） |
 
 用 AuthZed 的话说，代价是："This does add a small amount of latency to the write path, but it leaves the read paths performant."（这确实会给写路径增加少量延迟，但读路径的性能不受影响。）每次 `static` 写入都在同一行上争用，这正是论文改用提交等待来支付的代价。
 
@@ -193,11 +193,11 @@ SpiceDB 的 PostgreSQL 驱动在排序时完全不使用时间。修订版本是
   caption="修订版本号仅作示意。不带最近令牌的检查更可能由副本作答。"
 />
 
-文档描述的正是这一点：复制延迟 "would be problematic to SpiceDB's ability to solve the new enemy problem"（会妨碍 SpiceDB 解决 new enemy 问题的能力），因此 SpiceDB 会检查 "if the revision has been replicated into the target replica. If missing, it will fall back to the primary."（该修订版本是否已复制到目标副本。如果没有，就回退到主库。）对于 MySQL，这 "requires two roundtrips instead of one"（需要两次往返而不是一次），文档还警告不要在 MySQL 副本前面放负载均衡器，"because SpiceDB will not be able to maintain consistency guarantees"（因为 SpiceDB 将无法维持一致性保证）（[datastores](https://authzed.com/docs/spicedb/concepts/datastores)）。
+文档描述的正是这一点：复制延迟 "would be problematic to SpiceDB's ability to solve the new enemy problem"（会妨碍 SpiceDB 解决“new enemy”问题的能力），因此 SpiceDB 会检查 "if the revision has been replicated into the target replica. If missing, it will fall back to the primary."（该修订版本是否已复制到目标副本。如果没有，就回退到主库。）对于 MySQL，这 "requires two roundtrips instead of one"（需要两次往返而不是一次），文档还警告不要在 MySQL 副本前面放负载均衡器，"because SpiceDB will not be able to maintain consistency guarantees"（因为 SpiceDB 将无法维持一致性保证）（[datastores](https://authzed.com/docs/spicedb/concepts/datastores)）。
 
 运行在 PostgreSQL 上的 Permify 以同样的方式构造其 Snap Token：令牌包含一个 PostgreSQL `XID8` 和一个快照字符串（[`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go)，v1.7.6）。其文档只把该令牌描述为 "a token that consists of an encoded timestamp"（一个由编码后的时间戳构成的令牌）（[snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens)）。
 
-## 没有论文的 Spanner
+## 论文之外的 Spanner
 
 SpiceDB 也运行在拥有 TrueTime 的 Cloud Spanner 上。在那里，驱动 "assumes the database is linearizable and skips the transaction overlap strategy"（假定数据库是可线性化的，并跳过事务重叠策略）（[datastores](https://authzed.com/docs/spicedb/concepts/datastores)），并用 `SELECT CURRENT_TIMESTAMP()` 读取其修订版本（[`spanner/revisions.go`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/datastore/spanner/revisions.go)）。这是最接近论文的配置。
 

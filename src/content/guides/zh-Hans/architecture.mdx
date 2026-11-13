@@ -23,7 +23,7 @@ Zanzibar 是位于一组 Spanner 数据库前面的一组服务器。本页先�
   height={400}
   minWidth={560}
   title="Zanzibar 架构（简化）"
-  desc="客户端向 Zanzibar 服务集群中的 aclservers 发送 Check、Read、Expand 和 Write；与论文一样，watchserver 画在集群之外。aclservers 从 Spanner 加载命名空间配置，在每个命名空间一个的 Spanner 数据库中读写关系元组，并把每次写入追加到同样位于 Spanner 中的变更日志。watchserver 跟踪变更日志，把变更以流的形式发送给客户端（Watch API）和 Leopard（论文图 2 把 Leopard 画成一个独立的索引系统）。一条周期性的离线流水线读取元组数据库、转储快照并对旧版本进行垃圾回收；Leopard 根据这些快照构建索引，并为 aclservers 回答集合计算。"
+  desc="客户端向 Zanzibar 服务集群中的 aclserver 发送 Check、Read、Expand 和 Write；与论文一样，watchserver 画在集群之外。aclserver 从 Spanner 加载命名空间配置，在每个命名空间一个的 Spanner 数据库中读写关系元组，并把每次写入追加到同样位于 Spanner 中的变更日志。watchserver 跟踪变更日志，把变更以流的形式发送给客户端（Watch API）和 Leopard（论文图 2 把 Leopard 画成一个独立的索引系统）。一条周期性的离线流水线读取元组数据库、转储快照并对旧版本进行垃圾回收；Leopard 根据这些快照构建索引，并为 aclserver 回答集合计算。"
   groups={[
     { x: 178, y: 28, w: 184, h: 112, label: "Zanzibar 服务集群" },
     { x: 425, y: 20, w: 210, h: 262, label: "Spanner" },
@@ -51,7 +51,7 @@ Zanzibar 是位于一组 Spanner 数据库前面的一组服务器。本页先�
     { from: "pipe", to: "leo", label: "快照" },
     { from: "leo", to: "acl", label: "集合\n计算", labelOffset: -34 },
   ]}
-  caption="根据论文图 2 重绘并简化。箭头表示数据流向。客户端出现两次只是为了让线条分开：调用 aclservers 的客户端和订阅 Watch 的客户端是同一批。"
+  caption="根据论文图 2 重绘并简化。箭头表示数据流向。客户端出现两次只是为了让线条分开：调用 aclserver 的客户端和订阅 Watch 的客户端是同一批。"
 />
 
 注意，客户端与两类服务器打交道。`aclservers` 回答四种请求；`watchservers` 只以流的形式发送变更。用论文的话说，`aclservers` "are organized in clusters and respond to Check, Read, Expand, and Write requests"（以集群形式组织，响应 Check、Read、Expand 和 Write 请求），而 `watchservers` "tail the changelog and serve a stream of namespace changes to clients in near real time"（跟踪变更日志，并以近乎实时的方式向客户端提供命名空间变更流）（§3）。Leopard 是面向大型和深度嵌套组的索引，有[单独的页面](../leopard/)。
@@ -219,7 +219,7 @@ A 如何知道应该就 readme 去问 B？一个集群的服务器构成一个�
 
 ### 对缓慢的 Spanner 读取进行对冲
 
-有些读取会因为与请求本身无关的原因而变慢。对于发往 Spanner 和 Leopard 的调用，Zanzibar 使用请求对冲，该方法出自 [Dean 和 Barroso 的 “The Tail at Scale”（CACM，2013）](https://research.google/pubs/the-tail-at-scale/)，即论文的参考文献 [16]。第二个请求何时发出？
+有些读取会因为与请求本身无关的原因而变慢。对于发往 Spanner 和 Leopard 的调用，Zanzibar 使用请求对冲，该方法出自 [Dean 和 Barroso 的“The Tail at Scale”（CACM，2013）](https://research.google/pubs/the-tail-at-scale/)，即论文的参考文献 [16]。第二个请求何时发出？
 
 <Swimlane
   lanes={["aclserver", "Spanner 副本 1", "Spanner 副本 2"]}
@@ -300,7 +300,7 @@ Zanzibar 不对其自身的内部调用进行对冲。各个检查的代价差�
   width={640}
   height={300}
   title="Zanzibar 的 Spanner 数据库"
-  desc="每个命名空间一个数据库，存放关系元组：此处为 doc、group 和 folder。单个命名空间配置数据库存放配置以及配置更新的变更日志。单个由所有命名空间共享的变更日志数据库记录元组更新。aclservers 读写元组数据库，加载并监视配置数据库，并向变更日志追加记录。"
+  desc="每个命名空间一个数据库，存放关系元组：此处为 doc、group 和 folder。单个命名空间配置数据库存放配置以及配置更新的变更日志。单个由所有命名空间共享的变更日志数据库记录元组更新。aclserver 读写元组数据库，加载并监视配置数据库，并向变更日志追加记录。"
   nodes={[
     { id: "doc", x: 90, y: 60, label: "doc 元组", kind: "store" },
     { id: "grp", x: 90, y: 150, label: "group 元组", kind: "store" },
@@ -346,7 +346,7 @@ Zanzibar 不对其自身的内部调用进行对冲。各个检查的代价差�
 | 命名空间 | "more than 1,500 namespaces defined by hundreds of client applications"（由数百个客户端应用定义的 1,500 多个命名空间） | 4 |
 | 元组 | "more than 2 trillion relation tuples that occupy close to 100 terabytes"（超过 2 万亿条关系元组，占用近 100 TB） | 4 |
 | 复制 | "fully replicated in more than 30 locations around the world"（在全球 30 多个地点完整复制） | 4 |
-| 客户端负载 | "more than 10 million client queries per second (QPS)"（每秒超过 1000 万次客户端查询（QPS）） | 4 |
+| 客户端负载 | "more than 10 million client queries per second (QPS)"（每秒超过 1000 万次客户端查询，即 QPS） | 4 |
 | 各 API 峰值 | "Check requests peak at roughly 4.2M QPS, Read at 8.2M, Expand at 760K, and Write at 25K"（Check 请求峰值约 420 万 QPS，Read 为 820 万，Expand 为 76 万，Write 为 2.5 万） | 4 |
 | 服务器 | "more than 10,000 servers organized in several dozen clusters around the world"（超过 10,000 台服务器，组织成分布在全球的几十个集群） | 4 |
 | 每个集群的服务器数 | "from fewer than 100 to more than 1,000, with the median near 500"（从不到 100 台到超过 1,000 台，中位数接近 500 台） | 4 |

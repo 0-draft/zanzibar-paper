@@ -21,7 +21,7 @@ import Graph from "../../../components/diagram/Graph.astro";
 
 Topaz 是一个用 Go 编写的授权服务。它 "uses the Open Policy Agent (OPA) as its decision engine, and provides a built-in directory that is inspired by the Google Zanzibar data model"（使用 Open Policy Agent（OPA）作为决策引擎，并提供一个受 Google Zanzibar 数据模型启发的内置目录）（[README](https://github.com/aserto-dev/topaz)）。决策由 Rego 策略作出；策略可以询问目录某个主体与某个对象之间是否存在某种关系或权限，这正是与 Zanzibar 相似的部分。目录数据 "modeled and stored locally in an embedded database"（在一个嵌入式数据库中建模并本地存储）（同一 README）。
 
-Topaz 由 Aserto 构建。2025-04-27，Aserto 宣布它 "sunsetting the Aserto SaaS control plane and will shut it down by May 31, 2025"（将逐步停用 Aserto SaaS 控制平面，并于 2025 年 5 月 31 日前关闭），将 "wind down Aserto as a commercial entity"（结束 Aserto 作为商业实体的运营），并说 "we have a set of maintainers that will continue to support Topaz"（我们有一批维护者将继续支持 Topaz）（[Aserto 博客](https://www.aserto.com/blog/the-final-chapter-for-aserto)，厂商撰写）。此后版本发布一直在继续。截至 2026-11-13，默认分支上最近的 30 次提交全部出自同一位作者 Gert Drapers，他也是那篇结束运营公告的署名者（[提交记录](https://github.com/aserto-dev/topaz/commits/main)）。
+Topaz 由 Aserto 构建。2025-04-27，Aserto 宣布它 "sunsetting the Aserto SaaS control plane and will shut it down by May 31, 2025"（将逐步停用 Aserto SaaS 控制平面，并于 2025 年 5 月 31 日前关闭），将 "wind down Aserto as a commercial entity"（结束 Aserto 作为商业实体的运营），并说 "we have a set of maintainers that will continue to support Topaz"（我们有一批维护者将继续支持 Topaz）（[Aserto 博客](https://www.aserto.com/blog/the-final-chapter-for-aserto)，厂商撰写）。此后版本发布一直在继续。截至 2026-11-13，默认分支上最近的 30 次提交全部出自同一位作者 Gert Drapers，即那篇结束运营公告的署名者（[提交记录](https://github.com/aserto-dev/topaz/commits/main)）。
 
 ## 论文与 Topaz 对照
 
@@ -148,7 +148,7 @@ types:
 - 策略通过 OPA 内置函数访问目录，包括 `ds.check`、`ds.check_relation` 和 `ds.check_permission`（同一页面）。
 - "The directory is implemented as a BoltDB instance"（目录实现为一个 BoltDB 实例）（同一页面）。"Directory objects are loaded on-demand, in contrast to `data.json` files"（目录对象按需加载，这与 `data.json` 文件不同），后者随策略一起加载。
 - "The authorizer captures and stores decision logs for every decision that it evaluates"（授权器为它评估的每次决策捕获并存储决策日志）（同一页面）。
-- Topaz 可以 "as a sidecar or a microservice in your cloud"（作为 sidecar 或微服务部署在你的云中）（[简介](https://www.topaz.sh/docs/intro)）。
+- Topaz 可以部署 "as a sidecar or a microservice in your cloud"（在你的云中，作为 sidecar 或微服务）（[简介](https://www.topaz.sh/docs/intro)）。
 
 ## 一致性
 

@@ -180,7 +180,7 @@ editor(readme, chen) =   this(readme#editor, chen)
 
 ## 在快照上缓存子结果
 
-树中的每个节点都是一个有答案的问题，而论文把它们全部缓存起来：服务器 "form a distributed cache for both reads and check evaluations, including intermediate check results evaluated during pointer chasing"（为读取和检查评估（包括指针追逐过程中评估的中间检查结果）构成一个分布式缓存）（§3.2.5）。上面的第 ⑦ 步“Chen 是否属于 `folder:A#viewer`”就是这样一个中间结果。之后任何到达同一问题的检查都可以复用它。
+树中的每个节点都是一个有答案的问题，而论文把它们全部缓存起来：服务器 "form a distributed cache for both reads and check evaluations, including intermediate check results evaluated during pointer chasing"（为读取和检查评估构成一个分布式缓存，包括指针追逐过程中评估的中间检查结果）（§3.2.5）。上面的第 ⑦ 步“Chen 是否属于 `folder:A#viewer`”就是这样一个中间结果。之后任何到达同一问题的检查都可以复用它。
 
 是什么让复用变得安全？一个结果只在*某个快照上*成立。论文把快照放进了键里："We avoid reusing results evaluated from a different snapshot by encoding snapshot timestamps in cache keys."（我们通过在缓存键中编码快照时间戳，避免复用在不同快照上评估得到的结果。）然后它把评估时间戳向上取整，"to a coarse granularity, such as one or ten seconds, while respecting staleness constraints from request zookies"（到较粗的粒度，例如 1 秒或 10 秒，同时遵循请求 zookie 中的陈旧度约束），从而使大多数检查落在同样的少数几个时间戳上（§3.2.5；取整过程画在[一致性页面](../consistency/#为什么是至少一样新而不是恰好在)上）。
 
@@ -248,7 +248,7 @@ editor(readme, chen) =   this(readme#editor, chen)
   caption="这两个组元组是假设的，不属于贯穿示例。箭头沿着检查搜索的方向。"
 />
 
-论文没有给出具体数字。它对 "selected namespaces that exhibit such structure"（呈现此类结构的选定命名空间）用 Leopard 来处理深而宽的嵌套（§3.2.4；参见 [Leopard 页面](../leopard/)），§5 则声称 "safe pointer chasing despite potentially deep recursion (e.g. membership checks on hierarchical groups)"（尽管可能存在深度递归（例如对层级组的成员关系检查），仍能安全地进行指针追逐），但除此之外没有说明是什么使其安全。§3.2.6 中按客户端的限制约束的是 CPU 和未完成的 RPC，而不是深度。各产品选择了明确的上限：
+论文没有给出具体数字。它对 "selected namespaces that exhibit such structure"（呈现此类结构的选定命名空间）用 Leopard 来处理深而宽的嵌套（§3.2.4；参见 [Leopard 页面](../leopard/)），§5 则声称 "safe pointer chasing despite potentially deep recursion (e.g. membership checks on hierarchical groups)"（尽管可能存在深度递归，例如对层级组的成员关系检查，仍能安全地进行指针追逐），但除此之外没有说明是什么使其安全。§3.2.6 中按客户端的限制约束的是 CPU 和未完成的 RPC，而不是深度。各产品选择了明确的上限：
 
 | 系统 | 限制 | 默认值 | 达到时 | 来源 |
 | --- | --- | --- | --- | --- |
