@@ -4,7 +4,7 @@ import { expect, type Page, test } from "@playwright/test";
 
 const BASE = "/zanzibar-paper/";
 const DIR = "src/content/guides";
-const langs = readdirSync(DIR);
+const langs = readdirSync(DIR).filter((d) => !d.startsWith("."));
 const slugs = (lang: string) =>
   readdirSync(`${DIR}/${lang}`)
     .filter((f) => f.endsWith(".mdx"))
