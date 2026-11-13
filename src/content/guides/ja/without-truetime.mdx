@@ -48,7 +48,7 @@ zookie プロトコルは、§2.2 がストレージ層に求める 2 つの特�
   caption="① が破れると、スナップショットが x なしで y を含みうる。② が破れると、チェックが y より前に実行されうる。どちらの場合も Chen は readme を見てしまう。"
 />
 
-特性 ① が *データベースからは関連して見えないかもしれない書き込み* についてのものであることに注目したい。§2.2 は "updates on different ACLs or objects and those coordinated via channels invisible to Zanzibar" (異なる ACL やオブジェクトに対する更新や、Zanzibar からは見えない経路を介して調整された更新) について順序を求めている。論文の例 A では、2 つの書き込みを結びつけているのは Alice が Charlie に依頼したことであり、どのシステムの外でもある。それでもデータベースは 2 つのコミットを正しく順序付けなければならない。
+特性 ① が *データベースからは関連して見えないかもしれない書き込み* についてのものであることに注目したい。§2.2 は "updates on different ACLs or objects and those coordinated via channels invisible to Zanzibar" (異なる ACL やオブジェクトに対する更新や、Zanzibar からは見えない経路を介して調整された更新) について順序を求めている。論文の例 A では、2 つの書き込みを結びつけているのは Alice が Charlie に依頼したことであり、どのシステムの外での出来事である。それでもデータベースは 2 つのコミットを正しく順序付けなければならない。
 
 ## 順序を得る 3 つの方法
 
@@ -98,9 +98,9 @@ AuthZed は 2021 年に、SpiceDB を使って CockroachDB 上で「new enemy」
   desc="実時間 10.000 に、Anne のアプリが Chen を folder:A から外す。クロックが 250 ms 進んでいるノード 1 は、それをタイムスタンプ 10.250 でコミットする。確認応答の後、実時間 10.100 に、アプリは readme を folder:A に移す。クロックが正確なノード 2 は、それをタイムスタンプ 10.100 でコミットし、トークンとして返す。Chen のチェックはスナップショット 10.100 で実行される。移動は見えるが、より大きいタイムスタンプを持つ削除は見えないので、Chen は許可される。これが「new enemy」問題である。"
   events={[
     { lane: 0, t: 0, label: "x: Chen を外す", kind: "write" },
-    { lane: 1, t: 0, label: "x をコミット\nat 10.250", kind: "write", mono: true },
+    { lane: 1, t: 0, label: "x を 10.250\nでコミット", kind: "write", mono: true },
     { lane: 0, t: 1, label: "y: readme を移す", kind: "write" },
-    { lane: 2, t: 1, label: "y をコミット\nat 10.100", kind: "bad", mono: true },
+    { lane: 2, t: 1, label: "y を 10.100\nでコミット", kind: "bad", mono: true },
     { lane: 3, t: 2, label: "スナップショット\n10.100 でチェック", kind: "read", mono: true },
     { lane: 3, t: 3, label: "y は見え x は見えない:\nChen は許可", kind: "bad" },
   ]}
@@ -110,7 +110,7 @@ AuthZed は 2021 年に、SpiceDB を使って CockroachDB 上で「new enemy」
     { from: [0, 1], to: [2, 1] },
     { from: [2, 1], to: [3, 2], label: "token 10.100", dashed: true },
   ]}
-  caption="違反: y は x の後に起きたのに T_y < T_x である。T_y のスナップショットは、起きたことの接頭部分になっていない。"
+  caption="違反: y は x の後に起きたのに T_y < T_x である。T_y のスナップショットは、起きたことの接頭辞になっていない。"
 />
 
 <Swimlane
@@ -123,9 +123,9 @@ AuthZed は 2021 年に、SpiceDB を使って CockroachDB 上で「new enemy」
   desc="同じ 2 つの書き込みだが、どの書き込みも共有の重なりキー K も書く。ノード 1 は K を含めて x を 10.250 でコミットする。ノード 2 が y をコミットするときにも K を書くので、CockroachDB は y に、x による K への書き込みより大きいタイムスタンプ、ここでは 10.251 を与えなければならない。トークンは 10.251 で、Chen のチェックはそのスナップショットで実行され、x と y の両方が見えるので、Chen は拒否される。"
   events={[
     { lane: 0, t: 0, label: "x: Chen を外す", kind: "write" },
-    { lane: 1, t: 0, label: "x + K をコミット\nat 10.250", kind: "write", mono: true },
+    { lane: 1, t: 0, label: "x + K を 10.250\nでコミット", kind: "write", mono: true },
     { lane: 0, t: 1, label: "y: readme を移す", kind: "write" },
-    { lane: 2, t: 1, label: "y + K をコミット\nat 10.251", kind: "good", mono: true },
+    { lane: 2, t: 1, label: "y + K を 10.251\nでコミット", kind: "good", mono: true },
     { lane: 3, t: 2, label: "スナップショット\n10.251 でチェック", kind: "read", mono: true },
     { lane: 3, t: 3, label: "x と y が見える:\nChen は拒否", kind: "good" },
   ]}
@@ -150,7 +150,7 @@ AuthZed は、共有の読み取りでは足りないことを見いだした。
 | `static` (デフォルト) | "All writes overlap to guarantee safety at the cost of write throughput" (書き込みスループットを犠牲にして安全性を保証するため、すべての書き込みが重なる) |
 | `prefix` | "Only writes that contain objects with same prefix overlap" (同じ接頭辞を持つオブジェクトを含む書き込みだけが重なる) |
 | `request` | "Only writes with the same io.spicedb.requestoverlapkey header overlap" (同じ io.spicedb.requestoverlapkey ヘッダを持つ書き込みだけが重なる) |
-| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem" (どの書き込みも重ならず、書き込みスループットは最も良いが、New Enemy 問題に対して脆弱になりうる) |
+| `insecure` | "No writes overlap, providing the best write throughput, but possibly leaving you vulnerable to the New Enemy Problem" (どの書き込みも重ならず、書き込みスループットは最も良いが、「new enemy」問題に対して脆弱になりうる) |
 
 AuthZed の言葉によるコストは次のとおりである。"This does add a small amount of latency to the write path, but it leaves the read paths performant." (これは書き込みの経路にわずかなレイテンシを加えるが、読み取りの経路の性能は保たれる。) `static` の書き込みはすべて 1 つの行で競合する。これが、論文がコミット待ちという形で代わりに支払った代償である。
 
@@ -173,12 +173,12 @@ SpiceDB の PostgreSQL ドライバは、順序付けに時刻をまったく使
   desc="アプリケーションが Chen を folder:A から外す。プライマリはそれをリビジョン r105 としてコミットし、SpiceDB は r105 の ZedToken を返す。後に、at_least_as_fresh r105 を指定したチェックが届く。SpiceDB はレプリカに r105 が複製済みかを問い合わせる。レプリカは r103 までしか進んでいないので、SpiceDB は読み取りを代わりにプライマリに送り、プライマリは r105 以降で応答する。Chen は拒否される。"
   events={[
     { lane: 0, t: 0, label: "Chen を外す", kind: "write" },
-    { lane: 2, t: 0, label: "commit r105", kind: "write", mono: true },
+    { lane: 2, t: 0, label: "r105 をコミット", kind: "write", mono: true },
     { lane: 1, t: 1, label: "ZedToken r105", kind: "note", mono: true },
-    { lane: 0, t: 2, label: "check, token r105", kind: "read", mono: true },
-    { lane: 3, t: 2, label: "replayed to r103", kind: "bad", mono: true },
+    { lane: 0, t: 2, label: "チェック、token r105", kind: "read", mono: true },
+    { lane: 3, t: 2, label: "r103 まで適用済み", kind: "bad", mono: true },
     { lane: 1, t: 3, label: "r105 がない:\nプライマリを使う", kind: "note" },
-    { lane: 2, t: 4, label: "read at ≥ r105", kind: "good", mono: true },
+    { lane: 2, t: 4, label: "≥ r105 で読む", kind: "good", mono: true },
     { lane: 0, t: 5, label: "Chen は拒否", kind: "good" },
   ]}
   arrows={[
@@ -193,7 +193,7 @@ SpiceDB の PostgreSQL ドライバは、順序付けに時刻をまったく使
   caption="リビジョン番号は説明用である。最近のトークンを持たないチェックは、レプリカが応答する可能性が高くなる。"
 />
 
-ドキュメントはまさにこれを記述している。レプリケーションの遅延は "would be problematic to SpiceDB's ability to solve the new enemy problem" (SpiceDB が new enemy 問題を解決する能力にとって問題になる) ので、SpiceDB は "if the revision has been replicated into the target replica. If missing, it will fall back to the primary." を確認する (リビジョンが対象のレプリカに複製済みかどうかを確認し、なければプライマリにフォールバックする)。 MySQL ではこれが "requires two roundtrips instead of one" (1 回ではなく 2 回のラウンドトリップを要する)。またドキュメントは、MySQL のレプリカの前にロードバランサを置くことに対して "because SpiceDB will not be able to maintain consistency guarantees" (SpiceDB が一貫性の保証を維持できなくなるため) と警告している ([datastores](https://authzed.com/docs/spicedb/concepts/datastores))。
+ドキュメントはまさにこれを記述している。レプリケーションの遅延は "would be problematic to SpiceDB's ability to solve the new enemy problem" (SpiceDB が「new enemy」問題を解決する能力にとって問題になる) ので、SpiceDB はリビジョンが複製済みかを確かめる。"if the revision has been replicated into the target replica. If missing, it will fall back to the primary." (リビジョンが対象のレプリカに複製済みかどうか。なければプライマリにフォールバックする。) MySQL ではこれが "requires two roundtrips instead of one" (1 回ではなく 2 回のラウンドトリップを要する)。またドキュメントは、MySQL のレプリカの前にロードバランサを置くことに対して "because SpiceDB will not be able to maintain consistency guarantees" (SpiceDB が一貫性の保証を維持できなくなるため) と警告している ([datastores](https://authzed.com/docs/spicedb/concepts/datastores))。
 
 PostgreSQL 上で動く Permify も、Snap Token を同じ方法で作る。トークンは PostgreSQL の `XID8` とスナップショット文字列を保持する ([`snapshot/token.go`](https://github.com/Permify/permify/blob/v1.7.6/internal/storage/postgres/snapshot/token.go), v1.7.6)。そのドキュメントはトークンを "a token that consists of an encoded timestamp" (エンコードされたタイムスタンプから成るトークン) とだけ説明している ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens))。
 

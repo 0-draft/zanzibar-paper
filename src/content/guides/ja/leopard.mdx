@@ -1,6 +1,6 @@
 ---
 title: "Leopard：グループのインデックス"
-description: "Zanzibar が深く入れ子になったグループのメンバーシップを 1 回の集合の積で答える仕組みと、それが書き込みのたびに払うコスト。"
+description: "Zanzibar が深く入れ子になったグループのメンバーシップを 1 回の積集合演算で答える仕組みと、それが書き込みのたびに払うコスト。"
 section: guide
 part: mechanisms
 order: 7
@@ -11,7 +11,7 @@ paper: ["3.2.4", "4.4"]
 import Graph from "../../../components/diagram/Graph.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 
-Zanzibar は通常、オブジェクトからユーザーへとタプルを 1 回ずつ検索しながらたどることで Check に答える。ほとんどのデータではこれで速い。しかし何段にも入れ子になったグループでは速くない。Zanzibar はそうしたチェックを、入れ子を事前計算したインデックスである Leopard に任せる。
+Zanzibar は通常、オブジェクトからユーザーへと、1 回に 1 つずつ検索しながらタプルをたどることで Check に答える。ほとんどのデータではこれで速い。しかし何段にも入れ子になったグループでは速くない。Zanzibar はそうしたチェックを、入れ子を事前計算したインデックスである Leopard に任せる。
 
 ## 入れ子が遅い理由
 
@@ -127,7 +127,7 @@ Leopard は "a collection of named sets using `(T, s, e)` tuples, where *T* is a
   caption="入れ子の深さにかかわらず、2 回の検索と 1 回の積集合で済む。Beto は含まれ、Anne は含まれない。"
 />
 
-最初の図の 4 回の逐次読み取りは、2 回の集合の検索と 1 回の積集合になった。元の問いに答え切るには、Zanzibar は依然として `group:all#member` を指す readme のタプルを読む。Leopard が取り除くのはそこから下の深さである。論文は Check が通常の評価と Leopard への問い合わせにどう分けられるかを詳しく書いていないので、この分け方は §3.2.4 の読み取りであり、引用ではない。
+最初の図の 4 回の逐次読み取りは、2 回の集合の検索と 1 回の積集合になった。元の問いに答え切るには、Zanzibar は依然として `group:all#member` を指す readme のタプルを読む。Leopard が取り除くのはそこから下の深さである。論文は Check が通常の評価と Leopard への問い合わせにどう分けられるかを詳しく書いていないので、この分け方は §3.2.4 からの解釈であり、引用ではない。
 
 ## ソート済みリスト上の積集合
 
@@ -166,7 +166,7 @@ Leopard は "a collection of named sets using `(T, s, e)` tuples, where *T* is a
   caption="A に 3 要素、B で 3 回のシーク。B の 12 要素を 1 つずつ走査することはない。各シークを速くしているスキップリストの上位レベルは描いていない。"
 />
 
-作業量は短いほうのリストに従うことに注意されたい。ユーザーが少数のグループの直接のメンバーにすぎないなら、`MEMBER2GROUP(U)` は短く、`GROUP2GROUP(G)` が巨大でもテストは安いままである。論文は集合のサイズを示していないので、この場合は仮定である。インデックスは "is sharded by element IDs" (要素 ID でシャーディングされ)、シャードは "are usually served entirely from memory" (通常すべてメモリから提供される) (§3.2.4)。
+作業量は短いほうのリストに従うことに注意されたい。ユーザーが少数のグループの直接のメンバーにすぎないなら、`MEMBER2GROUP(U)` は短く、`GROUP2GROUP(G)` が巨大でもテストは安いままである。論文は集合のサイズを示しておらず、この場合は仮定である。インデックスは "is sharded by element IDs" (要素 ID でシャーディングされ)、シャードは "are usually served entirely from memory" (通常すべてメモリから提供される) (§3.2.4)。
 
 ## 3 つの部分
 

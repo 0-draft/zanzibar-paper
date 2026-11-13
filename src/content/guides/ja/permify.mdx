@@ -30,7 +30,7 @@ FusionAuth による Permify の買収は 2025-11-20 に発表された ([Permif
 
 | 論文 | Permify |
 | --- | --- |
-| 名前空間設定 (§2.3) | Permify Schema の `entity` ブロック。`relation`、`permission` (同義語の `action`)、`attribute`、`rule` を持つ ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling)) |
+| 名前空間設定 (§2.3) | Permify Schema の `entity` ブロック。`relation`、`permission` (またはその同義語の `action`)、`attribute`、`rule` を持つ ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling)) |
 | リレーションタプル `object#relation@user` (§2.1) | リレーショナルタプル `entity#relation@subject`。例: `doc:readme#owner@user:anne` ([storing data](https://fusionauth.io/permify-docs/getting-started/sync-data)) |
 | `_this` | `relation` に格納されたタプル。permission はその関係の名前を書くことでそれらを含める |
 | `computed_userset` | 同じエンティティの別の relation または permission の名前を書く。`view = viewer or edit` の中の `edit` がその例 |
@@ -116,7 +116,7 @@ folder:A#viewer@user:chen
   caption="Anne は owner → edit → view で、Beto はグループのユーザーセットで、Chen は parent.view で閲覧できる。破線は単一のユーザーではなくユーザーセットを表す。"
 />
 
-`folder:A` から readme への矢印は格納されたタプル (`doc:readme#parent@folder:A`) である一方、Chen のフォルダへのアクセスから readme へ至る一歩はどこにも格納されていない点に注意してほしい。スキーマの `parent.view` が、論文の `tuple_to_userset` と同じように、チェック時にそれを計算する。
+`folder:A` から readme への矢印は格納されたタプル (`doc:readme#parent@folder:A`) である一方、Chen のフォルダへのアクセスから readme へ至る一歩はどこにも格納されていない点に注意されたい。スキーマの `parent.view` が、論文の `tuple_to_userset` と同じように、チェック時にそれを計算する。
 
 ## アーキテクチャ
 
@@ -154,7 +154,7 @@ Permify のサーバー群はどのように作業を分担し、タプルはど
 
 ## 一貫性
 
-Permify の snap token は zookie の役割を果たす。Write がそれを返し、クライアントはそれをリソースとともに保存し、後のチェックで `snap_token` として送り返す。ドキュメントはこれを "a token that consists of an encoded timestamp" (エンコードされたタイムスタンプから成るトークン) と説明し、アクセスチェックにおいて "to ensure that the snapshot of the access control is at least as fresh as the resource timestamp" (アクセス制御のスナップショットが少なくともリソースのタイムスタンプと同じだけ新しいことを保証するために) 比較されるとしている ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens))。これは、zookie を伴うチェックに対する論文の保証、すなわち与えられた zookie より "a consistent snapshot no earlier than" (前でない一貫したスナップショット) と同じものである (§2.4.4)。
+Permify の snap token は zookie の役割を果たす。Write がそれを返し、クライアントはそれをリソースとともに保存し、後のチェックで `snap_token` として送り返す。ドキュメントはこれを "a token that consists of an encoded timestamp" (エンコードされたタイムスタンプから成るトークン) と説明し、アクセスチェックにおいて "to ensure that the snapshot of the access control is at least as fresh as the resource timestamp" (アクセス制御のスナップショットが少なくともリソースのタイムスタンプと同じだけ新しいことを保証するために) 比較されるとしている ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens))。これは、zookie を伴うチェックに対する論文の保証、すなわち "a consistent snapshot no earlier than" the given zookie (与えられた zookie より前でない一貫したスナップショット) と同じものである (§2.4.4)。
 
 共有設定の変更後に行うチェックは、どのようにしてその変更を観測するのか。
 
@@ -181,12 +181,12 @@ Permify の snap token は zookie の役割を果たす。Write がそれを返�
   caption="論文の zookie と同じように、トークンはコンテンツとともに運ばれる (§2.2)。"
 />
 
-トークンがない場合の挙動に注意してほしい。論文では、Zanzibar は "choose a reasonably recent snapshot, possibly offering a lower-latency response" (適度に新しいスナップショットを選択し、より低レイテンシな応答を返せる可能性がある) (§2.4.1)。Permify はそうせず、`transactions` テーブルから最新のトランザクションの ID を読み、そのスナップショットで評価する。結果はその ID を含むキーでキャッシュされる ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens))。キャッシュキーは `check_{tenant_id}_{schema_version}:{snapshot_token}:{check_request}` である ([cache](https://fusionauth.io/permify-docs/operations/cache))。したがって新しい書き込みは、古いキーを無効化するのではなく新しいキーを生む。
+トークンがない場合の挙動に注意されたい。論文では、Zanzibar は "choose a reasonably recent snapshot, possibly offering a lower-latency response" (適度に新しいスナップショットを選択し、より低レイテンシな応答を返せる可能性がある) (§2.4.1)。Permify はそうせず、`transactions` テーブルから最新のトランザクションの ID を読み、そのスナップショットで評価する。結果はその ID を含むキーでキャッシュされる ([snap tokens](https://fusionauth.io/permify-docs/operations/snap-tokens))。キャッシュキーは `check_{tenant_id}_{schema_version}:{snapshot_token}:{check_request}` である ([cache](https://fusionauth.io/permify-docs/operations/cache))。したがって新しい書き込みは、古いキーを無効化するのではなく新しいキーを生む。
 
 ## 論文との違い
 
 - **属性と規則。** Permify Schema は属性ベースのチェックのために `attribute` と `rule` を追加している。例: `permission view = check_ip_range(ip_range) or admin` ([modeling](https://fusionauth.io/permify-docs/getting-started/modeling))。Zanzibar の書き換えはタプルだけを対象とする (§2.3.1)。
-- **コンテキストタプル。** "dynamically added to permission request operations" (権限リクエストの操作に動的に追加される) 関係は、格納済みの関係とともに評価され、書き込まれることはない ([contextual tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples))。
+- **contextual tuple。** "dynamically added to permission request operations" (権限リクエストの操作に動的に追加される) 関係は、格納済みの関係とともに評価され、書き込まれることはない ([contextual tuples](https://fusionauth.io/permify-docs/operations/contextual-tuples))。
 - **テナント。** `Tenancy` サービスがテナントを作成、一覧、削除する ([service.proto](https://github.com/Permify/permify/blob/master/proto/base/v1/service.proto))。論文にはテナントの概念はない。
 - **ストレージ。** Spanner ではなく、MVCC スナップショットを伴う PostgreSQL を使う。Spanner では TrueTime 機構がすべての ACL 書き込みにタイムスタンプを付ける (§2.2, §3.1)。分散キャッシュは "across availability zones (within an AWS region)" (アベイラビリティゾーンをまたいで (1 つの AWS リージョン内で)) 動作する ([cache](https://fusionauth.io/permify-docs/operations/cache))。
 - **非正規化インデックスがない。** 論文は深く入れ子になったグループのチェックに Leopard で応える (§3.2.4)。Permify が文書化しているのは結果のキャッシュとコンシステントハッシュであり、集合インデックスではない。

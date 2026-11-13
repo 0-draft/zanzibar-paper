@@ -15,13 +15,13 @@ import Callout from "../../../components/diagram/Callout.astro";
 
 1971 年、Butler Lampson は保護を行列として記述した。行はドメイン (今日の言葉では主体)、列はオブジェクトであり、各セルにはドメインがオブジェクトに対して持つアクセスが並ぶ ([Lampson, "Protection"](https://cseweb.ucsd.edu/classes/fa01/cse221/papers/lampson-protection-osr74.pdf))。実際のシステムで行列全体を格納するものはない。ACL はその列を格納し、ロールと属性の規則はそのセルを計算し、関係のグラフは辺をたどってセルを導く。
 
-本ページでは 1 つのセルを 4 通りにモデル化する。通しの例: Anne、Beto、Chen (`user:anne`、`user:beto`、`user:chen`)、`folder:A` 内のドキュメント `doc:readme`、グループ `group:eng`。Anne は readme を所有し、Beto は eng に属し、eng のメンバーは readme を閲覧し、Chen はフォルダ A を閲覧する。判定は次のとおりである。
+本ページでは 1 つのセルを 4 通りにモデル化する。共通の例: Anne、Beto、Chen (`user:anne`、`user:beto`、`user:chen`)、`folder:A` 内のドキュメント `doc:readme`、グループ `group:eng`。Anne は readme を所有し、Beto は eng に属し、eng のメンバーは readme を閲覧し、Chen はフォルダ A を閲覧する。判定は次のとおりである。
 
 ```text
 Can user:chen view doc:readme?
 ```
 
-期待される答えは yes であり、その理由はフォルダだけである。Chen は readme に対する直接の付与を持たない。
+期待される答えは yes であり、それはフォルダを通じてのみ成り立つ。Chen は readme に対する直接の付与を持たない。
 
 ## ACL: オブジェクト上のリスト
 
@@ -55,7 +55,7 @@ readme 自身のリストは Chen について何と言っているか。
 
 ロールベースアクセス制御は、ユーザーと権限の間に 1 つの層を置く。NIST の言葉では "RBAC controls all access through roles assigned to users. Each role assigns a collection of permissions to users" (RBAC はすべてのアクセスをユーザーに割り当てられたロールを通じて制御する。各ロールは権限の集まりをユーザーに割り当てる) ([Kuhn, Coyne and Weil 2010](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf))。Ferraiolo と Kuhn が 1992 年に提案し、統一された NIST モデルが 2004 年に ANSI INCITS 359-2004 となった ([NIST RBAC project](https://csrc.nist.gov/projects/role-based-access-control))。
 
-ロールはグローバルなので、1 つのドキュメントに対する付与には、そのドキュメントを名前に含むロールが必要になる。通しの例は 3 つのロールになる。
+ロールはグローバルなので、1 つのドキュメントに対する付与には、そのドキュメントを名前に含むロールが必要になる。共通の例は 3 つのロールになる。
 
 | ユーザー | ロール | ロールが付与する権限 |
 | --- | --- | --- |
@@ -101,7 +101,7 @@ Chen に閲覧権限を与えるのはどのロールか。
 
 属性ベースアクセス制御は付与をまったく格納しない。NIST SP 800-162 はこれを、認可が "is determined by evaluating attributes associated with the subject, object, requested operations, and, in some cases, environment against policy, rules, or relationships" (主体、オブジェクト、要求された操作、場合によっては環境に関連付けられた属性を、ポリシー、規則、または関係に照らして評価することで決定される) 方法論と定義している ([NIST SP 800-162](https://csrc.nist.gov/pubs/sp/800/162/upd2/final))。判定は属性の関数であり、リクエスト時に評価される。
 
-通しの例の 3 つの付与を、AWS が 2023 年にオープンソース化したポリシー言語 [Cedar](https://docs.cedarpolicy.com/policies/syntax-policy.html) の構文で規則として書くと次のようになる。
+共通の例の 3 つの付与を、AWS が 2023 年にオープンソース化したポリシー言語 [Cedar](https://docs.cedarpolicy.com/policies/syntax-policy.html) の構文で規則として書くと次のようになる。
 
 ```text
 // Anne: the owner may view
@@ -200,7 +200,7 @@ Zanzibar は各関係をリレーションタプル `object#relation@user` と�
 | readme を閲覧できるのは誰か | リストを読み、`group:eng` を展開する: Anne、Beto、Chen | 「`doc:readme` の閲覧」を付与するロールを持つ全員: Anne、Beto、Chen | どこにも格納されていない。すべてのユーザーについて規則を評価する。Anne、Beto、Chen | `doc:readme#viewer` を Expand する (§2.4.5): Anne、Beto、Chen |
 | Beto が eng を抜ける | Beto をグループから外す。readme のリストはそのまま | Beto の `eng` への割り当てを外す | `user:beto.team` を変更する | タプル `group:eng#member@user:beto` を 1 つ削除する |
 | readme がフォルダ A からフォルダ B に移る | A からコピーしたエントリを削除し、B のエントリをコピーする。readme と、一緒に移った他のすべてについて | 「`doc:readme` の閲覧」を `folderA_viewer` から外し、`folderB_viewer` ロールに加える | `doc:readme.folder` を変更する。規則はそのまま | `parent` タプルを 1 つ置き換える: `doc:readme#parent@folder:A#...` が `@folder:B#...` になる |
-| 難しい点 | 継承とグループは後付けである。「Chen は何を見られるか」はすべてのオブジェクトのリストを走査することを意味する | ロール爆発: "thousands of separate roles" (何千もの別々のロール)、n 個のブール条件には 2ⁿ 個のロールが必要になりうる ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf))。`readme_owner` のようなオブジェクトごとのロールは事態を悪化させる | 監査: ABAC は "is easy to set up, but analyzing or changing user permissions can be problematic" (設定は容易だが、ユーザーの権限の分析や変更が問題になりうる) ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf))。「attribute sprawl」は同じ問題を指す業界の略語であり、NIST の用語ではない | グラフの走査: "Recursive pointer chasing … has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups" (再帰的なポインタの追跡は、深く入れ子になったグループや多数の子グループを持つグループに対して低レイテンシを維持するのが難しい) (§3.2.4)。SpiceDB はデフォルトで深さを [50 ホップ](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth) に、OpenFGA の `resolveNodeLimit` は [25](https://openfga.dev/docs/getting-started/setup-openfga/configuration) に制限している |
+| 難しい点 | 継承とグループは後付けである。「Chen は何を見られるか」はすべてのオブジェクトのリストを走査することを意味する | ロール爆発: "thousands of separate roles" (何千もの別々のロール)、n 個のブール条件には 2ⁿ 個のロールが必要になりうる ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf))。`readme_owner` のようなオブジェクトごとのロールは事態を悪化させる | 監査: ABAC は "is easy to set up, but analyzing or changing user permissions can be problematic" (設定は容易だが、ユーザーの権限の分析や変更が問題になりうる) ([Kuhn et al.](https://csrc.nist.gov/files/pubs/journal/2010/06/adding-attributes-to-rolebased-access-control/final/docs/kuhn-coyne-weil-10.pdf))。「attribute sprawl」は同じ問題を指す業界での通称であり、NIST の用語ではない | グラフの走査: "Recursive pointer chasing … has difficulty maintaining low latency with groups that are deeply nested or have a large number of child groups" (再帰的なポインタ追跡は、深く入れ子になったグループや多数の子グループを持つグループに対して低レイテンシを維持するのが難しい) (§3.2.4)。SpiceDB はデフォルトで深さを [50 ホップ](https://authzed.com/docs/spicedb/modeling/recursion-and-max-depth) に、OpenFGA の `resolveNodeLimit` は [25](https://openfga.dev/docs/getting-started/setup-openfga/configuration) に制限している |
 
 中央の 2 行に注意したい。Beto が eng を抜けるのは、どのモデルでも 1 つの変更である。ここでのどのモデルも何らかの形のグループを持っているからである。フォルダの移動で違いが出る。ACL と RBAC はフォルダの意味を readme の付与にコピーしたので、それらの付与を書き換えなければならない。ABAC と ReBAC はフォルダをデータとして保ったので、1 つの値が変わるだけである。ReBAC はさらに「誰が閲覧できるか」を格納されたデータから答えられるようにしており、規則だけの ABAC の版ではそれができない。
 
@@ -208,7 +208,7 @@ Zanzibar は各関係をリレーションタプル `object#relation@user` と�
 
 Zanzibar は ReBAC のシステムである。リレーションタプルが辺であり、ユーザーセット書き換えルール (§2.3.1) が辺の組み合わせ方を定める。そのデータモデルは、Multics、UNIX、POSIX ACL、VMS に見られる "permissions, users, groups, and inheritance" (権限、ユーザー、グループ、継承) をサポートし (§5)、グループを単なるもう 1 つのオブジェクトとして扱う。これが "allows us to unify the concepts of ACLs and groups" (ACL とグループの概念を統一できる) ようにしている (§2.1)。
 
-RBAC はその上に載る。論文は、ロールは "are similar to Zanzibar relations" (Zanzibar の関係に似ている) と述べ、"A number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language" (多くの Zanzibar クライアントが、Zanzibar の名前空間設定言語の上に RBAC のポリシーを実装している) と述べている (§5)。どのようにしてかは述べていない。1 つの方法は、ロールを `member` 関係がユーザーセットであるオブジェクトにすることである。
+RBAC はその上に載る。論文は、ロールは "are similar to Zanzibar relations" (Zanzibar の関係に似ている) と述べ、"A number of Zanzibar clients have implemented RBAC policies on top of Zanzibar’s namespace configuration language" (いくつかの Zanzibar クライアントが、Zanzibar の名前空間設定言語の上に RBAC のポリシーを実装している) と述べている (§5)。どのようにしてかは述べていない。1 つの方法は、ロールを `member` 関係がユーザーセットであるオブジェクトにすることである。
 
 Chen のロールはタプルではどう見えるか。
 
@@ -244,7 +244,7 @@ ABAC は論文が扱っていない部分である。時刻やネットワーク
 
 <Callout kind="paper" title="論文では">
 
-問題の定義: §1。タプルとユーザーセット: §2.1。書き換えルール: §2.3.1。Multics、UNIX、POSIX ACL、VMS、RBAC、IAM のシステム: §5 関連研究。ポインタの追跡とそのコスト: §3.2.3 と §3.2.4。
+問題の定義: §1。タプルとユーザーセット: §2.1。書き換えルール: §2.3.1。Multics、UNIX、POSIX ACL、VMS、RBAC、IAM のシステム: §5 関連研究。ポインタ追跡とそのコスト: §3.2.3 と §3.2.4。
 
 </Callout>
 

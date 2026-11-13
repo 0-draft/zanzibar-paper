@@ -76,7 +76,7 @@ import Frames from "../../../components/diagram/Frames.astro";
 
 </Frames>
 
-左の図はセキュリティにとって危険であり、右の図は信頼にとって危険であることに注意したい。Beto は失うべきアクセスを持ち続けるか、誰も取り消せるよう目にできないアクセスを持つ。右の図は AuthZed が順を追って説明しているケースである。"we've written to SpiceDB but we haven't committed the transaction to our database, and now SpiceDB and our database disagree about the state of the world" (SpiceDB には書き込んだがデータベースへのトランザクションはコミットしておらず、SpiceDB とデータベースとで世界の状態についての認識が食い違っている) ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem))。リクエストハンドラ内でリトライしてもどちらの隙間も塞がらない。リトライの前にクラッシュが起こりうるからである。
+左の図はセキュリティにとって危険であり、右の図は信頼にとって危険であることに注意したい。Beto は失うべきアクセスを持ち続けるか、誰の目にも見えず取り消しようのないアクセスを持つ。右の図は AuthZed が順を追って説明しているケースである。"we've written to SpiceDB but we haven't committed the transaction to our database, and now SpiceDB and our database disagree about the state of the world" (SpiceDB には書き込んだがデータベースへのトランザクションはコミットしておらず、SpiceDB とデータベースとで世界の状態についての認識が食い違っている) ([The Dual-Write Problem](https://authzed.com/blog/the-dual-write-problem))。リクエストハンドラ内でリトライしてもどちらの隙間も塞がらない。リトライの前にクラッシュが起こりうるからである。
 
 ## 選択肢
 
@@ -155,7 +155,7 @@ AuthZed の記事は選択肢を列挙している。何もしない、帯域外
 
 ## Watch はインデックスを動かすが、キューではない
 
-上のパターンは変更を認可サービスの *中へ* 移す。Watch (§2.4.3) は変更を *外へ* 移す。"Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API." (一部のクライアントは Zanzibar のリレーションタプルのセカンダリインデックスを維持している。それは Watch API で行える。) レスポンスは変更を "in ascending timestamp order" (タイムスタンプの昇順で) *ハートビート zookie* まで含み、ハートビート zookie は "the client can use … to resume watching where the previous watch response left off" (クライアントが前回の Watch レスポンスの終わったところから監視を再開するのに使える) (§2.4.3)。Leopard の差分インデクサーは論文自身のコンシューマーである (§3.2.4)。
+上のパターンは変更を認可サービスの *中へ* 移す。Watch (§2.4.3) は変更を *外へ* 移す。"Some clients maintain secondary indices of relation tuples in Zanzibar. They can do so with our Watch API." (一部のクライアントは Zanzibar のリレーションタプルの二次インデックスを維持している。それは Watch API で行える。) レスポンスは変更を "in ascending timestamp order" (タイムスタンプの昇順で) *ハートビート zookie* まで含み、ハートビート zookie は "the client can use … to resume watching where the previous watch response left off" (クライアントが前回の Watch レスポンスの終わったところから監視を再開するのに使える) (§2.4.3)。Leopard の差分インデクサーは論文自身のコンシューマーである (§3.2.4)。
 
 再開位置はクライアントが持ち、サーバーは履歴を一定期間しか保持しない。SpiceDB のドキュメント: "Historical changes can only be requested until the configured garbage collection window on the underlying datastore. This is typically 24 hours, but may differ based on the datastore used" (過去の変更は、基盤となるデータストアに設定されたガベージコレクションの期間内でしか要求できない。これは通常 24 時間だが、使うデータストアによって異なることがある) ([SpiceDB, Watching Relationship Changes](https://authzed.com/docs/spicedb/concepts/watch))。SpiceDB の issue はその帰結を述べている。"the Watch API is non-durable; if you want to write to a durable queue, you have to take the messages coming from the Watch API and put them somewhere" (Watch API は永続的ではない。永続的なキューに書き込みたいなら、Watch API から来るメッセージを受け取ってどこかに置かなければならない) ([spicedb#2015](https://github.com/authzed/spicedb/issues/2015)、2026-10-29 に not planned としてクローズ)。オープン中の issue [spicedb#2285](https://github.com/authzed/spicedb/issues/2285) は、デフォルトの挙動が "starts watching from the HEAD revision which leaves gaps of updates that may have not been seen" (HEAD リビジョンから監視を始めるので、見られていない可能性のある更新の隙間が残る) と付け加えている。
 
@@ -233,7 +233,7 @@ zookie プロトコルはクライアントに 2 つのことを求める。内�
     { lane: 2, t: 0, label: "ロックは\nバージョン 7", kind: "note" },
     { lane: 1, t: 1, label: "readme のタプル\n+ ロックを読む", kind: "read" },
     { lane: 0, t: 2, label: "書き込み + touch、\nロック不変なら", kind: "write" },
-    { lane: 2, t: 2, label: "コミット;\nロック変更", kind: "good" },
+    { lane: 2, t: 2, label: "コミット、\nロック変更", kind: "good" },
     { lane: 1, t: 3, label: "書き込み + touch、\nロック不変なら", kind: "write" },
     { lane: 2, t: 3, label: "ロック変更済み:\n拒否", kind: "bad" },
     { lane: 1, t: 4, label: "ステップ 1 へ:\n読み直す", kind: "read" },
@@ -250,7 +250,7 @@ zookie プロトコルはクライアントに 2 つのことを求める。内�
 
 <Callout kind="note" title="応用であり、文書化されていない">
 
-SpiceDB の `WriteRelationships` は `optional_preconditions` を受け付け、"if any preconditions fail, the entire transaction will be reverted" (いずれかの前提条件が満たされなければ、トランザクション全体が取り消される)。前提条件は、関係のフィルターに対する `MUST_MATCH` または `MUST_NOT_MATCH` である ([SpiceDB `permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto))。論文のロックタプルを模倣する 1 つの方法は、`doc:readme#lock@version:7` のような関係を置き、それに対する `MUST_MATCH` の前提条件を付け、同じ書き込みでバージョン 7 の削除とバージョン 8 の作成を行うことである。この構成は本サイト独自のものであり、SpiceDB のドキュメントにはなく、実行もしていない。
+SpiceDB の `WriteRelationships` は `optional_preconditions` を受け付け、"if any preconditions fail, the entire transaction will be reverted" (いずれかの前提条件が満たされなければ、トランザクション全体が取り消される)。前提条件は、リレーションシップのフィルターに対する `MUST_MATCH` または `MUST_NOT_MATCH` である ([SpiceDB `permission_service.proto`](https://github.com/authzed/api/blob/main/authzed/api/v1/permission_service.proto))。論文のロックタプルを模倣する 1 つの方法は、`doc:readme#lock@version:7` のような関係を置き、それに対する `MUST_MATCH` の前提条件を付け、同じ書き込みでバージョン 7 の削除とバージョン 8 の作成を行うことである。この構成は本サイト独自のものであり、SpiceDB のドキュメントにはなく、実行もしていない。
 
 </Callout>
 

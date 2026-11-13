@@ -13,7 +13,7 @@ import Swimlane from "../../../components/diagram/Swimlane.astro";
 import Callout from "../../../components/diagram/Callout.astro";
 import Frames from "../../../components/diagram/Frames.astro";
 
-Check が問うのは 1 つのこと、すなわち、このスナップショットにおいてこのユーザーはこのユーザーセットに含まれるか、である。これに答えるには、複数のサーバーにまたがる数十回の読み取りが必要になることがある。このページでは 1 回の Check を内側から追う。Check が変換されるブール式、その各部分が実行される順序、早期に打ち切れる条件、キャッシュに残すもの、そして打ち切る場所である。
+Check が問うのは 1 つのこと、すなわち、このスナップショットにおいてこのユーザーはこのユーザーセットに含まれるか、である。これに答えるには、複数のサーバーにまたがる数十回の読み取りが必要になることがある。このページでは 1 回の Check を内側から追う。Check が変換されるブール式、その各部分が実行される順序、早期に打ち切れる条件、キャッシュに残すもの、そしてどこで探索をあきらめるかである。
 
 隣接する内容は他の 2 つのページが扱う。[リレーションタプルとユーザーセット](../relation-tuples/#グラフ探索としての-check) は同じ問いを、グラフ探索として 1 つの枝ずつたどる。[アーキテクチャ](../architecture/#1-つの-check-を順に追う) はサーバー間をまたぐリクエストを追う。コンシステントハッシュ、キャッシュの木、ロックテーブル、読み取りのプーリング、ヘッジである。このページは評価の内側にとどまる。
 
@@ -215,7 +215,7 @@ Chen のチェックでは、これは時間とともにどう見えるか。
 
 製品では次のとおりである。
 
-- SpiceDB はリビジョンを `--datastore-revision-quantization-interval` (デフォルト `5s`) で設定される時間枠に丸め ([`dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go)、v1.57.1)、ディスパッチャーを [`singleflight`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go) 層で包んでいる。この層は "dispatch requests that were single flighted" を数えており、ロックテーブルの役割を果たす。
+- SpiceDB はリビジョンを `--datastore-revision-quantization-interval` (デフォルト `5s`) で設定される時間枠に丸め ([`dsconfig/config.go`](https://github.com/authzed/spicedb/blob/v1.57.1/pkg/cmd/datastore/dsconfig/config.go)、v1.57.1)、ディスパッチャーを [`singleflight`](https://github.com/authzed/spicedb/blob/v1.57.1/internal/dispatch/singleflight/singleflight.go) 層で包んでいる。この層は "dispatch requests that were single flighted" (single flight でまとめられたディスパッチリクエスト) を数えており、ロックテーブルの役割を果たす。
 - OpenFGA のチェックキャッシュはデフォルトで無効である (`checkQueryCache.enabled` は `false`、有効時の TTL は `10s`) ([configuration](https://openfga.dev/docs/getting-started/setup-openfga/configuration))。そのエントリはスナップショットに属するのではなく TTL で期限切れになる。OpenFGA がキャッシュを迂回するための `HIGHER_CONSISTENCY` モードを必要とするのはこのためである ([consistency](https://openfga.dev/docs/interacting/consistency)。[TrueTime なしの順序付け](../without-truetime/) を参照)。
 
 ## 読み取りはチェックごとにプールされる

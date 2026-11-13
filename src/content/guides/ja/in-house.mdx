@@ -13,7 +13,7 @@ import Swimlane from "../../../components/diagram/Swimlane.astro";
 
 製品を導入するのではなく、論文を読んで自前のサービスを作った企業もある。2021 年に詳しい解説を公開したのが Airbnb (Himeji) と Carta (AuthZ) の 2 社である。どちらのシステムも社外では利用できないため、本ページの内容はすべて両社のエンジニアが書いたものに基づいており、それらの記事より新しい情報は含まない。
 
-<Callout title="記事の読み方">
+<Callout title="記事をどう読んだか">
 記事は Medium 上にあり、本サイトのチェッカーには HTTP 403 が返された。全文は 2026-11-13 に、同じ記事を配信している 2 つのパブリケーションの Medium RSS フィード ([Airbnb Engineering のフィード](https://medium.com/feed/airbnb-engineering/tagged/authorization)、[Building Carta のフィード](https://medium.com/feed/building-carta/tagged/authorization)) から読んだ。Himeji に関する事実は [InfoQ の記事](https://www.infoq.com/news/2021/05/airbnb-himeji) (2021-05-12) と照合した。Himeji の筆頭著者との対談の録画 ([Authorization in Software](https://www.youtube.com/watch?v=TXZFi6Opbkk)) も存在するが、録画もその説明文も読めなかったため使っていない。
 </Callout>
 
@@ -77,7 +77,7 @@ Carta の Aaron Tainter は 2 本の記事を公開した。2021-06-11 の「Aut
 
 ### インデックスとチケット
 
-AuthZ は、グラフをたどるのではなく、事前に計算したインデックスからチェックに答える。"Traversing the graph is expensive, so AuthZ maintains a custom secondary index." (グラフのたどりはコストが高いので、AuthZ は独自のセカンダリインデックスを保持している。) インデックスは 2 つの集合を持つ。Actor Index Set ("the direct connections from actor leaf nodes"、アクターの葉ノードからの直接の接続) と Object Index Set ("the direct and indirect connections to each object node"、各オブジェクトノードへの直接および間接の接続) である。第 2 部は "(Google's Zanzibar paper calls them Group2Group and Member2Group)" (Google の Zanzibar 論文はこれらを Group2Group と Member2Group と呼んでいる) と補足している。これは Leopard の 2 種類の集合 (§3.2.4) である。
+AuthZ は、グラフをたどるのではなく、事前に計算したインデックスからチェックに答える。"Traversing the graph is expensive, so AuthZ maintains a custom secondary index." (グラフのたどりはコストが高いので、AuthZ は独自の二次インデックスを保持している。) インデックスは 2 つの集合を持つ。Actor Index Set ("the direct connections from actor leaf nodes"、アクターの葉ノードからの直接の接続) と Object Index Set ("the direct and indirect connections to each object node"、各オブジェクトノードへの直接および間接の接続) である。第 2 部は "(Google's Zanzibar paper calls them Group2Group and Member2Group)" (Google の Zanzibar 論文はこれらを Group2Group と Member2Group と呼んでいる) と補足している。これは Leopard の 2 種類の集合 (§3.2.4) である。
 
 インデックスは非同期に構築されるため、利用者には自分の変更が反映されたことを知る手段が必要になる。それが *チケット* の役割である。"During an update, AuthZ issues a Ticket (synonymous with a Zookie in Zanzibar) to the consumer." (更新時に、AuthZ は利用者にチケット (Zanzibar の zookie と同義) を発行する。) "A Ticket is an opaque token which represents the time at which the change was committed to AuthZ." (チケットは、変更が AuthZ にコミットされた時刻を表す不透明なトークンである。)
 
@@ -121,7 +121,7 @@ AuthZ は、グラフをたどるのではなく、事前に計算したイン�
 | 論文 | Airbnb Himeji (2021) | Carta AuthZ (2021) |
 | --- | --- | --- |
 | タプル `object#relation@user` (§2.1) | `entity # relation @ principal`、加えて関係を持たない参照タプル | RelationTuple: アクター、関係、オブジェクト |
-| 書き換えを伴う名前空間設定 (§2.3.1) | YAML の設定、集合演算 | ドメイン固有言語 (非公開) |
+| 書き換えを伴う名前空間設定 (§2.3.1) | YAML の設定、集合演算 | ドメイン固有言語 (記事には示されていない) |
 | zookie (§2.2) | 記載なし | チケット、"synonymous with a Zookie" (zookie と同義) |
 | Leopard (§3.2.4) | 記載なし。代わりに書き込み時ファンアウト | Actor Index Set と Object Index Set、ワーカーが構築 |
 | キャッシュ (§3.2.5) | シャーディング・複製されたインメモリキャッシュ、目標ヒット率約 98% | 記載なし |

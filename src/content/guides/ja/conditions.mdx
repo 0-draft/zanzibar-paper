@@ -14,7 +14,7 @@ import Callout from "../../../components/diagram/Callout.astro";
 
 規則の中には、誰が何と関係しているかを問題にしないものがある。「オフィスのネットワークからのみ」「営業時間内のみ」「1,000 未満の送金のみ」「金曜日まで」。どれもリクエストか時計についての事実に依存する。論文にはこれらを書く手段がない。論文の考え方に基づく製品はそれぞれ異なるやり方で手段を加えている。本ページでは、この欠落がなぜあるのか、3 つの製品が何を加えているのか、そしてどんなときに規則をアプリケーション側に置いたほうがよいのかを説明する。
 
-通しの例: Anne、Beto、Chen (`user:anne`、`user:beto`、`user:chen`)、`folder:A` 内のドキュメント `doc:readme`、グループ `group:eng`。Anne は readme を所有し、Beto は eng に属し、eng のメンバーは readme を閲覧し、Chen はフォルダ A を閲覧する。本ページが前提とする関係のパターンは [モデリングのページ](../modeling/) にある。
+共通の例: Anne、Beto、Chen (`user:anne`、`user:beto`、`user:chen`)、`folder:A` 内のドキュメント `doc:readme`、グループ `group:eng`。Anne は readme を所有し、Beto は eng に属し、eng のメンバーは readme を閲覧し、Chen はフォルダ A を閲覧する。本ページが前提とする関係のパターンは [モデリングのページ](../modeling/) にある。
 
 ## タプルが言えないこと
 
@@ -55,7 +55,7 @@ Check は何を運び、何が欠けているか。
 
 ## SpiceDB の caveat
 
-SpiceDB は関係に条件を付ける。"Caveats are expressions that can return true or false, and they can be attached (by name) to relationships" (caveat は true または false を返しうる式であり、(名前で) 関係に付けられる)。"a caveat definition includes a name, one or more well-typed parameters, and a CEL expression returning a boolean value" (caveat の定義は、名前、1 つ以上の型付きパラメータ、真偽値を返す CEL 式を含む) ([caveats docs](https://authzed.com/docs/spicedb/concepts/caveats))。CEL は Google の [Common Expression Language](https://github.com/google/cel-spec) である。パラメータの型には `int`、`string`、`duration`、`timestamp`、`list<T>`、`map<T>`、そして SpiceDB 固有の `ipaddress` がある。
+SpiceDB はリレーションシップに条件を付ける。"Caveats are expressions that can return true or false, and they can be attached (by name) to relationships" (caveat は true または false を返しうる式であり、(名前で) リレーションシップに付けられる)。"a caveat definition includes a name, one or more well-typed parameters, and a CEL expression returning a boolean value" (caveat の定義は、名前、1 つ以上の型付きパラメータ、真偽値を返す CEL 式を含む) ([caveats docs](https://authzed.com/docs/spicedb/concepts/caveats))。CEL は Google の [Common Expression Language](https://github.com/google/cel-spec) である。パラメータの型には `int`、`string`、`duration`、`timestamp`、`list<T>`、`map<T>`、そして SpiceDB 固有の `ipaddress` がある。
 
 Chen がフォルダ A を、そしてそれを通じて readme を閲覧できるのは、オフィスのネットワークからだけだとする。caveat と、それを持ちうる関係は、caveats のページの例にならうと次のようになる。
 
@@ -74,7 +74,7 @@ definition folder {
 
 *SpiceDB のスキーマ。2026-11-13 時点の文書化された構文に従っている。バリデータは実行していない。*
 
-`user | user with has_valid_ip` により、同じ関係が caveat なしの関係と caveat 付きの関係の両方を保持できる。"to make the caveat **required**, the `user |` can be removed" (caveat を **必須** にするには `user |` を取り除けばよい) (caveats docs)。関係 `folder:A#viewer@user:chen` は、caveat 名 `has_valid_ip` とそのコンテキストの一部、ここでは `allowed_range` = `10.20.30.0/24` とともに書き込まれる。残りの `user_ip` は、各 `CheckPermission` 呼び出しの `context` フィールドで届く。両方が値を与えた場合、"the values in the Relationship take precedence over those in the CheckPermissionRequest" (Relationship の値が CheckPermissionRequest の値より優先される) (caveats docs)。
+`user | user with has_valid_ip` により、同じ関係が caveat なしのリレーションシップと caveat 付きのリレーションシップの両方を保持できる。"to make the caveat **required**, the `user |` can be removed" (caveat を **必須** にするには `user |` を取り除けばよい) (caveats docs)。リレーションシップ `folder:A#viewer@user:chen` は、caveat 名 `has_valid_ip` とそのコンテキストの一部、ここでは `allowed_range` = `10.20.30.0/24` とともに書き込まれる。残りの `user_ip` は、各 `CheckPermission` 呼び出しの `context` フィールドで届く。両方が値を与えた場合、"the values in the Relationship take precedence over those in the CheckPermissionRequest" (Relationship の値が CheckPermissionRequest の値より優先される) (caveats docs)。
 
 どの辺が条件を運ぶか。
 
@@ -82,7 +82,7 @@ definition folder {
   width={600}
   height={200}
   minWidth={480}
-  title="通しの例における caveat 付きの関係"
+  title="共通の例における caveat 付きのリレーションシップ"
   desc="user:chen から folder:A へ、強調された viewer の辺があり、has_valid_ip と allowed_range 10.20.30.0/24 のラベルが付いている。folder:A から doc:readme へ parent の辺がある。user:anne から doc:readme へ、条件のない owner の辺がある。"
   nodes={[
     { id: "anne", x: 80, y: 45, label: "user:anne", kind: "subject", mono: true },
@@ -105,9 +105,9 @@ caveat 付きのチェックは、yes でも no でもない形で終わりう�
 アプリケーションが IP アドレスを渡し忘れると何が起きるか。
 
 <Swimlane
-  lanes={["アプリケーション", "SpiceDB", "格納された関係"]}
+  lanes={["アプリケーション", "SpiceDB", "格納されたリレーションシップ"]}
   title="コンテキストを必要とする caveat 付きの Check"
-  desc="1 行目: アプリケーションが user:chen、view、doc:readme について、コンテキストなしで CheckPermission を送る。2 行目: SpiceDB は parent->view をたどって folder:A に至り、caveat has_valid_ip と allowed_range 10.20.30.0/24 を持つ関係 folder:A#viewer@user:chen を見つける。3 行目: user_ip が欠けているので、SpiceDB は PERMISSIONSHIP_CONDITIONAL_PERMISSION を返し、欠けているものとして user_ip を挙げる。4 行目: アプリケーションはコンテキスト user_ip 10.20.30.7 を付けて再びチェックする。5 行目: in_cidr は true となり、SpiceDB は PERMISSIONSHIP_HAS_PERMISSION を返す。"
+  desc="1 行目: アプリケーションが user:chen、view、doc:readme について、コンテキストなしで CheckPermission を送る。2 行目: SpiceDB は parent->view をたどって folder:A に至り、caveat has_valid_ip と allowed_range 10.20.30.0/24 を持つリレーションシップ folder:A#viewer@user:chen を見つける。3 行目: user_ip が欠けているので、SpiceDB は PERMISSIONSHIP_CONDITIONAL_PERMISSION を返し、欠けているものとして user_ip を挙げる。4 行目: アプリケーションはコンテキスト user_ip 10.20.30.7 を付けて再びチェックする。5 行目: in_cidr は true となり、SpiceDB は PERMISSIONSHIP_HAS_PERMISSION を返す。"
   timeLabel="時間"
   laneWidth={190}
   rowHeight={84}
@@ -128,11 +128,11 @@ caveat 付きのチェックは、yes でも no でもない形で終わりう�
   caption="CONDITIONAL_PERMISSION は許可でも拒否でもない。レスポンスは何が欠けていたかを示すので、呼び出し元はそれを付けて再試行できる。これを yes として扱うアプリケーションには穴がある。"
 />
 
-格納された関係がすでにコンテキストの半分を保持していることに注意したい。アプリケーションが与えるのは、リクエスト時に知っているものだけである。
+格納されたリレーションシップがすでにコンテキストの半分を保持していることに注意したい。アプリケーションが与えるのは、リクエスト時に知っているものだけである。
 
-### 期限付きの関係
+### 期限付きのリレーションシップ
 
-有効期限は caveat のよくある用途だった。それに関する AuthZed の記事は、多くのユーザーが有効期限だけを求めていたと述べ、組み込みの形を紹介している。関係は省略可能な有効期限を持ち、スキーマは `use expiration` と `with expiration` でそれを有効にする。記事によれば、これは SpiceDB v1.40 で `--enable-experimental-relationship-expiration` の背後にある実験的機能として出荷された ([AuthZed blog, 2025-02-13](https://authzed.com/blog/the-evolution-of-expiration))。
+有効期限は caveat のよくある用途だった。それに関する AuthZed の記事は、多くのユーザーが有効期限だけを求めていたと述べ、組み込みの形を紹介している。リレーションシップは省略可能な有効期限を持ち、スキーマは `use expiration` と `with expiration` でそれを有効にする。記事によれば、これは SpiceDB v1.40 で `--enable-experimental-relationship-expiration` の背後にある実験的機能として出荷された ([AuthZed blog, 2025-02-13](https://authzed.com/blog/the-evolution-of-expiration))。
 
 ```text
 use expiration
@@ -145,11 +145,11 @@ definition folder {
 
 *SpiceDB のスキーマ。2026-11-13 時点の文書化された構文に従っている。バリデータは実行していない。*
 
-[expiring relationships のドキュメント](https://authzed.com/docs/spicedb/concepts/expiring-relationships) は `WriteRelationships` の `OptionalExpiresAt` (RFC 3339) で時刻を設定し、caveat よりこちらを選ぶ理由を 2 つ挙げている。caveat は "requires clients to provide the `now` timestamp" (クライアントが `now` のタイムスタンプを与える必要がある)、そして "expired caveats are not automatically garbage collected" (期限切れの caveat は自動的にはガベージコレクションされない)。期限切れの関係は期限が来た時点で数えられなくなる。ただし、期限前にキャッシュされた部分結果は、そのキャッシュの有効期間内であればまだ返されうる。その行は後でガベージコレクションによって削除される (同じページによれば、デフォルトでは 24 時間後)。このページはバージョンを一度は "v1.40"、一度は "v1.4.0" と書いており、ブログ記事は v1.40 としている。現行リリースでこの機能がまだ実験的とされているかは確認していない。
+[expiring relationships のドキュメント](https://authzed.com/docs/spicedb/concepts/expiring-relationships) は `WriteRelationships` の `OptionalExpiresAt` (RFC 3339) で時刻を設定し、caveat よりこちらを選ぶ理由を 2 つ挙げている。caveat は "requires clients to provide the `now` timestamp" (クライアントが `now` のタイムスタンプを与える必要がある)、そして "expired caveats are not automatically garbage collected" (期限切れの caveat は自動的にはガベージコレクションされない)。期限切れのリレーションシップは期限が来た時点で数えられなくなる。ただし、期限前にキャッシュされた部分結果は、そのキャッシュの有効期間内であればまだ返されうる。その行は後でガベージコレクションによって削除される (同じページによれば、デフォルトでは 24 時間後)。このページはバージョンを一度は "v1.40"、一度は "v1.4.0" と書いており、ブログ記事は v1.40 としている。現行リリースでこの機能がまだ実験的とされているかは確認していない。
 
 ## OpenFGA の condition
 
-OpenFGA は型制約を通じてタプルに条件を付ける。[conditions のガイド](https://openfga.dev/docs/modeling/conditions) のモデルを、通しの例の型で示す。
+OpenFGA は型制約を通じてタプルに条件を付ける。[conditions のガイド](https://openfga.dev/docs/modeling/conditions) のモデルを、共通の例の型で示す。
 
 ```text
 model
@@ -180,7 +180,7 @@ SpiceDB との違いは 2 つある。コンテキストの欠落は第 3 の答
 
 OpenFGA では、リクエストが自前のタプルを持ち込むこともできる。contextual tuple は "a tuple that can be added to a Check request, and only exists within the context of that particular request" (Check リクエストに追加でき、その特定のリクエストのコンテキスト内にだけ存在するタプル) であり、"are not persisted in the store" (ストアには永続化されない) ([contextual and time-based authorization のガイド](https://openfga.dev/docs/modeling/contextual-time-based-authorization))。このガイドは、許可された IP の範囲と時間帯をオブジェクト (`ip-address-range`、`timeslot`) としてモデル化し、チェックとともに `user:anne` `user` `timeslot:12_13` を送る。支店が許可していない時間帯なら `{"allowed":false}` が返る。
 
-通しの例に当てはめる。フォルダ A はオフィスのネットワークからしか閲覧できないとする。アプリケーションは呼び出し元のアドレスから Chen が `network:office` にいると判断し、それを contextual tuple で伝える。
+共通の例に当てはめる。フォルダ A はオフィスのネットワークからしか閲覧できないとする。アプリケーションは呼び出し元のアドレスから Chen が `network:office` にいると判断し、それを contextual tuple で伝える。
 
 ```text
 type network
@@ -217,7 +217,7 @@ type folder
   caption="can_view = viewer ∩ (allowed_network → user)。破線の辺はストレージではなくアプリケーションから来る。これがなければ積集合は成り立たない。"
 />
 
-IP の照合がどこで行われたかに注意したい。呼び出しの前に、アプリケーションの中で行われている。contextual tuple が動かすのは事実をリクエストへであって、ロジックをサービスへではない。ガイドはその適用範囲も挙げている。contextual tuple は Check と ListObjects でサポートされ、"are not supported on read, expand and other endpoints" (read、expand、その他のエンドポイントではサポートされない)。また、タプルの変更から構築した検索インデックスをそれと組み合わせるのは "will not be trivial" (簡単ではない)。この記述は 2026-11-13 に取得したガイドによるもので、その後のリリースでサポートが広がっている可能性がある。
+IP の照合がどこで行われたかに注意したい。呼び出しの前に、アプリケーションの中で行われている。contextual tuple はリクエストに事実を持ち込むのであって、ロジックをサービスに移すのではない。ガイドはその適用範囲も挙げている。contextual tuple は Check と ListObjects でサポートされ、"are not supported on read, expand and other endpoints" (read、expand、その他のエンドポイントではサポートされない)。また、タプルの変更から構築した検索インデックスをそれと組み合わせるのは "will not be trivial" (簡単ではない)。この記述は 2026-11-13 に取得したガイドによるもので、その後のリリースでサポートが広がっている可能性がある。
 
 ## Permify の attribute と rule
 
@@ -243,10 +243,10 @@ rule check_ip_range(ip_range string[]) {
 
 | | 論文 | SpiceDB | OpenFGA | Permify |
 | --- | --- | --- | --- | --- |
-| 条件の置き場所 | どこにもない。タプルは 4 つの要素からなる (§2.1) | 関係の上。スキーマで `with` によって許可された名前付きの caveat | タプルの上。型制約で `with` によって許可された名前付きの condition | permission が呼び出す `rule` の中。エンティティの `attribute` とリクエストのコンテキストを対象とする |
-| 式言語 | なし | CEL | CEL | CEL に "based on" |
+| 条件の置き場所 | どこにもない。タプルはオブジェクト、関係、ユーザーだけからなる (§2.1) | リレーションシップの上。スキーマで `with` によって許可された名前付きの caveat | タプルの上。型制約で `with` によって許可された名前付きの condition | permission が呼び出す `rule` の中。エンティティの `attribute` とリクエストのコンテキストを対象とする |
+| 式言語 | なし | CEL | CEL | CEL に基づく ("based on") |
 | リクエスト時の事実 | なし。Check が運ぶのはユーザーセット、ユーザー、zookie (§2.4.4) | `CheckPermission` の `context` | Check の `context`。contextual tuple | `context` (`context.data`) |
-| 格納値とリクエスト値 | 該当なし | 関係が優先 | 永続化されたコンテキストが優先 | 未確認 |
+| 格納値とリクエスト値 | 該当なし | リレーションシップが優先 | 永続化されたコンテキストが優先 | 未確認 |
 | コンテキストの欠落 | 該当なし | 欠けたフィールドとともに `PERMISSIONSHIP_CONDITIONAL_PERMISSION` | リクエストがエラーで失敗する | 未確認 |
 | 有効期限 | タプルを削除する (クライアントの仕事) | `with expiration` (v1.40)、または caveat | `current_time` に対する condition | 未確認 |
 

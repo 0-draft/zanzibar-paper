@@ -4,7 +4,7 @@ description: "Zanzibar に着想を得た CNCF の認可エンジンを、論文
 section: ecosystem
 order: 2
 checked: "2026-11-13"
-paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.2.4"]
+paper: ["2.1", "2.2", "2.3.1", "2.4", "3", "3.1.3", "3.2.2", "3.2.4"]
 product:
   name: OpenFGA
   maintainer: CNCF project (Okta core maintainer)
@@ -194,7 +194,7 @@ OpenFGA には zookie がない。ドキュメント自身が "Future work" (今
 - **変更はポーリングで取る。** `ReadChanges` は "sorted by ascending time" (時刻の昇順に並んだ) タプル変更の 1 ページを、継続トークンとともに返す ([`openfga_service.proto`](https://github.com/openfga/api/blob/main/openfga/v1/openfga_service.proto))。論文の Watch はハートビート zookie を伴うストリームである (§2.4.3)。
 - **ストレージ。** 論文は Spanner を使う (§3.1)。OpenFGA は `memory` (デフォルト。"Data is lost between server restarts" (サーバーを再起動するとデータは失われる))、PostgreSQL (省略可能なリードレプリカ付き)、MySQL、SQLite を提供する ([configure OpenFGA](https://openfga.dev/docs/getting-started/setup-openfga/configure-openfga))。
 - **条件。** `[user with non_expired_grant]` のような型制約により、CEL の条件が成り立つときだけタプルが有効になる ([conditions](https://openfga.dev/docs/modeling/conditions))。論文のタプル (§2.1) には条件がない。
-- **コンテキストタプル。** 単一の Check、ListObjects、ListUsers、Expand リクエストとともに送られ、"not persisted in the datastore" (データストアには永続化されない) タプルである ([concepts](https://openfga.dev/docs/concepts)、[contextual tuples](https://openfga.dev/docs/interacting/contextual-tuples))。
+- **contextual tuple。** 単一の Check、ListObjects、ListUsers、Expand リクエストとともに送られ、"not persisted in the datastore" (データストアには永続化されない) タプルである ([concepts](https://openfga.dev/docs/concepts)、[contextual tuples](https://openfga.dev/docs/interacting/contextual-tuples))。
 - **ワイルドカード。** `[user, user:*]` で公開の付与ができる ([configuration language](https://openfga.dev/docs/configuration-language))。論文のタプル文法にワイルドカードはない (§2.1)。
 - **ストアとモデルのバージョン。** ストアは "one or more versions of an authorization model" (認可モデルの 1 つ以上のバージョン) とそのタプルを保持し、"Store data cannot be shared across stores" (ストアのデータはストア間で共有できない) ([concepts](https://openfga.dev/docs/concepts))。論文では、設定は名前空間 ID をキーとするテーブルに、設定更新の変更ログと並べて格納され、各リクエストは 1 つの設定スナップショットのタイムスタンプで評価される (§3.1.3、§3.2.2)。OpenFGA のチェックは、使うモデルのバージョンを指定できる。
 - **Leopard がない。** ここで引用したドキュメントが記述しているのは Check キャッシュとイテレータキャッシュであり、Leopard のような事前計算された集合インデックスではない (§3.2.4)。
@@ -202,7 +202,7 @@ OpenFGA には zookie がない。ドキュメント自身が "Future work" (今
 
 ## ステータス
 
-2026-11-13 時点：活動中。最新リリースは 2026-10-28 の v1.22.1、最初のリリースは 2022-06-10 の v0.1.0。GitHub のスターは約 6.1k、ライセンスは Apache-2.0 ([repository](https://github.com/openfga/openfga)、[releases](https://github.com/openfga/openfga/releases))。
+2026-11-13 時点：開発継続中。最新リリースは 2026-10-28 の v1.22.1、最初のリリースは 2022-06-10 の v0.1.0。GitHub のスターは約 6.1k、ライセンスは Apache-2.0 ([repository](https://github.com/openfga/openfga)、[releases](https://github.com/openfga/openfga/releases))。
 
 - 2022 年 6 月：オープンソース化 ([project post, 2026-01-07](https://openfga.dev/blog/incubation-announcement))。
 - 2022 年：CNCF Sandbox プロジェクトとして採択。日付は出典によって食い違う。CNCF のプロジェクトページは OpenFGA が "was accepted to CNCF on September 14, 2022" (2022 年 9 月 14 日に CNCF に採択された) とし、CNCF の告知は 2022 年 9 月としているが、プロジェクト自身の投稿は 2022 年 12 月としている ([CNCF project page](https://www.cncf.io/projects/openfga/)、[CNCF](https://www.cncf.io/blog/2025/11/11/openfga-becomes-a-cncf-incubating-project/)、[project post](https://openfga.dev/blog/incubation-announcement))。

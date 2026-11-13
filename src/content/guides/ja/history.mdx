@@ -20,11 +20,11 @@ Zanzibar の論文は、自らの系譜を [§5 関連研究](../../#s5) で述�
 
 その後、オペレーティングシステムはリストをより安価で粗いものにし、のちに再び豊かにした。論文自身がこの流れをたどっている。UNIX の初版では、ファイルのフラグが "whether owner and non-owner can read or write the file" (所有者と所有者以外がファイルを読み書きできるかどうか) を表す。第 4 版では "for owner, group, and others" (所有者、グループ、その他に対する) 読み取り・書き込み・実行のビットがある。POSIX ACL は "an arbitrary list of users and groups" (ユーザーとグループの任意のリスト) を加え、VMS は "supports ACL inheritance for files created within a directory tree" (ディレクトリツリー内に作成されたファイルに対する ACL の継承をサポートする) (§5)。権限、ユーザー、グループ、継承というこの 4 つの語が、Zanzibar のデータモデルがサポートしようとするものである。
 
-1970 年代から、モデルはオブジェクトごとのリストから離れていった。Bell–LaPadula と Biba は、所有者ではなくシステムがラベルによって判定する。Zanzibar は任意アクセス制御であるため、これらは祖先ではなく対比の対象である。ロールベースアクセス制御 (1992 年) は、ユーザーと権限の間にロールを置いた。論文はロールが "are similar to Zanzibar relations" (Zanzibar の関係に似ている) と述べている (§5)。属性ベースの制御は NIST の 2014 年のガイド SP 800-162 で定義され、リクエスト時に属性から判定を計算する。関係ベースの制御は 2007 年に Gates が名付け、2011 年に Fong が形式化したもので、「メンバーである」や「親フォルダである」のような、合成できる関係から判定する ([Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf))。論文は ReBAC という語を一度も使っていないが、そのリレーションタプルはまさにそのようなグラフである。
+1970 年代から、モデルはオブジェクトごとのリストから離れていった。Bell–LaPadula と Biba は、所有者ではなくシステムがラベルによって判定する。Zanzibar は任意アクセス制御であるため、これらは祖先ではなく対比の対象である。ロールベースアクセス制御 (1992 年) は、ユーザーと権限の間にロールを置いた。論文はロールが "are similar to Zanzibar relations" (Zanzibar の関係に似ている) と述べている (§5)。属性ベースの制御は NIST の 2014 年のガイド SP 800-162 で定義され、リクエスト時に属性から判定を計算する。関係ベースの制御は 2007 年に Gates が名付け、2011 年に Fong が形式化したもので、「メンバーである」や「親フォルダである」のような、合成できる関係から判定する ([Fong](https://pages.cpsc.ucalgary.ca/~pwlfong/Pub/codaspy2011.pdf))。論文は ReBAC という語を一度も使っていないが、そのリレーションタプルはそうしたグラフをなしている。
 
 Google で新しかったのは規模と一貫性である。論文は、2019 年 7 月の時点で Zanzibar が "has been in production use for more than 5 years" (5 年以上本番で使われてきた) と述べている (§4)。したがって遅くとも 2014 年には稼働していたが、開始年を示す公開資料はない。Zanzibar は Calendar、Cloud、Drive、Maps、Photos、YouTube に使われている (§1)。論文が比較対象とする TAO は "eventual global consistency" (グローバルな結果整合性) を提供するのに対し、Zanzibar は "external consistency and snapshot reads with bounded staleness" (外部一貫性と有界な古さを伴うスナップショット読み取り) を提供し、それによって「new enemy」問題を防ぐ (§5)。Lamport クロックは、"require explicit participation of all “processes”" (すべての「プロセス」の明示的な参加を必要とする) うえに、Zanzibar のプロセスの一部は "external clients or even human users" (外部のクライアントや、人間のユーザーでさえある) ため、採用されなかった。Chubby は "high volumes of data, efficient range reads, or reads at a client-specified snapshot with bounded staleness" (大量のデータ、効率的な範囲読み取り、クライアントが指定した有界な古さのスナップショットでの読み取り) をサポートせず、ZooKeeper はノードをまたぐ外部一貫性も、有界な古さを伴うスナップショット読み取りも提供しない (§5)。保証を与えたのは Spanner とその TrueTime クロックである ([Spanner, OSDI '12](https://www.usenix.org/system/files/conference/osdi12/osdi12-final-16.pdf))。
 
-論文の公開後、他の人々がこの設計をオープンな形で作り直した。Ory Keto は 2021 年にこの設計を中心に書き直され、SpiceDB、OpenFGA、Permify、Topaz がおよそ 18 か月以内に続いた。同じ時期に、ABAC の系譜にあるポリシーエンジンの OPA と Cedar が成熟し、2023 年に結成された OpenID Foundation の AuthZEN ワーキンググループが、アプリケーションが認可エンジンに判定を問い合わせる方法を標準化した。その Authorization API 1.0 は 2026 年 1 月に OpenID Final Specification となった。各システムの詳細はエコシステムのページにある。
+論文の公開後、ほかの開発者たちがこの設計をオープンソースで作り直した。Ory Keto は 2021 年にこの設計を中心に書き直され、SpiceDB、OpenFGA、Permify、Topaz がおよそ 18 か月以内に続いた。同じ時期に、ABAC の系譜にあるポリシーエンジンの OPA と Cedar が成熟し、2023 年に結成された OpenID Foundation の AuthZEN ワーキンググループが、アプリケーションが認可エンジンに判定を問い合わせる方法を標準化した。その Authorization API 1.0 は 2026 年 1 月に OpenID Final Specification となった。各システムの詳細はエコシステムのページにある。
 
 ## 年表
 
@@ -84,7 +84,7 @@ Google で新しかったのは規模と一貫性である。論文は、2019 �
       era: "モデルと標準",
       year: "1975–1977",
       title: "Biba 完全性モデル",
-      body: "Bell–LaPadula を完全性について双対にしたもの。MITRE MTR-3153 (1975 年 6 月)。通常は ESD-TR-76-372 (1977 年 4 月) として引用される。",
+      body: "Bell–LaPadula を完全性について双対にしたもの。MITRE MTR-3153 (1975 年 6 月)。改訂版の MTR-3153 Rev. 1 は 1977 年 4 月に ESD-TR-76-372 として発行された (DTIC AD-A039324)。",
       href: "https://seclab.cs.ucdavis.edu/projects/history/CD/index.html",
     },
     {
@@ -119,7 +119,7 @@ Google で新しかったのは規模と一貫性である。論文は、2019 �
       era: "モデルと標準",
       year: "2007",
       title: "「Relationship-Based Access Control」という語の誕生",
-      body: "Carrie Gates、W2SP 2007。Fong の 2011 年の論文 (概要と参考文献 [18]) による。Gates の論文自体は確認していない。",
+      body: "Carrie Gates、W2SP 2007。Fong の 2011 年の論文 (概要と参考文献 [18]) がこの命名を Gates に帰している。Gates の論文自体は確認していない。",
       href: "https://dl.acm.org/doi/10.1145/1943513.1943539",
     },
     {
@@ -197,7 +197,7 @@ Google で新しかったのは規模と一貫性である。論文は、2019 �
       era: "オープンソースと標準",
       year: "2022",
       title: "OpenFGA の最初のリリース",
-      body: "2022 年 6 月 10 日。Okta の従業員が開発した。2025 年 11 月から CNCF の Incubating プロジェクトである (CNCF ブログ、2025 年 11 月 11 日)。",
+      body: "2022 年 6 月 10 日。Okta の従業員が開発した。2025 年 10 月 28 日から CNCF の Incubating プロジェクトである。CNCF ブログでの発表は 2025 年 11 月 11 日。",
       href: "https://github.com/openfga/openfga",
     },
     {
@@ -278,11 +278,11 @@ Google で新しかったのは規模と一貫性である。論文は、2019 �
   caption="実線の矢印: Zanzibar はその上で動作する。破線の矢印: 論文が先例または類似の考え方として挙げているもの (§5、§3.2.4)。"
 />
 
-この分かれ方に注目したい。上半分のデータモデルは古い考え方の組み合わせ直しである。論文自身が主張しているのはその統一であり、タプルによるモデル化は "allows us to unify the concepts of ACLs and groups" (ACL とグループの概念を統一できる) (§2.1)。Abadi らはこれらを分けたままにしていた (§5)。下半分は Google の規模でそれを機能させたものである。"external consistency and snapshot reads with bounded staleness" (外部一貫性と有界な古さを伴うスナップショット読み取り) のための Spanner (§5) と、ポインタをたどるだけでは十分速く処理できないグループのための (§3.2.4)、"an indexing system used to optimize operations on large and deeply nested sets" (大規模で深く入れ子になった集合に対する操作を最適化するためのインデックスシステム) である Leopard (§3) である。
+この分かれ方に注目したい。上半分のデータモデルは古い考え方の組み合わせ直しである。論文自身が主張しているのはその統一であり、タプルによるモデル化は "allows us to unify the concepts of ACLs and groups" (ACL とグループの概念を統一できる) (§2.1)。Abadi らはこれらを分けたままにしていた (§5)。下半分は Google の規模でそれを機能させたものである。"external consistency and snapshot reads with bounded staleness" (外部一貫性と有界な古さを伴うスナップショット読み取り) のための Spanner (§5) と、ポインタ追跡では十分速く処理できないグループのための (§3.2.4)、"an indexing system used to optimize operations on large and deeply nested sets" (大規模で深く入れ子になった集合に対する操作を最適化するためのインデックスシステム) である Leopard (§3) である。
 
 <Callout kind="note" title="上に載る IAM">
 
-論文はまた、Google の Cloud IAM システムが "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (Zanzibar の ACL の格納・評価システムの上の層として構築されている) とも述べている (§5)。関係のストアの上で動くロールベースの製品である。各モデルの関係については [ACL、RBAC、ABAC、ReBAC](../access-control-models/) を参照。
+論文はまた、Google の Cloud IAM システムが "is built as a layer on top of Zanzibar’s ACL storage and evaluation system" (Zanzibar の ACL の格納・評価システムの上の層として構築されている) とも述べている (§5)。関係のストアの上で動くロールベースの製品である。各モデルがどう組み合わさるかは [ACL、RBAC、ABAC、ReBAC](../access-control-models/) を参照。
 
 </Callout>
 
@@ -302,6 +302,7 @@ Google で新しかったのは規模と一貫性である。論文は、2019 �
 - J. H. Saltzer, "Protection and the Control of Information Sharing in Multics", CACM 17(7), 1974, [dl.acm.org/doi/10.1145/361011.361067](https://dl.acm.org/doi/10.1145/361011.361067)
 - A. Grünbacher, "POSIX Access Control Lists on Linux", USENIX ATC 2003 FREENIX, [usenix.org](https://www.usenix.org/legacy/publications/library/proceedings/usenix03/tech/freenix03/full_papers/gruenbacher/gruenbacher_html/main.html)
 - D. E. Bell, "Looking Back at the Bell-La Padula Model", ACSAC 2005, [PDF](https://www.acsac.org/2005/papers/Bell.pdf)
+- K. J. Biba, "Integrity Considerations for Secure Computer Systems", MTR-3153 Rev. 1 / ESD-TR-76-372, April 1977, [DTIC AD-A039324](https://apps.dtic.mil/sti/html/tr/ADA039324/index.html)
 - UC Davis Computer Security Lab history archive (Biba), [seclab.cs.ucdavis.edu/projects/history/CD](https://seclab.cs.ucdavis.edu/projects/history/CD/index.html)
 - NIST, Role Based Access Control project, [csrc.nist.gov/projects/role-based-access-control](https://csrc.nist.gov/projects/role-based-access-control)
 - OASIS, XACML 3.0 core specification, [docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html](https://docs.oasis-open.org/xacml/3.0/xacml-3.0-core-spec-os-en.html)

@@ -20,7 +20,7 @@ import Callout from "../../../components/diagram/Callout.astro";
 import Graph from "../../../components/diagram/Graph.astro";
 import Swimlane from "../../../components/diagram/Swimlane.astro";
 
-Ory Keto は Ory Corp が Go で書いた権限サーバーである。README は Keto を "an open source implementation of 'Zanzibar: Google's Consistent, Global Authorization System'" (「Zanzibar: Google の一貫性を備えたグローバル認可システム」のオープンソース実装) と呼んでいる ([README](https://github.com/ory/keto))。Ory はこれをマネージドサービスとしても提供しており、Ory Network 上で "Ory Permissions is powered by the open source Ory Keto" (Ory Permissions はオープンソースの Ory Keto で動いている) (同じ README)。
+Ory Keto は Ory Corp が Go で書いた権限サーバーである。README は Keto を "an open source implementation of 'Zanzibar: Google's Consistent, Global Authorization System'" (「Zanzibar: Google の一貫性を備えたグローバル認可システム」のオープンソース実装) と呼んでいる ([README](https://github.com/ory/keto))。Ory はこれをマネージドサービスとしても提供しており、Ory Network 上では "Ory Permissions is powered by the open source Ory Keto" (Ory Permissions はオープンソースの Ory Keto で動いている) とされている (同じ README)。
 
 Keto は Zanzibar 型のシステムとして始まったわけではない。Zanzibar の設計が入ったのは 2021-04-07 の v0.6.0-alpha.1 であり、リリースノートには、それ以前の Keto は `legacy-0.5` ブランチに移り、"the architectures are vastly different" (アーキテクチャは大きく異なる) とある ([リリースノート](https://github.com/ory/keto/releases/tag/v0.6.0-alpha.1))。Ory Permission Language で書くユーザーセット書き換えは、2022-09-27 の v0.10.0-alpha.0 で続いて導入された ([リリースノート](https://github.com/ory/keto/releases/tag/v0.10.0-alpha.0))。
 
@@ -130,7 +130,7 @@ Folder:A#viewers@User:chen
   caption="Anne: owners → permits.edit → view。Beto: 主体集合 Group:eng#members。Chen: parents.traverse(p => p.permits.view)。破線は主体集合を表す。"
 />
 
-格納されているのは矢印だけである点に注意してほしい。所有者を閲覧者に、フォルダの閲覧者をドキュメントの閲覧者に変える各ステップは、すべて `permits` の関数の中にあり、チェック時に実行される。
+格納されているのは矢印だけである点に注意されたい。所有者を閲覧者に、フォルダの閲覧者をドキュメントの閲覧者に変える各ステップは、すべて `permits` の関数の中にあり、チェック時に実行される。
 
 ## アーキテクチャ
 
@@ -187,7 +187,7 @@ Keto のデプロイでは、どの部分がどこと通信するのか。
   caption="API の形は論文の zookie プロトコルに倣っているが、その挙動はまだない。"
 />
 
-したがって、論文が zookie の上に築く保証、すなわちコンテンツを「new enemy」問題から守ること (§2.2) は、その下にある SQL データベースの振る舞いに依存する点に注意してほしい。ここで確認した Keto のドキュメントのページは、一貫性について何も述べていない。
+したがって、論文が zookie の上に築く保証、すなわちコンテンツを「new enemy」問題から守ること (§2.2) は、その下にある SQL データベースの振る舞いに依存する点に注意されたい。ここで確認した Keto のドキュメントのページは、一貫性について何も述べていない。
 
 ## 論文との違い
 
