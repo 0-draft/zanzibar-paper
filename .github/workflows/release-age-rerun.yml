@@ -1,0 +1,51 @@
+name: Rerun release-age failures
+
+# Dependabot's cooldown covers the dependency it bumps, not the transitive
+# packages the new lockfile pulls in. When one of those is younger than
+# minimumReleaseAge (pnpm-workspace.yaml), every install in CI fails with
+# ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION until the package ages past the
+# cutoff. This reruns those failed jobs once a day instead of by hand; the
+# guard itself stays as strict as it is.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-age-rerun
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    name: Rerun Dependabot CI blocked by minimumReleaseAge
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: read
+    steps:
+      - name: Rerun failed jobs whose install hit the release-age cutoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh pr list --author 'app/dependabot' --state open \
+            --json number,headRefName,headRefOid \
+            --jq '.[] | "\(.number) \(.headRefName) \(.headRefOid)"' |
+          while read -r number branch sha; do
+            run_id=$(gh run list --workflow ci.yml --branch "$branch" --commit "$sha" \
+              --limit 1 --json databaseId,status,conclusion \
+              --jq '.[] | select(.status == "completed" and .conclusion == "failure") | .databaseId')
+            if [ -z "$run_id" ]; then
+              continue
+            fi
+            if gh run view "$run_id" --log-failed | grep -q ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION; then
+              echo "PR #$number: rerunning failed jobs of run $run_id"
+              gh run rerun "$run_id" --failed
+            else
+              echo "PR #$number: run $run_id failed for another reason, left alone"
+            fi
+          done
