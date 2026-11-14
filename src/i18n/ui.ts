@@ -28,6 +28,7 @@ export interface UiStrings {
   goToReference: string;
   backToText: string;
   reportParagraph: string;
+  showOriginal: string;
   openFigure: string;
   theme: string;
   themeSystem: string;
@@ -96,6 +97,7 @@ const en: UiStrings = {
   goToReference: "Go to the reference",
   backToText: "Back to the text",
   reportParagraph: "Report an error in this paragraph",
+  showOriginal: "Show the original of this paragraph",
   openFigure: "Open full size",
   theme: "Theme",
   themeSystem: "System",
@@ -169,6 +171,7 @@ export const UI: Record<string, UiStrings> = {
     goToReference: "参考文献へ移動",
     backToText: "本文に戻る",
     reportParagraph: "この段落の誤りを報告",
+    showOriginal: "この段落の原文を表示",
     openFigure: "原寸で開く",
     theme: "テーマ",
     themeSystem: "システム",
@@ -236,6 +239,7 @@ export const UI: Record<string, UiStrings> = {
     goToReference: "跳到参考文献",
     backToText: "返回正文",
     reportParagraph: "报告本段的错误",
+    showOriginal: "显示本段原文",
     openFigure: "查看原图",
     theme: "主题",
     themeSystem: "跟随系统",
@@ -303,6 +307,7 @@ export const UI: Record<string, UiStrings> = {
     goToReference: "跳至參考文獻",
     backToText: "返回正文",
     reportParagraph: "回報本段的錯誤",
+    showOriginal: "顯示本段原文",
     openFigure: "檢視原圖",
     theme: "主題",
     themeSystem: "跟隨系統",
@@ -371,6 +376,7 @@ export const UI: Record<string, UiStrings> = {
     goToReference: "참고문헌으로 이동",
     backToText: "본문으로 돌아가기",
     reportParagraph: "이 문단의 오류 신고",
+    showOriginal: "이 문단의 원문 보기",
     openFigure: "원본 크기로 열기",
     theme: "테마",
     themeSystem: "시스템",
@@ -441,6 +447,7 @@ export const UI: Record<string, UiStrings> = {
     goToReference: "Ir a la referencia",
     backToText: "Volver al texto",
     reportParagraph: "Informar de un error en este párrafo",
+    showOriginal: "Mostrar el original de este párrafo",
     openFigure: "Abrir a tamaño completo",
     theme: "Tema",
     themeSystem: "Sistema",
@@ -512,6 +519,7 @@ export const UI: Record<string, UiStrings> = {
     goToReference: "Aller à la référence",
     backToText: "Retour au texte",
     reportParagraph: "Signaler une erreur dans ce paragraphe",
+    showOriginal: "Afficher l’original de ce paragraphe",
     openFigure: "Ouvrir en taille réelle",
     theme: "Thème",
     themeSystem: "Système",
@@ -583,6 +591,7 @@ export const UI: Record<string, UiStrings> = {
     goToReference: "Zum Literatureintrag springen",
     backToText: "Zurück zum Text",
     reportParagraph: "Fehler in diesem Absatz melden",
+    showOriginal: "Original dieses Absatzes anzeigen",
     openFigure: "In voller Größe öffnen",
     theme: "Design",
     themeSystem: "System",
@@ -653,6 +662,7 @@ export const UI: Record<string, UiStrings> = {
     goToReference: "Ir para a referência",
     backToText: "Voltar ao texto",
     reportParagraph: "Relatar um erro neste parágrafo",
+    showOriginal: "Mostrar o original deste parágrafo",
     openFigure: "Abrir em tamanho original",
     theme: "Tema",
     themeSystem: "Sistema",

@@ -26,7 +26,7 @@ The Zanzibar paper, read side by side. The original stays on the left and your l
 | Deutsch | [Zanzibar: Googles konsistentes, globales Autorisierungssystem](https://0-draft.github.io/zanzibar-paper/de/) |
 | Português (Brasil) | [Zanzibar: o sistema de autorização global e consistente do Google](https://0-draft.github.io/zanzibar-paper/pt-BR/) |
 
-Every paragraph has a ¶ link, and switching language keeps you on the paragraph you were reading. You can hide either column. Figures 2 to 5 are vector crops of the PDF rather than redraws. Figure 1 and both tables are text, so you can copy the namespace config and the latency numbers.
+Every paragraph has a ¶ link, and switching language keeps you on the paragraph you were reading. You can hide either column; with the translation alone, the EN button beside a paragraph opens its original underneath. Figures 2 to 5 are vector crops of the PDF rather than redraws. Figure 1 and both tables are text, so you can copy the namespace config and the latency numbers.
 
 ## About the translations
 

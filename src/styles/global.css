@@ -750,9 +750,45 @@ html[data-first="translation"] .cell-tr {
   text-decoration: none;
   border-radius: var(--r1);
 }
-.pl a:hover {
+.pl a:hover,
+.pl-peek:hover {
   color: var(--ink);
   background: var(--paper);
+}
+/* translation-only view: open the original of one paragraph under its
+   translation. Needs the script, so it stays hidden without it. */
+.pl-peek {
+  display: none;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r1);
+  background: none;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+html.js[data-view="translation"] .pl-peek {
+  display: grid;
+}
+.pl-peek[aria-pressed="true"] {
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+}
+html[data-view="translation"] .row.peek > :not(.pl) {
+  grid-row: auto;
+}
+html[data-view="translation"] .row.peek .cell-en {
+  display: block;
+  order: 2;
+  margin-top: 0.5rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--rule);
+  color: var(--ink-2);
 }
 .row:hover .pl,
 .row:focus-within .pl,
