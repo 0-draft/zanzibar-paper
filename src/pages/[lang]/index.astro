@@ -196,6 +196,17 @@ const EN_DESCRIPTION =
                     ></path></svg
                   >
                 </a>
+                {r.en !== undefined && r.tr !== undefined && !original && (
+                  <button
+                    type="button"
+                    class="pl-peek"
+                    aria-pressed="false"
+                    aria-label={t.showOriginal}
+                    title={t.showOriginal}
+                  >
+                    EN
+                  </button>
+                )}
               </span>
             </div>
           ))

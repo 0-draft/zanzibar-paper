@@ -71,6 +71,28 @@ test("view menu: show one text, and the choice is remembered", async ({ page }) 
   await expect(cellEn).toBeVisible();
 });
 
+test("translation-only view opens one paragraph's original under its translation", async ({ page }) => {
+  await page.goto(`${BASE}ja/`);
+  const peek = page.locator("#s1-p1 .pl-peek");
+  await expect(peek).toBeHidden();
+  await openView(page);
+  await page.locator('input[name="view"][value="translation"]').check();
+  await page.keyboard.press("Escape");
+  const cellEn = page.locator("#s1-p1 .cell-en");
+  await expect(cellEn).toBeHidden();
+  await page.locator("#s1-p1").hover();
+  await peek.click();
+  await expect(peek).toHaveAttribute("aria-pressed", "true");
+  await expect(cellEn).toBeVisible();
+  await expect(page.locator("#s1-p2 .cell-en")).toBeHidden();
+  const [tr, en] = await Promise.all([page.locator("#s1-p1 .cell-tr").boundingBox(), cellEn.boundingBox()]);
+  expect(en!.y, "the original sits under the translation").toBeGreaterThan(tr!.y + tr!.height - 1);
+  await noHorizontalScroll(page);
+  await peek.click();
+  await expect(peek).toHaveAttribute("aria-pressed", "false");
+  await expect(cellEn).toBeHidden();
+});
+
 test("switching the view at the top of the page does not jump into the paper", async ({ page }) => {
   await page.goto(`${BASE}ja/`);
   await openView(page);

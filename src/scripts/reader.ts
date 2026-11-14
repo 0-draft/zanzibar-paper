@@ -131,6 +131,14 @@ for (const a of document.querySelectorAll<HTMLAnchorElement>("a[data-lang-link]"
   });
 }
 
+// Translation-only view: the EN button opens that paragraph's original.
+document.addEventListener("click", (e) => {
+  const b = (e.target as Element).closest<HTMLButtonElement>(".pl-peek");
+  if (!b) return;
+  const on = b.closest(".row")?.classList.toggle("peek") ?? false;
+  b.setAttribute("aria-pressed", String(on));
+});
+
 // ── Disclosures: one open at a time; close on outside click, Escape, or
 // following a link ───────────────────────────────────────────────────────
 const pops = [...document.querySelectorAll<HTMLDetailsElement>("details.pop")];
