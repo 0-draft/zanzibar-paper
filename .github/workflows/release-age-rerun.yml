@@ -42,7 +42,9 @@ jobs:
             if [ -z "$run_id" ]; then
               continue
             fi
-            if gh run view "$run_id" --log-failed | grep -q ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION; then
+            # Not grep -q: under pipefail an early exit can SIGPIPE gh and
+            # turn a match into a failure.
+            if gh run view "$run_id" --log-failed | grep ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION >/dev/null; then
               echo "PR #$number: rerunning failed jobs of run $run_id"
               gh run rerun "$run_id" --failed
             else
