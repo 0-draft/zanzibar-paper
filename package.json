@@ -35,11 +35,11 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
     "@axe-core/playwright": "^4.14.0",
-    "@biomejs/biome": "^2.6.6",
+    "@biomejs/biome": "^2.6.8",
     "@playwright/test": "^1.65.0",
     "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "^5.1.0",
-    "markdownlint-cli2": "^0.24.0",
+    "markdownlint-cli2": "^0.24.1",
     "textlint": "^15.8.0",
     "textlint-rule-ja-no-mixed-period": "^3.0.2",
     "textlint-rule-ja-no-successive-word": "^2.1.0",
@@ -48,7 +48,7 @@
     "textlint-rule-no-dropping-the-ra": "^3.0.0",
     "textlint-rule-no-mix-dearu-desumasu": "^6.0.4",
     "textlint-rule-no-nfd": "^2.0.2",
-    "textlint-rule-preset-ja-spacing": "^3.0.4",
+    "textlint-rule-preset-ja-spacing": "^3.1.0",
     "typescript": "^6.0.3",
     "vitest": "^5.1.0"
   }
